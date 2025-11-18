@@ -1,0 +1,67 @@
+name: taskio
+description: Приложение для управления учебными проектами
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Firebase
+  firebase_core: ^3.0.0
+  firebase_auth: ^5.0.0
+
+  # Backend
+  supabase_flutter: ^2.9.1
+
+  # State management
+  provider: ^6.1.5
+
+  # UI
+  table_calendar: ^3.1.1
+  cupertino_icons: ^1.0.8
+  easy_localization: ^3.0.0
+  image_picker: ^1.1.2
+  file_picker: ^8.1.2
+  url_launcher: ^6.3.0
+  flutter_animate: ^4.5.0
+
+  # Notifications
+  flutter_local_notifications: ^17.0.0
+  timezone: ^0.9.4
+
+  # PDF generation
+  pdf: ^3.11.3
+  printing: ^5.14.2
+
+
+  # Utils
+  flutter_dotenv: ^5.0.2
+  uuid: ^4.5.1
+  intl: ^0.19.0
+  device_calendar: ^4.0.0
+  path_provider: ^2.1.3
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - .env
+    - assets/lang/
+    - assets/images/
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/taskio_icon.png"
+  min_sdk_android: 23

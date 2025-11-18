@@ -1,0 +1,16 @@
+{
+  "my_projects": "My Projects",
+  "no_notifications": "No new notifications",
+  "sort_deadline_asc": "By deadline ↑",
+  "sort_deadline_desc": "By deadline ↓",
+  "sort_status": "By status",
+  "filter_all": "All statuses",
+  "filter_in_progress": "Only 'In Progress'",
+  "create_project": "Create Project",
+  "refresh_projects": "Refresh Projects",
+  "logout": "Logout",
+  "choose_language": "Choose Language",
+  "profile": "Profile",
+  "not_implemented": "Profile editing is not yet implemented.",
+  "ok": "OK"
+}

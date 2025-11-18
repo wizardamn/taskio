@@ -1,0 +1,16 @@
+{
+  "my_projects": "Мои проекты",
+  "no_notifications": "Нет новых уведомлений",
+  "sort_deadline_asc": "По дедлайну ↑",
+  "sort_deadline_desc": "По дедлайну ↓",
+  "sort_status": "По статусу",
+  "filter_all": "Все статусы",
+  "filter_in_progress": "Только \"В работе\"",
+  "create_project": "Создать проект",
+  "refresh_projects": "Обновить проекты",
+  "logout": "Выйти",
+  "choose_language": "Выберите язык",
+  "profile": "Профиль",
+  "not_implemented": "Редактирование профиля пока не реализовано.",
+  "ok": "ОК"
+}
