@@ -34,7 +34,6 @@ Future<void> main() async {
     anonKey: supabaseAnonKey,
   );
 
-  // ❌ УДАЛЕНО: Лишняя переменная currentUser, так как она больше не нужна здесь
 
   runApp(
     EasyLocalization(

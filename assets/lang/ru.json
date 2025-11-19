@@ -12,5 +12,13 @@
   "choose_language": "Выберите язык",
   "profile": "Профиль",
   "not_implemented": "Редактирование профиля пока не реализовано.",
-  "ok": "ОК"
+  "ok": "ОК",
+  "guest": "Гость",
+  "guest_email": "Войдите, чтобы увидеть детали",
+  "edit_profile_hint": "Нажмите, чтобы изменить профиль",
+  "dark_theme": "Темная тема",
+  "light_theme": "Светлая тема",
+  "generate_report": "Сформировать отчет",
+  "report_functionality_not_impl": "Функция отчетов будет реализована",
+  "login": "Войти"
 }

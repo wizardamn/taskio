@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:easy_localization/easy_localization.dart';
 
 import '../../models/project_model.dart';
 import '../../providers/project_provider.dart';
@@ -24,6 +23,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
     super.initState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // Использование context.read безопасно, так как нет async gap до него
       final prov = context.read<ProjectProvider>();
       // ✅ Загружаем/обновляем проекты при инициализации
       await prov.fetchProjects();
@@ -31,7 +31,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   }
 
   // =====================================================
-  //                 ГЛАВНЫЙ BUILD МЕТОД
+  //               ГЛАВНЫЙ BUILD МЕТОД
   // =====================================================
   @override
   Widget build(BuildContext context) {
@@ -40,13 +40,13 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('my_projects'.tr()),
+        title: const Text('Мои проекты'), // Русификация
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications),
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('no_new_notifications'.tr())),
+                const SnackBar(content: Text('Нет новых уведомлений')), // Русификация
               );
             },
           ),
@@ -56,12 +56,12 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
             icon: const Icon(Icons.filter_list_alt),
             onSelected: (value) => _onSortFilter(value, prov),
             itemBuilder: (context) => [
-              PopupMenuItem(value: 'dAsc', child: Text('sort_deadline_asc'.tr())),
-              PopupMenuItem(value: 'dDesc', child: Text('sort_deadline_desc'.tr())),
-              PopupMenuItem(value: 'status', child: Text('sort_status'.tr())),
+              const PopupMenuItem(value: 'dAsc', child: Text('Срок: сначала ранние')), // Русификация
+              const PopupMenuItem(value: 'dDesc', child: Text('Срок: сначала поздние')), // Русификация
+              const PopupMenuItem(value: 'status', child: Text('По статусу')), // Русификация
               const PopupMenuDivider(),
-              PopupMenuItem(value: 'all', child: Text('filter_all'.tr())),
-              PopupMenuItem(value: 'inProgress', child: Text('filter_in_progress'.tr())),
+              const PopupMenuItem(value: 'all', child: Text('Все проекты')), // Русификация
+              const PopupMenuItem(value: 'inProgress', child: Text('В работе')), // Русификация
             ],
           ),
         ],
@@ -94,7 +94,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
         curve: Curves.easeIn,
         child: FloatingActionButton(
           onPressed: _addProject,
-          tooltip: 'create_project'.tr(),
+          tooltip: 'Создать проект', // Русификация
           child: const Icon(Icons.add),
         ),
       ),
@@ -102,21 +102,23 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   }
 
   // =====================================================
-  //                 ОБРАБОТЧИКИ ДЕЙСТВИЙ
+  //               ОБРАБОТЧИКИ ДЕЙСТВИЙ
   // =====================================================
 
   /// Обработчик нажатия на FAB
   Future<void> _addProject() async {
-    if (!context.mounted) return;
+    // 1. Читаем провайдер до первого await
+    final prov = context.read<ProjectProvider>();
 
     // Анимация нажатия
     setState(() => _fabScale = 0.9);
     await Future.delayed(const Duration(milliseconds: 100));
+    // setState safe, так как вызывается в том же виджете, что и находится
     setState(() => _fabScale = 1.0);
 
-    final prov = context.read<ProjectProvider>();
     final newProject = prov.createEmptyProject();
 
+    // 2. Асинхронный gap
     final created = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -124,15 +126,16 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
       ),
     );
 
-    if (context.mounted && created != null) {
-      // Обновляем список после создания
+    // 3. Проверка mounted после gap
+    if (!context.mounted) return;
+
+    if (created != null) {
       await prov.fetchProjects();
 
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('project_created'.tr())),
-        );
-      }
+      // 4. Используем context безопасно
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Проект успешно создан')), // Русификация
+      );
     }
   }
 
@@ -160,40 +163,49 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   // Подтверждение удаления
   Future<void> _confirmDelete(
       BuildContext context, ProjectProvider prov, String id) async {
+    // showDialog использует переданный context, что безопасно
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('delete_project_title'.tr()),
-        content: Text('delete_project_warning'.tr()),
+        title: const Text('Удаление проекта'), // Русификация
+        content: const Text('Вы уверены, что хотите удалить этот проект?'), // Русификация
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('cancel'.tr()),
+            child: const Text('Отмена'), // Русификация
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.error),
-            child: Text('delete'.tr()),
+            child: const Text('Удалить'), // Русификация
           ),
         ],
       ),
     );
 
-    if (context.mounted && confirmed == true) {
+    // Проверяем mounted перед использованием context после await
+    if (!context.mounted) return;
+
+    if (confirmed == true) {
       await prov.deleteProject(id);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('project_deleted'.tr())),
-        );
-      }
+
+      // Проверяем mounted перед использованием ScaffoldMessenger
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Проект успешно удален')), // Русификация
+      );
     }
   }
 
   // =====================================================
-  //                 СПИСОК И КАРТОЧКА
+  //               СПИСОК И КАРТОЧКА
   // =====================================================
   Widget _buildProjectList(List<ProjectModel> projects) {
+    // Читаем провайдер один раз перед циклом/созданием виджетов
+    final provider = context.read<ProjectProvider>();
+
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 80),
       itemCount: projects.length,
@@ -209,11 +221,16 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                   builder: (_) => ProjectFormScreen(project: project, isNew: false),
                 ),
               );
-              if (context.mounted && updated != null) {
-                await context.read<ProjectProvider>().fetchProjects();
+
+              // Проверка mounted после await
+              if (!context.mounted) return;
+
+              if (updated == true) {
+                // Используем захваченный provider
+                await provider.fetchProjects();
               }
             },
-            onDelete: (id) => _confirmDelete(context, context.read<ProjectProvider>(), id)
+            onDelete: (id) => _confirmDelete(context, provider, id)
         );
       },
     );
@@ -221,7 +238,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
 }
 
 // =====================================================
-//                 ОТДЕЛЬНАЯ КАРТОЧКА ПРОЕКТА
+//               ОТДЕЛЬНАЯ КАРТОЧКА ПРОЕКТА
 // =====================================================
 class _ProjectCard extends StatelessWidget {
   final ProjectModel project;
@@ -230,8 +247,20 @@ class _ProjectCard extends StatelessWidget {
 
   const _ProjectCard({required this.project, required this.onEdit, required this.onDelete});
 
+  /// Получает имена ВСЕХ участников
+  List<String> _getAllParticipantNames(ProjectModel project) {
+    // Включаем всех, так как `participantsData` уже должен содержать
+    // всех актуальных участников, включая владельца.
+    return project.participantsData
+        .map((p) => p.fullName)
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final allParticipants = _getAllParticipantNames(project);
+    final participantCount = project.participantsData.length;
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       elevation: 5,
@@ -258,17 +287,33 @@ class _ProjectCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 4),
-            Text('deadline'.tr(args: [DateFormat('dd.MM.yyyy').format(project.deadline)])),
+            // Срок
+            Text('Срок: ${DateFormat('dd.MM.yyyy').format(project.deadline)}'),
 
-            // ✅ ИСПРАВЛЕНО: Используем геттер text из расширения
-            // Убедитесь, что файл project_model.dart импортирован
-            Text('status'.tr(args: [project.statusEnum.text])),
+            // Статус
+            Text('Статус: ${project.statusEnum.text}'),
 
-            if (project.participants.isNotEmpty)
-              Text('participants'.tr(args: [project.participants.join(', ')])),
+            // Участники (включая владельца, если их больше 1)
+            if (participantCount > 1)
+              Text(
+                // Теперь отображаются все участники, разделенные запятыми
+                'Участники: ${allParticipants.join(', ')} (Всего $participantCount чел.)',
+                style: const TextStyle(fontSize: 12, color: Colors.black54),
+              )
+            else if (participantCount == 1)
+              const Text(
+                'Участники: Только владелец',
+                style: TextStyle(fontSize: 12, color: Colors.black54),
+              ),
 
-            if (project.grade != null)
-              Text('grade'.tr(args: [project.grade!.toStringAsFixed(1)])),
+            // Оценка
+            if (project.grade != null && project.statusEnum == ProjectStatus.completed)
+              Text('Оценка: ${project.grade!.truncate()}', // Отображаем как целое число
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
           ],
         ),
 
@@ -282,8 +327,8 @@ class _ProjectCard extends StatelessWidget {
             }
           },
           itemBuilder: (context) => [
-            PopupMenuItem(value: 'edit', child: Text('edit'.tr())),
-            PopupMenuItem(value: 'delete', child: Text('delete'.tr())),
+            const PopupMenuItem(value: 'edit', child: Text('Изменить')),
+            const PopupMenuItem(value: 'delete', child: Text('Удалить')),
           ],
           icon: const Icon(Icons.more_vert),
         ),

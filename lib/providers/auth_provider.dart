@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
 import '../services/auth_service.dart';
 
 class AuthProvider extends ChangeNotifier {
@@ -16,22 +15,33 @@ class AuthProvider extends ChangeNotifier {
 
   /// Вход в систему
   Future<void> signIn(String email, String password) async {
-    // Вызываем метод сервиса. Если будет ошибка, она пробросится в UI.
-    await _authService.signIn(email, password);
-    // Уведомляем слушателей (например, LoginWrapper) об изменении состояния
-    notifyListeners();
+    try {
+      // Вызываем метод сервиса.
+      await _authService.signIn(email, password);
+      // Уведомляем слушателей об изменении состояния
+      notifyListeners();
+    } catch (e) {
+      // ✅ ДОБАВЛЕНО: Явное логирование ошибки в консоль
+      debugPrint('Ошибка входа (AuthProvider): $e');
+      // Обязательно пробрасываем ошибку дальше, чтобы ее мог обработать UI
+      rethrow;
+    }
   }
 
   /// Регистрация
-  // ✅ ИСПРАВЛЕНО: Теперь принимает все 4 параметра, чтобы передать их в сервис
   Future<void> signUp(String email, String password, String fullName, String role) async {
-    await _authService.signUp(
-      email,
-      password,
-      fullName,
-      role,
-    );
-    notifyListeners();
+    try {
+      await _authService.signUp(
+        email,
+        password,
+        fullName,
+        role,
+      );
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Ошибка регистрации (AuthProvider): $e');
+      rethrow;
+    }
   }
 
   /// Выход из системы

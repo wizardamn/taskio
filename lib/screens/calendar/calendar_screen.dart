@@ -4,7 +4,7 @@ import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
 
 import '../../providers/project_provider.dart';
-// ✅ ИСПРАВЛЕНИЕ 1: Используем ProjectModel
+// Используем модель проекта
 import '../../models/project_model.dart';
 
 class CalendarScreen extends StatefulWidget {
@@ -20,10 +20,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final prov = context.watch<ProjectProvider>();
+    // Получаем провайдер и все проекты
+    final ProjectProvider projectProvider = context.watch<ProjectProvider>();
 
-    // ✅ ИСПРАВЛЕНИЕ 2: Используем List<ProjectModel>
-    final events = _groupProjectsByDate(prov.view);
+    // Группируем проекты по дате дедлайна
+    final Map<DateTime, List<ProjectModel>> events = _groupProjectsByDate(projectProvider.view);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Календарь проектов')),
@@ -41,7 +42,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 _focusedDay = focused;
               });
             },
-            // ✅ ИСПРАВЛЕНИЕ 3: eventLoader использует List<ProjectModel>
+            // Загрузчик событий: возвращает список проектов для данного дня
             eventLoader: (day) => events[DateUtils.dateOnly(day)] ?? [],
             calendarStyle: const CalendarStyle(
               todayDecoration: BoxDecoration(
@@ -52,17 +53,22 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 color: Colors.green,
                 shape: BoxShape.circle,
               ),
+              // Маркеры (точки) показывают, что в этот день есть события
               markerDecoration: BoxDecoration(
                 color: Colors.deepOrange,
                 shape: BoxShape.circle,
               ),
             ),
+            headerStyle: const HeaderStyle(
+              formatButtonVisible: false, // Отключаем кнопку формата (неделя/месяц)
+              titleCentered: true,
+            ),
           ),
           const SizedBox(height: 8),
           Expanded(
             child: _selectedDay == null
-                ? const Center(child: Text('Выберите дату'))
-            // ✅ ИСПРАВЛЕНИЕ 4: _buildEventList использует List<ProjectModel>
+                ? const Center(child: Text('Выберите дату для просмотра проектов'))
+            // Отображаем список проектов для выбранного дня
                 : _buildEventList(events[DateUtils.dateOnly(_selectedDay!)] ?? []),
           ),
         ],
@@ -70,12 +76,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
-  /// Группировка проектов по дате дедлайна
-  // ✅ ИСПРАВЛЕНИЕ 5: Используем ProjectModel в сигнатуре и теле
+
   Map<DateTime, List<ProjectModel>> _groupProjectsByDate(List<ProjectModel> projects) {
     final Map<DateTime, List<ProjectModel>> data = {};
     for (final project in projects) {
-      final date = DateUtils.dateOnly(project.deadline);
+      // Используем DateUtils.dateOnly, чтобы игнорировать время и группировать только по дате
+      final DateTime date = DateUtils.dateOnly(project.deadline);
       data.putIfAbsent(date, () => []);
       data[date]!.add(project);
     }
@@ -83,7 +89,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   /// Список проектов для выбранного дня
-  // ✅ ИСПРАВЛЕНИЕ 6: Используем List<ProjectModel>
   Widget _buildEventList(List<ProjectModel> projects) {
     if (projects.isEmpty) {
       return const Center(child: Text('На этот день нет проектов'));
@@ -93,13 +98,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
       itemCount: projects.length,
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (context, index) {
-        final p = projects[index];
+        final ProjectModel p = projects[index];
         return ListTile(
           leading: const Icon(Icons.assignment, color: Colors.blue),
           title: Text(p.title, style: const TextStyle(fontWeight: FontWeight.bold)),
           subtitle: Text(
-            // ✅ ИСПРАВЛЕНИЕ 7: Используем p.statusEnum.text
-            'Дедлайн: ${DateFormat('dd.MM.yyyy').format(p.deadline)}\nСтатус: ${p.statusEnum.text}',
+            // Используем статус из ProjectModel (предполагая наличие геттера .text у ProjectStatus)
+            'Дедлайн: ${DateFormat('dd.MM.yyyy HH:mm').format(p.deadline)}\nСтатус: ${p.statusEnum.text}',
           ),
           onTap: () => _showProjectDetails(context, p),
         );
@@ -108,7 +113,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   /// Диалог с подробностями проекта
-  // ✅ ИСПРАВЛЕНИЕ 8: Используем ProjectModel
   void _showProjectDetails(BuildContext context, ProjectModel project) {
     showDialog(
       context: context,
@@ -118,12 +122,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 💡 ПРИМЕЧАНИЕ: description не может быть null в ProjectModel
             Text('Описание: ${project.description.isEmpty ? "Нет" : project.description}'),
             const SizedBox(height: 8),
-            // ✅ ИСПРАВЛЕНИЕ 9: Используем p.statusEnum.text
+            // Используем статус из ProjectModel
             Text('Статус: ${project.statusEnum.text}'),
-            Text('Дедлайн: ${DateFormat('dd.MM.yyyy').format(project.deadline)}'),
+            Text('Дедлайн: ${DateFormat('dd.MM.yyyy HH:mm').format(project.deadline)}'),
           ],
         ),
         actions: [

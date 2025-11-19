@@ -10,10 +10,13 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
 
   Future<void> init() async {
-    // Инициализация таймзон
+    // Инициализация таймзон для плановых уведомлений
     tz.initializeTimeZones();
 
+    // Настройка для Android
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+
+    // Настройка для iOS
     final iosInit = DarwinInitializationSettings(
       // Разрешения запрашиваются здесь
       requestAlertPermission: true,
@@ -26,7 +29,18 @@ class NotificationService {
       iOS: iosInit,
     );
 
-    await _plugin.initialize(initializationSettings);
+    // Инициализация плагина.
+    // onDidReceiveNotificationResponse необходим для обработки нажатий на уведомления.
+    await _plugin.initialize(
+      initializationSettings,
+      // Placeholder для обработки нажатия на уведомление (необходимо для инициализации)
+      onDidReceiveNotificationResponse: (NotificationResponse response) async {
+        // Здесь можно обработать ответ: например, перейти на нужный экран
+        if (response.payload != null) {
+          // Выполнить навигацию или другие действия
+        }
+      },
+    );
   }
 
   /// Простое уведомление
@@ -61,8 +75,10 @@ class NotificationService {
     required String title,
     required String body,
     required DateTime scheduledTime,
+    // Смещение напоминания перед scheduledTime (по умолчанию — 0)
+    Duration reminderOffset = Duration.zero,
   }) async {
-    final androidDetails = AndroidNotificationDetails(
+    const androidDetails = AndroidNotificationDetails(
       'scheduled_channel',
       'Плановые уведомления',
       channelDescription: 'Напоминания о задачах и проектах',
@@ -73,21 +89,35 @@ class NotificationService {
 
     const iosDetails = DarwinNotificationDetails();
 
-    final notificationDetails = NotificationDetails(
+    const notificationDetails = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
     );
 
-    // Установка местного часового пояса (tz.local) для планового уведомления
+    // 1. ВЫЧИСЛЕНИЕ ВРЕМЕНИ:
+    // Отнимаем offset (смещение) от scheduledTime (дедлайна)
+    final actualScheduleTime = scheduledTime.subtract(reminderOffset);
+
+    // 2. Установка местного часового пояса (tz.local) для планового уведомления
+    final tzTime = tz.TZDateTime.from(actualScheduleTime, tz.local);
+
+    // 3. Проверка: не планируем, если время уже прошло
+    if (tzTime.isBefore(tz.TZDateTime.now(tz.local))) {
+      return;
+    }
+
     await _plugin.zonedSchedule(
       id,
       title,
       body,
-      tz.TZDateTime.from(scheduledTime, tz.local),
+      tzTime,
       notificationDetails,
-      androidAllowWhileIdle: true,
+      // ✅ Исправлено: замена androidAllowWhileIdle на androidScheduleMode
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
       UILocalNotificationDateInterpretation.absoluteTime,
+      // payload может быть добавлен для передачи данных при нажатии
+      // payload: 'project_id_$id',
     );
   }
 
@@ -100,8 +130,4 @@ class NotificationService {
   Future<void> cancelAll() async {
     await _plugin.cancelAll();
   }
-
-// ❌ Метод requestPermissions удален, так как он требовал
-// импорта приватных типов (IOSFlutterLocalNotificationsPlugin)
-// и разрешения уже запрашиваются в DarwinInitializationSettings.
 }

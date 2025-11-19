@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:easy_localization/easy_localization.dart'; // ✅ ИМПОРТ: Добавлен для локализации
 
 import '../../providers/project_provider.dart';
 import '../../services/auth_service.dart';
@@ -102,15 +101,16 @@ class _LoginWrapperState extends State<LoginWrapper> {
     // Определяем, какой экран нужно показать
     switch (_status) {
       case AuthStatus.loading:
-      // Показываем загрузку с локализованным текстом
-        currentScreen = Scaffold(
+      // Показываем загрузку с русским текстом
+        currentScreen = const Scaffold( // Добавлена const, так как виджеты внутри константны
           body: Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const CircularProgressIndicator(),
-                const SizedBox(height: 16),
-                Text('loading_auth_status'.tr()), // ✅ ЛОКАЛИЗАЦИЯ
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                // ✅ ИСПРАВЛЕНО: Заменена ключ локализации на русскую строку
+                Text('Загрузка статуса пользователя...'),
               ],
             ),
           ),

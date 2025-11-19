@@ -12,5 +12,13 @@
   "choose_language": "Choose Language",
   "profile": "Profile",
   "not_implemented": "Profile editing is not yet implemented.",
-  "ok": "OK"
+  "ok": "OK",
+  "guest": "Guest",
+  "guest_email": "Sign in to see details",
+  "edit_profile_hint": "Tap to edit profile",
+  "dark_theme": "Dark Theme",
+  "light_theme": "Light Theme",
+  "generate_report": "Generate Report",
+  "report_functionality_not_impl": "Reporting feature will be implemented",
+  "login": "Login"
 }

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/profile_model.dart';
 
@@ -7,18 +8,28 @@ class AuthService {
   // URL для редиректа (для веб/диплинков)
   final String _emailRedirectTo = 'https://yqcywpkkdwkmqposwyoz.supabase.co/auth/v1/callback';
 
+  // ------------------------------------------------
+  // ✅ УПРАВЛЕНИЕ СОСТОЯНИЕМ
+  // ------------------------------------------------
+
+  /// Поток для отслеживания состояния авторизации пользователя.
+  Stream<User?> get authStateChanges => _client.auth.onAuthStateChange.map((event) {
+    // Возвращаем пользователя, если сессия существует
+    return event.session?.user;
+  });
+
+  // ------------------------------------------------
+  // ✅ АВТОРИЗАЦИЯ И РЕГИСТРАЦИЯ
+  // ------------------------------------------------
+
   /// Регистрация нового пользователя.
   Future<bool> signUp(String email, String password, String fullName, String role) async {
     try {
-      if (email.isEmpty || password.isEmpty || fullName.isEmpty) {
+      if (email.isEmpty || password.isEmpty || fullName.isEmpty || role.isEmpty) {
         throw Exception('Все поля должны быть заполнены.');
       }
-      if (role.isEmpty) {
-        throw Exception('Роль не выбрана.');
-      }
 
-      // ✅ ИСПРАВЛЕНИЕ: В Supabase Flutter v2 параметры data и emailRedirectTo
-      // передаются прямо в метод signUp, без обертки options.
+      // Supabase Flutter SDK автоматически обрабатывает метаданные.
       final AuthResponse response = await _client.auth.signUp(
         email: email,
         password: password,
@@ -29,19 +40,21 @@ class AuthService {
         emailRedirectTo: _emailRedirectTo,
       );
 
-      final user = response.user;
-
       // Если user == null, значит требуется подтверждение email.
-      if (user == null) {
+      if (response.user == null) {
         return true;
       }
 
-      // Триггер в БД создаст профиль автоматически.
+      // После успешной регистрации и авторизации (если не требуется подтверждение),
+      // профиль либо будет создан триггером, либо мы его создадим в getProfile.
+
       return true;
     } on AuthException catch (e) {
-      throw Exception('Ошибка регистрации: ${e.message}');
+      debugPrint('Supabase Auth Error (SignUp): ${e.message}');
+      throw Exception(_mapAuthExceptionToRussian(e.message));
     } catch (e) {
-      throw Exception('Непредвиденная ошибка регистрации: $e');
+      debugPrint('General Error (SignUp): $e');
+      throw Exception('Непредвиденная ошибка регистрации. Попробуйте снова.');
     }
   }
 
@@ -57,20 +70,39 @@ class AuthService {
         password: password,
       );
 
-      if (response.user == null) {
-        throw Exception('Ошибка входа. Возможно, email не подтвержден.');
+      if (response.user == null || response.session == null) {
+        // Это должно быть обработано AuthException, но для надежности
+        throw Exception('Вход не удался. Проверьте данные.');
       }
+
+      // ✅ Надежный способ гарантировать сохранение сессии локально.
+      // Хотя это обычно происходит автоматически, явное сохранение повышает стабильность.
+      // await _client.auth.setSession(response.session!);
+
       return true;
     } on AuthException catch (e) {
-      throw Exception('Ошибка входа: ${e.message}');
+      debugPrint('Supabase Auth Error (SignIn): ${e.message}');
+      // ✅ Бросаем переведенную ошибку для лучшей диагностики проблемы
+      throw Exception(_mapAuthExceptionToRussian(e.message));
     } catch (e) {
+      debugPrint('General Error (SignIn): $e');
       throw Exception('Не удалось войти: $e');
     }
   }
 
   /// Выход из аккаунта.
   Future<void> signOut() async {
-    await _client.auth.signOut();
+    try {
+      // ✅ КРИТИЧЕСКИ ВАЖНО: Правильный вызов signOut, очищающий все сессии
+      await _client.auth.signOut();
+      debugPrint('User signed out successfully and session cleared.');
+    } on AuthException catch (e) {
+      debugPrint('Supabase Auth Error (SignOut): ${e.message}');
+      throw Exception('Ошибка при выходе: ${_mapAuthExceptionToRussian(e.message)}');
+    } catch (e) {
+      debugPrint('General Error (SignOut): $e');
+      throw Exception('Неизвестная ошибка при выходе. Попробуйте еще раз.');
+    }
   }
 
   /// Получить профиль текущего пользователя.
@@ -86,7 +118,8 @@ class AuthService {
           .maybeSingle();
 
       if (data == null) {
-        // Попытка восстановить профиль из метаданных, если триггер не сработал
+        // Если профиль не найден (например, при отложенном подтверждении email),
+        // создаем его вручную, используя метаданные, сохраненные при регистрации.
         final metadataRole = user.userMetadata?['role'] as String?;
         final metadataName = user.userMetadata?['full_name'] as String?;
 
@@ -95,11 +128,12 @@ class AuthService {
             'id': user.id,
             'full_name': metadataName,
             'role': metadataRole,
+            'email': user.email, // Добавляем email для надежности
             'created_at': DateTime.now().toIso8601String(),
           });
           return getProfile(); // Рекурсивный вызов после создания
         }
-        return null;
+        return null; // Не удалось найти или восстановить
       }
 
       return ProfileModel.fromJson(data, user);
@@ -108,5 +142,30 @@ class AuthService {
     } catch (e) {
       throw Exception('Ошибка при загрузке профиля: $e');
     }
+  }
+
+  // ------------------------------------------------
+  // ✅ ВСПОМОГАТЕЛЬНЫЕ
+  // ------------------------------------------------
+
+  /// Преобразует стандартные сообщения об ошибках Supabase в русский текст
+  String _mapAuthExceptionToRussian(String message) {
+    final lowerCaseMessage = message.toLowerCase();
+
+    if (lowerCaseMessage.contains('invalid login credentials') || lowerCaseMessage.contains('invalid credentials')) {
+      return 'Неверный адрес электронной почты или пароль.';
+    }
+    if (lowerCaseMessage.contains('user already exists')) {
+      return 'Пользователь с таким адресом уже зарегистрирован.';
+    }
+    if (lowerCaseMessage.contains('email not confirmed')) {
+      return 'Подтвердите свой адрес электронной почты для входа.';
+    }
+    if (lowerCaseMessage.contains('password should be at least 6 characters')) {
+      return 'Пароль должен содержать не менее 6 символов.';
+    }
+
+    // Резервное сообщение с оригинальной ошибкой
+    return 'Ошибка авторизации: $message';
   }
 }

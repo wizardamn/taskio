@@ -1,32 +1,51 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
-import 'package:easy_localization/easy_localization.dart';
 
 // ----------------------------------------------------------------------
-// ✅ ENUM: СТАТУС ПРОЕКТА
+// 1. Модель участника проекта (для отображения имени)
 // ----------------------------------------------------------------------
-enum ProjectStatus {
-  planned, // 0
-  inProgress, // 1
-  completed, // 2
-  archived, // 3
+class ProjectParticipant {
+  final String id;
+  final String fullName; // Полное имя участника
+
+  ProjectParticipant({required this.id, required this.fullName});
+
+  // Фабрика для парсинга, если ProjectService обогащает данные
+  factory ProjectParticipant.fromJson(Map<String, dynamic> json) {
+    return ProjectParticipant(
+      // ИСПРАВЛЕНО: Часто приходит как 'profile_id' из JOIN
+      id: json['profile_id'] as String? ?? json['id'] as String,
+      // Предполагаем, что полное имя хранится в 'full_name'
+      fullName: json['full_name'] as String? ?? 'Неизвестный участник',
+    );
+  }
 }
 
 // ----------------------------------------------------------------------
-// ✅ РАСШИРЕНИЕ ДЛЯ ОТОБРАЖЕНИЯ СТАТУСА И ЦВЕТА
+// ENUM: СТАТУС ПРОЕКТА
+// ----------------------------------------------------------------------
+enum ProjectStatus {
+  planned, // 0 - Запланирован
+  inProgress, // 1 - В работе
+  completed, // 2 - Завершен
+  archived, // 3 - Архив
+}
+
+// ----------------------------------------------------------------------
+// РАСШИРЕНИЕ ДЛЯ ОТОБРАЖЕНИЯ СТАТУСА И ЦВЕТА
 // ----------------------------------------------------------------------
 extension ProjectStatusExtension on ProjectStatus {
-  // Возвращает локализованный текст статуса
+  // Возвращает русскую строку
   String get text {
     switch (this) {
       case ProjectStatus.planned:
-        return 'status_planned'.tr();
+        return 'Запланирован';
       case ProjectStatus.inProgress:
-        return 'status_in_progress'.tr();
+        return 'В работе';
       case ProjectStatus.completed:
-        return 'status_completed'.tr();
+        return 'Завершен';
       case ProjectStatus.archived:
-        return 'status_archived'.tr();
+        return 'Архив';
     }
   }
 
@@ -46,7 +65,7 @@ extension ProjectStatusExtension on ProjectStatus {
 }
 
 // ----------------------------------------------------------------------
-// 📎 МОДЕЛЬ ВЛОЖЕНИЯ (ATTACHMENT)
+// МОДЕЛЬ ВЛОЖЕНИЯ (ATTACHMENT)
 // ----------------------------------------------------------------------
 class Attachment {
   final String fileName;
@@ -55,7 +74,7 @@ class Attachment {
   final DateTime uploadedAt;
   final String uploaderId;
 
-  // Геттер для обратной совместимости (если где-то использовался .path)
+  // Геттер для обратной совместимости
   String get path => filePath;
 
   Attachment({
@@ -88,7 +107,7 @@ class Attachment {
 }
 
 // ----------------------------------------------------------------------
-// ✅ МОДЕЛЬ ПРОЕКТА
+// МОДЕЛЬ ПРОЕКТА
 // ----------------------------------------------------------------------
 class ProjectModel {
   final String id;
@@ -98,7 +117,10 @@ class ProjectModel {
   final DateTime deadline;
   final int status; // Хранится как индекс enum для Supabase (0, 1, 2, 3)
   final double? grade;
-  final List<String> participants;
+  // Хранит список ID участников, как он приходит/отправляется в БД
+  final List<String> participantIds;
+  // Хранит обогащенный список объектов ProjectParticipant (для UI)
+  final List<ProjectParticipant> participantsData;
   final List<Attachment> attachments;
   final DateTime createdAt;
 
@@ -110,7 +132,8 @@ class ProjectModel {
     required this.deadline,
     required this.status,
     this.grade,
-    required this.participants,
+    required this.participantIds,
+    required this.participantsData,
     required this.attachments,
     required this.createdAt,
   });
@@ -124,13 +147,13 @@ class ProjectModel {
     return ProjectStatus.values[status];
   }
 
-  // Вспомогательный метод для получения локализованного статуса (если не используется расширение)
+  // Вспомогательный метод для получения локализованного статуса
   String getLocalizedStatus() {
     return statusEnum.text;
   }
 
   // ------------------------------------------------
-  // ✅ COPY WITH
+  // COPY WITH (для иммутабельности и обновления)
   // ------------------------------------------------
   ProjectModel copyWith({
     String? id,
@@ -140,7 +163,8 @@ class ProjectModel {
     DateTime? deadline,
     int? status,
     double? grade,
-    List<String>? participants,
+    List<String>? participantIds,
+    List<ProjectParticipant>? participantsData,
     List<Attachment>? attachments,
     DateTime? createdAt,
   }) {
@@ -152,28 +176,32 @@ class ProjectModel {
       deadline: deadline ?? this.deadline,
       status: status ?? this.status,
       grade: grade ?? this.grade,
-      participants: participants ?? this.participants,
+      participantIds: participantIds ?? this.participantIds,
+      participantsData: participantsData ?? this.participantsData,
       attachments: attachments ?? this.attachments,
       createdAt: createdAt ?? this.createdAt,
     );
   }
 
   // ------------------------------------------------
-  // ✅ FROM JSON (Десериализация из Supabase)
+  // FROM JSON (Десериализация из Supabase)
   // ------------------------------------------------
   factory ProjectModel.fromJson(Map<String, dynamic> json) {
-    // Безопасное получение списка участников
-    List<String> parseStringList(dynamic value) {
+
+    // Безопасное получение списка ID участников
+    List<String> parseParticipantIds(dynamic value) {
       if (value is List) {
         return value.map((e) => e.toString()).toList();
+      }
+      if (json['participant_ids'] is List) {
+        return (json['participant_ids'] as List).map((e) => e.toString()).toList();
       }
       return [];
     }
 
-    // ✅ Десериализация списка вложений
+    // Десериализация списка вложений
     List<Attachment> parseAttachments(dynamic value) {
       if (value is List) {
-        // Проверяем, что элементы списка действительно Map, прежде чем парсить
         return value
             .whereType<Map<String, dynamic>>()
             .map((e) => Attachment.fromJson(e))
@@ -192,18 +220,22 @@ class ProjectModel {
       createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
       // Статус должен быть int, по умолчанию ProjectStatus.planned (0)
       status: json['status'] as int? ?? ProjectStatus.planned.index,
+      // Парсинг numeric в double
       grade: (json['grade'] as num?)?.toDouble(),
-      participants: parseStringList(json['participants']),
+      // Записываем список ID из поля 'participants'
+      participantIds: parseParticipantIds(json['participants']),
+      // Изначально список объектов участников пуст
+      participantsData: [],
       attachments: parseAttachments(json['attachments']),
     );
   }
 
   // ------------------------------------------------
-  // ✅ TO JSON (Сериализация для Supabase)
+  // TO JSON (Сериализация для Supabase)
   // ------------------------------------------------
   Map<String, dynamic> toJson() {
     return {
-      // ID не включается при добавлении, но нужен при обновлении
+      // ID включается только при обновлении
       if (id.isNotEmpty) 'id': id,
       'owner_id': ownerId,
       'title': title,
@@ -211,16 +243,18 @@ class ProjectModel {
       // Сохраняем в UTC для базы данных
       'deadline': deadline.toUtc().toIso8601String(),
       'status': status,
+      // Сохраняем как double или null
       'grade': grade,
-      'participants': participants,
-      // ✅ Сериализация списка вложений
+      // Используем 'participants' (согласно схеме) для отправки списка ID
+      'participants': participantIds,
+      // 'attachments' - это JSONB поле
       'attachments': attachments.map((a) => a.toJson()).toList(),
-      // 'created_at' обычно устанавливается БД, но здесь мы его передаем для полноты
+      // 'created_at' передается для полноты, хотя обычно устанавливается БД
       'created_at': createdAt.toUtc().toIso8601String(),
     };
   }
 
-  // Добавление createEmpty, если он нужен для создания нового проекта
+  // Добавление createEmpty для создания нового проекта
   static ProjectModel createEmpty({required String ownerId}) {
     return ProjectModel(
       id: const Uuid().v4(),
@@ -229,7 +263,8 @@ class ProjectModel {
       description: '',
       deadline: DateTime.now().add(const Duration(days: 7)),
       status: ProjectStatus.planned.index,
-      participants: [],
+      participantIds: [ownerId], // Владелец сразу в списке ID
+      participantsData: [],
       attachments: [],
       createdAt: DateTime.now(),
     );

@@ -12,7 +12,9 @@ class ProjectProvider extends ChangeNotifier {
   final ProjectService _service;
 
   bool isGuest = true;
-  bool isLoading = false;
+  // Сделаем приватными для контроля
+  bool _isLoading = false;
+  String? _errorMessage; // Новое поле для хранения сообщения об ошибке
 
   String? _userId;
   String _currentUserName = 'Гость';
@@ -22,14 +24,15 @@ class ProjectProvider extends ChangeNotifier {
   SortBy _sortBy = SortBy.deadlineAsc;
   ProjectFilter _filter = ProjectFilter.all;
 
-  ProjectProvider(this._service) {
-    // Конструктор остается пустым, вся инициализация в setUser
-  }
+  ProjectProvider(this._service);
 
   // ------------------------------------------------
   // ✅ ГЕТТЕРЫ
   // ------------------------------------------------
   String get currentUserName => _currentUserName;
+  bool get isLoading => _isLoading; // Геттер для состояния загрузки
+  String? get errorMessage => _errorMessage; // Геттер для ошибок
+
   List<ProjectModel> get view {
     var result = [..._projects];
     if (_filter == ProjectFilter.inProgressOnly) {
@@ -55,12 +58,12 @@ class ProjectProvider extends ChangeNotifier {
   // ------------------------------------------------
   Future<void> setUser(String userId, String userName) async {
     _userId = userId;
-    _currentUserName = userName; // Устанавливаем имя
+    _currentUserName = userName;
     isGuest = false;
 
     _service.updateOwner(_userId);
-    await fetchProjects(); // Загружаем проекты сразу
-    notifyListeners(); // Уведомляем UI, что мы больше не гость
+    await fetchProjects();
+    notifyListeners();
   }
 
   // Вызывается из ProfileScreen
@@ -77,6 +80,8 @@ class ProjectProvider extends ChangeNotifier {
     _userId = null;
     _currentUserName = 'Гость';
     _service.updateOwner(null);
+    _isLoading = false;
+    _errorMessage = null; // Очищаем ошибки при выходе
 
     if (!keepProjects) {
       _projects.clear();
@@ -85,25 +90,42 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   // ------------------------------------------------
-  // ✅ ЗАГРУЗКА ПРОЕКТОВ
+  // ✅ ЗАГРУЗКА ПРОЕКТОВ (КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ)
   // ------------------------------------------------
   Future<void> fetchProjects() async {
     if (isGuest || _userId == null) {
+      _projects.clear();
+      _isLoading = false;
+      _errorMessage = null;
       notifyListeners();
+      debugPrint('ProjectProvider: fetchProjects отменено, пользователь - гость.');
       return;
     }
-    isLoading = true;
+
+    _isLoading = true;
+    _errorMessage = null; // Сбрасываем ошибку перед новой попыткой
     notifyListeners();
+    debugPrint('ProjectProvider: Начинаем загрузку проектов...');
+
     try {
       final loaded = await _service.getAll();
       _projects.clear();
       _projects.addAll(loaded);
+
+      debugPrint('ProjectProvider: Успешно загружено ${_projects.length} проектов.');
+
     } catch (e, st) {
-      debugPrint("fetchProjects error: $e\n$st");
-      _projects.clear();
+      // ✅ ИСПРАВЛЕНИЕ: Логируем ошибку и устанавливаем сообщение для UI
+      _projects.clear(); // Очищаем список, если загрузка не удалась
+      // Используем только часть сообщения об ошибке для более чистого вывода в UI
+      _errorMessage = 'Ошибка загрузки: ${e.toString().split(':')[0].trim()}';
+      debugPrint("ProjectProvider ERROR: fetchProjects ошибка: $e\n$st");
+
+    } finally {
+      // ✅ ИСПРАВЛЕНИЕ: Гарантируем, что _isLoading всегда сбрасывается
+      _isLoading = false;
+      notifyListeners();
     }
-    isLoading = false;
-    notifyListeners();
   }
 
   // ------------------------------------------------
@@ -125,18 +147,21 @@ class ProjectProvider extends ChangeNotifier {
   Future<void> addProject(ProjectModel p) async {
     if (isGuest) return;
     await _service.add(p);
+    // При добавлении всегда нужна полная перезагрузка для обновления списка
     await fetchProjects();
   }
 
   Future<void> updateProject(ProjectModel p) async {
     if (isGuest) return;
     await _service.update(p);
-    await fetchProjects();
+    // ✅ ИСПРАВЛЕНИЕ ПРОИЗВОДИТЕЛЬНОСТИ: Обновляем только один проект
+    await _refreshSingle(p.id);
   }
 
   Future<void> deleteProject(String id) async {
     if (isGuest) return;
     await _service.delete(id);
+    // При удалении всегда нужна полная перезагрузка
     await fetchProjects();
   }
 
@@ -169,7 +194,6 @@ class ProjectProvider extends ChangeNotifier {
   // ------------------------------------------------
 
   /// Загружает файл в хранилище и обновляет проект в базе данных.
-  /// Требует, чтобы ProjectService имел метод uploadAttachment.
   Future<ProjectModel> uploadAttachment(String projectId, File file) async {
     if (isGuest || _userId == null) {
       // Бросаем исключение, поскольку ProjectFormScreen ожидает ProjectModel или ошибку.
@@ -191,7 +215,6 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   /// Удаляет файл из хранилища и обновляет проект в базе данных.
-  /// Требует, чтобы ProjectService имел метод deleteAttachment.
   Future<void> deleteAttachment(String projectId, String filePath) async {
     if (isGuest || _userId == null) {
       return; // Гости не могут удалять вложения
@@ -222,7 +245,7 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   // ------------------------------------------------
-  // ✅ СОЗДАНИЕ ПУСТОГО ПРОЕКТА
+  // ✅ СОЗДАНИЕ ПУСТОГО ПРОЕКТА (ИСПРАВЛЕНО)
   // ------------------------------------------------
   ProjectModel createEmptyProject() {
     if (isGuest || _userId == null) {
@@ -239,7 +262,11 @@ class ProjectProvider extends ChangeNotifier {
       status: ProjectStatus.planned.index,
       grade: null,
       attachments: const [],
-      participants: [_userId!],
+
+      participantsData: const [],
+      // Добавляем participantIds (List<String>) для хранения ID при создании
+      participantIds: [_userId!],
+
       createdAt: DateTime.now(),
     );
   }

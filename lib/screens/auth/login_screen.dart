@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:easy_localization/easy_localization.dart'; // ✅ ИМПОРТ: Добавлен для локализации
+import 'package:taskio/screens/auth/register_screen.dart'; // Импорт RegisterScreen
 import '../../services/auth_service.dart';
-import 'register_screen.dart';
 
+// Для ручной анимации необходим SingleTickerProviderStateMixin
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<LoginScreen> createState() => _LoginScreenState(); // ИСПРАВЛЕНО: Должен возвращать _LoginScreenState
 }
 
 class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
@@ -15,10 +15,11 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   final _auth = AuthService();
   final _email = TextEditingController();
   final _password = TextEditingController();
+
   bool _isLoading = false;
   bool _isPasswordVisible = false;
 
-  // ✅ АНИМАЦИИ: Контроллер для анимации входа формы
+  // Контроллер для анимации формы
   late AnimationController _animationController;
   late Animation<double> _animation;
 
@@ -44,16 +45,17 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   void dispose() {
     _email.dispose();
     _password.dispose();
-    _animationController.dispose(); // ✅ АНИМАЦИИ: Освобождаем контроллер
+    _animationController.dispose(); // Освобождаем контроллер
     super.dispose();
   }
 
-  // Функция для показа стильных подсказок
+  // Функция для показа стильных подсказок (Snackbar)
   void _showSnackBar(String message, {bool isError = true}) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        // ✅ УЛУЧШЕНИЕ: Используем цветовую схему темы
+        // Используем цветовую схему темы
         backgroundColor: isError
             ? Theme.of(context).colorScheme.error
             : Colors.green.shade600,
@@ -72,10 +74,23 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     setState(() => _isLoading = true);
 
     try {
-      await _auth.signIn(_email.text.trim(), _password.text.trim());
+      final success = await _auth.signIn(
+        _email.text.trim(),
+        _password.text.trim(),
+      );
+
       if (!mounted) return;
+
+      if (success) {
+        // Успешный вход: Стильная подсказка
+        _showSnackBar('Успешный вход', isError: false);
+        // Предполагаем, что здесь будет навигация на главный экран
+        // Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => HomeScreen()));
+      }
+
     } on Exception catch (e) {
       if (mounted) {
+        // Отображение ошибок
         _showSnackBar(e.toString().replaceFirst('Exception: ', ''), isError: true);
       }
     } finally {
@@ -85,7 +100,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     }
   }
 
-  // ✅ АНИМАЦИИ: Вспомогательный виджет для анимации смещения (slide-up)
+  // Вспомогательный виджет для анимации смещения (slide-up)
   Widget _buildAnimatedContent(Widget child, double delay) {
     return AnimatedBuilder(
       animation: _animationController,
@@ -110,13 +125,22 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     );
   }
 
+  // Функция перехода на экран регистрации
+  void _navigateToRegister() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const RegisterScreen(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Регулярное выражение для проверки почты:
+    // Регулярное выражение для строгой проверки почты
     const emailRegex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}$';
 
     return Scaffold(
-      appBar: AppBar(title: Text('login_title'.tr())), // ✅ ЛОКАЛИЗАЦИЯ
+      appBar: AppBar(title: const Text('Вход')),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -130,16 +154,15 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                   TextFormField(
                     controller: _email,
                     keyboardType: TextInputType.emailAddress,
-                    decoration: InputDecoration(
-                        labelText: 'email'.tr(), // ✅ ЛОКАЛИЗАЦИЯ
-                        hintText: 'email_hint'.tr() // ✅ ЛОКАЛИЗАЦИЯ
-                    ),
+                    decoration: const InputDecoration(
+                        labelText: 'Email',
+                        hintText: 'Введите ваш Email'),
                     validator: (v) {
                       if (v == null || v.isEmpty) {
-                        return 'email_empty_warning'.tr(); // ✅ ЛОКАЛИЗАЦИЯ
+                        return 'Пожалуйста, введите email';
                       }
                       if (!RegExp(emailRegex).hasMatch(v)) {
-                        return 'email_format_warning'.tr(); // ✅ ЛОКАЛИЗАЦИЯ
+                        return 'Неверный формат email';
                       }
                       return null;
                     },
@@ -153,56 +176,69 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                   TextFormField(
                     controller: _password,
                     decoration: InputDecoration(
-                      labelText: 'password'.tr(), // ✅ ЛОКАЛИЗАЦИЯ
-                      hintText: 'password_hint'.tr(), // ✅ ЛОКАЛИЗАЦИЯ
+                      labelText: 'Пароль',
+                      hintText: 'Введите пароль',
                       suffixIcon: IconButton(
                         icon: Icon(_isPasswordVisible
                             ? Icons.visibility
                             : Icons.visibility_off),
                         onPressed: () {
+                          // Переключает состояние видимости
                           setState(() => _isPasswordVisible = !_isPasswordVisible);
                         },
                       ),
                     ),
                     obscureText: !_isPasswordVisible,
-                    validator: (v) => v == null || v.length < 6
-                        ? 'password_length_warning'.tr() // ✅ ЛОКАЛИЗАЦИЯ
-                        : null,
+                    validator: (v) {
+                      if (v == null || v.isEmpty) {
+                        return 'Пожалуйста, введите пароль';
+                      }
+                      if (v.length < 6) {
+                        return 'Пароль должен быть не менее 6 символов';
+                      }
+                      return null;
+                    },
                   ),
                   100,
                 ),
                 const SizedBox(height: 30),
 
-                // 3. Кнопка Войти (Задержка 200ms)
+                // 3. Кнопка Входа (Задержка 200ms)
                 _buildAnimatedContent(
                   _isLoading
                       ? const CircularProgressIndicator()
                       : ElevatedButton(
-                    onPressed: _login,
-                    // ✅ УЛУЧШЕНИЕ: Увеличиваем размер кнопки
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 50),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                      onPressed: _login,
+                      // Улучшение: Увеличиваем размер кнопки
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 50),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
-                    ),
-                    child: Text('login_button'.tr()), // ✅ ЛОКАЛИЗАЦИЯ
-                  ),
+                      child: const Text('Войти')),
                   200,
                 ),
+
                 const SizedBox(height: 20),
 
-                // 4. Кнопка Зарегистрироваться (Задержка 300ms)
+                // 4. Ссылка на регистрацию (Задержка 300ms)
                 _buildAnimatedContent(
-                  TextButton(
-                    onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const RegisterScreen())),
-                    child: Text('register_link'.tr()), // ✅ ЛОКАЛИЗАЦИЯ
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text('Нет аккаунта?'),
+                      TextButton(
+                        onPressed: _navigateToRegister, // Используем функцию перехода
+                        child: const Text(
+                          'Зарегистрироваться',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
                   ),
                   300,
-                )
+                ),
               ],
             ),
           ),
