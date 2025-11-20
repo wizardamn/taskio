@@ -20,8 +20,50 @@ class ProjectService {
   }
 
   // ------------------------------------------------
+  // ✅ ПРОВЕРКА ПРАВ
+  // ------------------------------------------------
+
+  /// Проверяет, является ли пользователь владельцем ('owner') или редактором ('editor')
+  /// проекта в таблице project_members.
+  Future<bool> _isUserAllowedToEdit(String projectId, String userId) async {
+    try {
+      final res = await client
+          .from('project_members')
+          .select('role')
+          .eq('project_id', projectId)
+          .eq('member_id', userId)
+          .maybeSingle();
+
+      if (res == null) return false;
+      final role = res['role'] as String;
+      return role == 'owner' || role == 'editor';
+    } catch (e) {
+      debugPrint('[ProjectService] Error checking edit permission: $e');
+      return false;
+    }
+  }
+
+  /// Проверяет, является ли пользователь участником проекта (любая роль)
+  Future<bool> _isUserMember(String projectId, String userId) async {
+    try {
+      final res = await client
+          .from('project_members')
+          .select('member_id')
+          .eq('project_id', projectId)
+          .eq('member_id', userId)
+          .maybeSingle();
+      return res != null;
+    } catch (e) {
+      debugPrint('[ProjectService] Error checking membership: $e');
+      return false;
+    }
+  }
+
+
+  // ------------------------------------------------
   // 1. ВАЛИДАЦИЯ УЧАСТНИКОВ (Проверка существования ID)
   // ------------------------------------------------
+  /// Фильтрует список ID, оставляя только те, которые существуют в profiles.
   Future<List<String>> _filterValidUserIds(List<String> userIds) async {
     if (userIds.isEmpty) return [];
 
@@ -62,7 +104,7 @@ class ProjectService {
         if (profileData != null) {
           fullName = profileData['full_name'] as String? ?? fullName;
         } else {
-          // Это сработает, если RLS запрещает чтение профиля
+          // Это сработает, если RLS запрещает чтение профиля, но мы хотим видеть ID.
           debugPrint('[ProjectService] RLS or data issue: profile data missing for $memberId');
         }
 
@@ -100,7 +142,7 @@ class ProjectService {
           .map<String>((e) => e['project_id'].toString())
           .toList();
 
-      // 2. Также добавляем проекты, где пользователь - владелец
+      // 2. Также добавляем проекты, где пользователь - владелец (хотя RLS по членству должен это включать)
       final ownerProjectsResponse = await client
           .from('projects')
           .select('id')
@@ -178,7 +220,7 @@ class ProjectService {
   }
 
   // ------------------------------------------------
-  // 4. CRUD
+  // 4. CRUD (С ПРОВЕРКОЙ ПРАВ)
   // ------------------------------------------------
 
   /// Создать проект
@@ -197,21 +239,30 @@ class ProjectService {
 
     // 3. Добавляем всех участников (включая владельца) в project_members
     for (var memberId in validParticipants) {
+      // Новые члены всегда добавляются как 'editor', если не владелец
       await addParticipant(projectId, memberId, memberId == ownerId ? "owner" : "editor");
     }
   }
 
   /// Обновить проект
   Future<void> update(ProjectModel project) async {
-    final jsonToUpdate = project.toJson();
+    final userId = _currentUserId;
+    if (userId == null) throw Exception('User ID is not set.');
 
-    // 1. Обновляем основную таблицу
+    // ❌ ПРОВЕРКА ПРАВ: Только owner/editor может обновлять
+    if (!(await _isUserAllowedToEdit(project.id, userId))) {
+      throw Exception('Недостаточно прав для редактирования проекта.'.tr());
+    }
+
+    // 1. Обновляем основную таблицу (без манипуляции с 'participants', Supabase использует его только для RLS)
+    final jsonToUpdate = project.toJson();
     await client.from('projects').update(jsonToUpdate).eq('id', project.id);
 
     // 2. СИНХРОНИЗАЦИЯ ЧЛЕНОВ В project_members
     final currentMembers = await getParticipantIds(project.id);
     final ownerId = project.ownerId;
 
+    // Желаемый список членов, прошедший валидацию
     final desiredMembersRaw = <String>{...project.participantIds, ownerId}.toList();
     final desiredMembers = await _filterValidUserIds(desiredMembersRaw);
 
@@ -223,26 +274,34 @@ class ProjectService {
       await removeParticipant(project.id, memberId);
     }
 
-    // Участники для добавления/обновления (новые или владелец)
-    final membersToSync = desiredMembers;
-
-    for (var memberId in membersToSync) {
+    // Участники для добавления/обновления
+    for (var memberId in desiredMembers) {
       // addParticipant использует upsert: добавит нового или обновит существующего
-      await addParticipant(project.id, memberId, memberId == ownerId ? "owner" : "editor");
+      // Роль остается 'owner' или устанавливается в 'editor' для остальных
+      final role = memberId == ownerId ? "owner" : "editor";
+      await addParticipant(project.id, memberId, role);
     }
   }
 
   /// Удалить проект
   Future<void> delete(String id) async {
+    final userId = _currentUserId;
+    if (userId == null) throw Exception('User ID is not set.');
+
+    final project = await getById(id);
+    if (project == null) throw Exception('Проект не найден');
+
+    // ❌ ПРОВЕРКА ПРАВ: Только владелец может удалить проект
+    if (project.ownerId != userId) {
+      throw Exception('Недостаточно прав для удаления проекта. Доступно только владельцу.'.tr());
+    }
+
     try {
       // Удаление файлов
-      final project = await getById(id);
-      if (project != null) {
-        final filePaths = project.attachments.map((a) => a.filePath).toList();
-        if (filePaths.isNotEmpty) {
-          await client.storage.from(bucketName).remove(filePaths);
-          debugPrint('Successfully removed ${filePaths.length} files.');
-        }
+      final filePaths = project.attachments.map((a) => a.filePath).toList();
+      if (filePaths.isNotEmpty) {
+        await client.storage.from(bucketName).remove(filePaths);
+        debugPrint('Successfully removed ${filePaths.length} files from storage.');
       }
     } catch (e) {
       debugPrint('Error removing files: $e');
@@ -267,12 +326,11 @@ class ProjectService {
     return List<String>.from(data.map((e) => e['member_id'].toString()));
   }
 
-  /// ✅ ВОССТАНОВЛЕННЫЙ МЕТОД
   /// Получает полный список участников проекта (ID, роль, профиль)
   Future<List<Map<String, dynamic>>> getParticipants(String projectId) async {
+    // Этот метод используется на ProjectFormScreen для отображения списка участников
     final data = await client
         .from('project_members')
-    // Запрашиваем ID члена, роль и профиль (с полным именем, ролью и почтой)
         .select('member_id, role, profile:profiles!inner(full_name, role, email)')
         .eq('project_id', projectId);
 
@@ -296,17 +354,22 @@ class ProjectService {
   }
 
   // ------------------------------------------------
-  // 6. ВЛОЖЕНИЯ
+  // 6. ВЛОЖЕНИЯ (С ПРОВЕРКОЙ ПРАВ)
   // ------------------------------------------------
 
   Future<ProjectModel> uploadAttachment(String projectId, File file) async {
-    if (_currentUserId == null) {
-      throw Exception('User ID is not set.');
+    final userId = _currentUserId;
+    if (userId == null) throw Exception('User ID is not set.');
+
+    // ❌ ПРОВЕРКА ПРАВ: Только участник может загружать вложения
+    if (!(await _isUserMember(projectId, userId))) {
+      throw Exception('Недостаточно прав для загрузки вложения.'.tr());
     }
 
     final fileExtension = file.path.split('.').last;
     final fileName = file.path.split('/').last;
-    final filePath = '$projectId/$_currentUserId/${DateTime.now().millisecondsSinceEpoch}_$fileName';
+    // Путь для хранения: projectId/uploaderId/timestamp_fileName
+    final filePath = '$projectId/$userId/${DateTime.now().millisecondsSinceEpoch}_$fileName';
 
     try {
       await client.storage
@@ -353,6 +416,14 @@ class ProjectService {
   }
 
   Future<void> deleteAttachment(String projectId, String filePath) async {
+    final userId = _currentUserId;
+    if (userId == null) return;
+
+    // ❌ ПРОВЕРКА ПРАВ: Только участник может удалять вложения
+    if (!(await _isUserMember(projectId, userId))) {
+      throw Exception('Недостаточно прав для удаления вложения.'.tr());
+    }
+
     try {
       await client.storage
           .from(bucketName)
@@ -372,7 +443,8 @@ class ProjectService {
   }
 
   Future<File?> downloadAttachment(String filePath, String fileName) async {
-    // Используем метод из SupabaseService
+    // Скачивание не требует дополнительной проверки здесь,
+    // так как SupabaseService и RLS на Storage должны обеспечить доступ всем участникам.
     return SupabaseService().downloadAttachment(filePath, fileName);
   }
 }

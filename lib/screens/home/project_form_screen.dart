@@ -66,12 +66,17 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     _grade = widget.project.grade;
     _attachments = List.from(widget.project.attachments);
 
-    _participants = List.from(widget.project.participantIds);
-    if (widget.project.ownerId.isNotEmpty && !_participants.contains(widget.project.ownerId)) {
-      _participants.add(widget.project.ownerId);
-    } else if (_supabase.auth.currentUser?.id != null && !_participants.contains(_supabase.auth.currentUser!.id)) {
-      _participants.add(_supabase.auth.currentUser!.id);
+    // Инициализация участников: берем из проекта, добавляем владельца
+    _participants = List<String>.from(widget.project.participantIds);
+    final String currentUserId = _supabase.auth.currentUser?.id ?? '';
+    final String ownerId = widget.project.ownerId.isNotEmpty ? widget.project.ownerId : currentUserId;
+
+    // Добавляем владельца проекта в список, если его там нет
+    if (ownerId.isNotEmpty && !_participants.contains(ownerId)) {
+      _participants.add(ownerId);
     }
+    // Если владелец не был установлен в проекте, но пользователь авторизован,
+    // добавляем его как участника (он же будет владельцем при сохранении нового проекта)
 
     _loadUsers();
   }
@@ -103,6 +108,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
   // Найти имя по ID
   String? _getUserName(String userId) {
+    // 1. Поиск в загруженном списке пользователей
     final user = _users.firstWhereOrNull((u) => u['id'] == userId);
     if (user != null) {
       final name = user['full_name'] as String?;
@@ -111,6 +117,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       }
     }
 
+    // 2. Поиск в данных участников, пришедших с проектом (если список _users еще пуст или не полон)
     final participantData = widget.project.participantsData.firstWhereOrNull((pd) => pd.id == userId);
     if (participantData != null) {
       return participantData.fullName;
@@ -198,9 +205,11 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   // ============================
   Future<void> _pickAttachment() async {
     if (widget.project.id.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Сначала сохраните проект, чтобы добавить вложения')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Сначала сохраните проект, чтобы добавить вложения')),
+        );
+      }
       return;
     }
 
@@ -220,6 +229,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     setState(() => _isUploading = true);
 
     try {
+      // ИСПРАВЛЕНИЕ: Мы передаем file, а провайдер его загружает и возвращает обновленный проект
       final updatedProject = await provider.uploadAttachment(widget.project.id, file);
 
       if (!mounted) { return; }
@@ -277,20 +287,19 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       await file.writeAsBytes(response.bodyBytes);
 
       // 5. Открываем локальный файл с помощью open_file.
-      // Пакет open_file возвращает Future<String>.
       final result = await OpenFile.open(localPath);
 
       if (!mounted) { return; }
 
       // ПРОВЕРКА РЕЗУЛЬТАТА: open_file возвращает 'done' при успехе или сообщение об ошибке.
-      if (result == 'done') {
+      if (result.type == ResultType.done) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Файл ${attachment.fileName} открыт.')),
         );
       } else {
         // result содержит сообщение об ошибке (например, 'No app found to open...')
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка открытия: $result')),
+          SnackBar(content: Text('Ошибка открытия: ${result.message}')),
         );
       }
 
@@ -325,6 +334,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     final ownerId = widget.project.ownerId.isNotEmpty ? widget.project.ownerId : currentUserId;
 
     final Set<String> participantSet = _participants.toSet();
+    // Убеждаемся, что владелец всегда включен в список участников
     participantSet.add(ownerId);
     final finalParticipantIds = participantSet.toList();
 
@@ -340,14 +350,19 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       attachments: _attachments,
       participantsData: const [],
       participantIds: finalParticipantIds,
-      createdAt: widget.project.createdAt,
+      createdAt: widget.project.createdAt.isBefore(DateTime(2000)) ? DateTime.now() : widget.project.createdAt,
     );
 
     final provider = context.read<ProjectProvider>();
 
     try {
       if (widget.isNew) {
-        await provider.addProject(projectModel);
+        // ИСПРАВЛЕНИЕ: Вызываем addProject, который теперь возвращает ProjectModel?
+        final savedProject = await provider.addProject(projectModel);
+        if (savedProject == null) {
+          throw Exception("Не удалось создать проект (ошибка провайдера).");
+        }
+
       } else {
         await provider.updateProject(projectModel);
       }
@@ -379,8 +394,11 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
     final provider = context.read<ProjectProvider>();
     try {
+      // ИСПРАВЛЕНИЕ: Вызываем метод провайдера
       await provider.deleteAttachment(widget.project.id, attachment.filePath);
 
+      // После успешного удаления в провайдере (и обновления локального списка там),
+      // нам нужно обновить только _attachments здесь, чтобы UI не ждал полного rebuild.
       if (mounted) {
         setState(() => _attachments.removeWhere((a) => a.filePath == attachment.filePath));
         ScaffoldMessenger.of(context).showSnackBar(
@@ -418,6 +436,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Получаем уникальный список участников и их имена
     final uniqueParticipantIds = _participants.toSet().toList();
 
     final participantNames = uniqueParticipantIds
@@ -517,7 +536,8 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 16),
                   child: TextFormField(
-                    initialValue: _grade != null ? _grade!.truncate().toString() : '',
+                    // Используем toInt() для отображения целого числа
+                    initialValue: _grade?.toInt().toString() ?? '',
                     keyboardType: TextInputType.number,
                     inputFormatters: [
                       FilteringTextInputFormatter.digitsOnly,
@@ -536,7 +556,8 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                       }
                       return null;
                     },
-                    onSaved: (v) => _grade = v != null && v.isNotEmpty ? int.tryParse(v)?.toDouble() : null,
+                    // Сохраняем как Double или null
+                    onSaved: (v) => _grade = v?.isNotEmpty == true ? int.tryParse(v!)?.toDouble() : null,
                   ).animate().fadeIn().scale(),
                 ),
 
@@ -562,7 +583,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text("Вложения (нажмите для скачивания/открытия)", style: Theme.of(context).textTheme.titleMedium),
+                  Text("Вложения", style: Theme.of(context).textTheme.titleMedium),
                   if (_isUploading)
                     const SizedBox(
                         width: 20,

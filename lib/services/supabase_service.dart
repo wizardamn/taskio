@@ -1,10 +1,8 @@
 import 'dart:io';
-import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:path_provider/path_provider.dart'; // Нужен для downloadAttachment. Убедитесь, что 'path_provider' добавлен в pubspec.yaml!
-import 'package:flutter/foundation.dart'; // Для debugPrint
-import 'dart:typed_data'; // Для корректной работы с байтами
+import 'package:flutter/foundation.dart'; // Для debugPrint и Uint8List
 
 // Универсальный сервис для работы с клиентом Supabase,
 // инициализацией, профилями и файловым хранилищем.
@@ -69,7 +67,7 @@ class SupabaseService {
   Future<File?> downloadAttachment(String filePath, String fileName) async {
     try {
       // 1. Получаем байты файла из Supabase Storage
-      // Supabase download возвращает Uint8List
+      // Uint8List теперь доступен через flutter/foundation.dart
       final Uint8List bytes = await client.storage
           .from(bucket)
           .download(filePath);
