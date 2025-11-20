@@ -34,7 +34,9 @@ class ProjectFormScreen extends StatefulWidget {
 class _ProjectFormScreenState extends State<ProjectFormScreen> {
   final _formKey = GlobalKey<FormState>();
   final SupabaseClient _supabase = SupabaseService.client;
-  final Uuid _uuid = const Uuid();
+
+  // ИНИЦИАЛИЗАЦИЯ UUID: Убран 'const' для устранения ошибки 'Unnecessary constructor invocation.'
+  final Uuid _uuid = Uuid();
 
   // Локальные переменные состояния
   late String _title;
@@ -44,6 +46,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   double? _grade;
   late List<Attachment> _attachments;
 
+  // Список ID участников, включая владельца
   late List<String> _participants;
 
   List<Map<String, dynamic>> _users = [];
@@ -66,17 +69,20 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     _grade = widget.project.grade;
     _attachments = List.from(widget.project.attachments);
 
-    // Инициализация участников: берем из проекта, добавляем владельца
-    _participants = List<String>.from(widget.project.participantIds);
-    final String currentUserId = _supabase.auth.currentUser?.id ?? '';
-    final String ownerId = widget.project.ownerId.isNotEmpty ? widget.project.ownerId : currentUserId;
+    // --- Логика инициализации участников ---
+    final Set<String> participantSet = widget.project.participantIds.toSet();
 
-    // Добавляем владельца проекта в список, если его там нет
-    if (ownerId.isNotEmpty && !_participants.contains(ownerId)) {
-      _participants.add(ownerId);
+    final String currentUserId = _supabase.auth.currentUser?.id ?? '';
+    final String ownerId = widget.project.ownerId.isNotEmpty
+        ? widget.project.ownerId
+        : currentUserId;
+
+    if (ownerId.isNotEmpty) {
+      participantSet.add(ownerId);
     }
-    // Если владелец не был установлен в проекте, но пользователь авторизован,
-    // добавляем его как участника (он же будет владельцем при сохранении нового проекта)
+
+    _participants = participantSet.toList();
+    // ------------------------------------
 
     _loadUsers();
   }
@@ -84,7 +90,13 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   // Загрузка всех пользователей для списка участников
   Future<void> _loadUsers() async {
     try {
-      final res = await _supabase.from('profiles').select('id, full_name');
+      final currentUserId = _supabase.auth.currentUser?.id;
+
+      // Загружаем всех, кроме текущего, чтобы не дублировать "Я" в списке пользователей,
+      // но при этом иметь всех остальных
+      final res = await _supabase.from('profiles')
+          .select('id, full_name')
+          .neq('id', currentUserId);
 
       if (!mounted) { return; }
 
@@ -98,8 +110,9 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
           _users = [];
           _isLoadingUsers = false;
         });
+        // Используем явный toString() для безопасности
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка загрузки пользователей: $e')),
+          SnackBar(content: Text('Ошибка загрузки пользователей: ${e.toString()}')),
         );
       }
       debugPrint("Ошибка загрузки списка пользователей: $e");
@@ -107,64 +120,88 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   }
 
   // Найти имя по ID
-  String? _getUserName(String userId) {
+  String _getUserName(String userId) {
     // 1. Поиск в загруженном списке пользователей
     final user = _users.firstWhereOrNull((u) => u['id'] == userId);
     if (user != null) {
-      final name = user['full_name'] as String?;
+      final String? name = user['full_name'] as String?;
       if (name != null && name.isNotEmpty) {
         return name;
       }
     }
 
-    // 2. Поиск в данных участников, пришедших с проектом (если список _users еще пуст или не полон)
+    // 2. Поиск в данных участников, пришедших с проектом
     final participantData = widget.project.participantsData.firstWhereOrNull((pd) => pd.id == userId);
     if (participantData != null) {
       return participantData.fullName;
     }
 
-    return null;
+    // 3. Проверяем, не является ли это текущим пользователем
+    final currentUserId = _supabase.auth.currentUser?.id;
+    if (userId == currentUserId) {
+      return 'Я (Владелец)';
+    }
+
+    return 'Неизвестный пользователь';
   }
 
   // Выбор участников через диалог
   Future<void> _selectParticipants() async {
-    if (_users.isEmpty) { return; }
+    if (_users.isEmpty && _isLoadingUsers) { return; }
 
     if (!mounted) { return; }
-    final List<String> selected = List.from(_participants);
-    final String ownerId = widget.project.ownerId.isNotEmpty ? widget.project.ownerId : _supabase.auth.currentUser?.id ?? '';
+
+    final Set<String> selected = _participants.toSet();
+    final String ownerId = widget.project.ownerId.isNotEmpty
+        ? widget.project.ownerId
+        : _supabase.auth.currentUser?.id ?? '';
+
 
     await showDialog(
       context: context,
       builder: (ctx) {
-        final List<String> tempSelected = List.from(selected);
+        final Set<String> tempSelected = Set.from(selected);
 
         return StatefulBuilder(
           builder: (context, setInnerState) {
+            // Список всех пользователей для выбора
+            final List<Map<String, dynamic>> allUsersForSelection = [
+              // Добавляем владельца как плейсхолдер, если его нет в списке _users (потому что мы его отфильтровали)
+              if (ownerId.isNotEmpty)
+                _users.firstWhereOrNull((u) => u['id'] == ownerId) ??
+                    {'id': ownerId, 'full_name': 'Я (Владелец)'},
+              ..._users.where((u) => u['id'] != ownerId),
+            ].toSet().toList(); // Уникальный список
+
             return AlertDialog(
               title: const Text("Выбор участников"),
               content: SizedBox(
                 width: 300,
                 height: 400,
                 child: ListView(
-                  children: _users.map((u) {
+                  children: allUsersForSelection.map((u) {
                     final id = u['id'] as String;
                     final isOwner = ownerId == id;
-                    final name = u['full_name'] as String? ?? id;
+                    // 'name' гарантированно String
+                    final name = (u['full_name'] as String?) ?? id;
 
                     final isDisabled = isOwner;
 
+                    // Владелец всегда выбран и не может быть снят
+                    if (isOwner && !tempSelected.contains(id)) {
+                      tempSelected.add(id);
+                    }
+
                     return CheckboxListTile(
-                      title: Text(name),
+                      // ИСПРАВЛЕНО: Добавлен .toString() для явного указания типа String
+                      title: Text(name.toString()),
                       value: tempSelected.contains(id),
                       onChanged: isDisabled
                           ? null
                           : (v) {
                         setInnerState(() {
                           if (v == true) {
-                            if (!tempSelected.contains(id)) {
-                              tempSelected.add(id);
-                            }
+                            tempSelected.add(id);
                           } else {
                             tempSelected.remove(id);
                           }
@@ -187,7 +224,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    setState(() => _participants = tempSelected);
+                    setState(() => _participants = tempSelected.toList());
                     Navigator.pop(ctx);
                   },
                   child: const Text("Готово"),
@@ -229,7 +266,6 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     setState(() => _isUploading = true);
 
     try {
-      // ИСПРАВЛЕНИЕ: Мы передаем file, а провайдер его загружает и возвращает обновленный проект
       final updatedProject = await provider.uploadAttachment(widget.project.id, file);
 
       if (!mounted) { return; }
@@ -318,6 +354,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   Future<void> _saveProject() async {
     if (!mounted || !_formKey.currentState!.validate()) { return; }
 
+    // Убеждаемся, что все поля сохранены
     _formKey.currentState!.save();
 
     final currentUserId = _supabase.auth.currentUser?.id;
@@ -333,12 +370,9 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     final projectId = widget.project.id.isNotEmpty ? widget.project.id : _uuid.v4();
     final ownerId = widget.project.ownerId.isNotEmpty ? widget.project.ownerId : currentUserId;
 
-    final Set<String> participantSet = _participants.toSet();
-    // Убеждаемся, что владелец всегда включен в список участников
-    participantSet.add(ownerId);
-    final finalParticipantIds = participantSet.toList();
+    final finalParticipantIds = _participants.toSet().toList();
 
-
+    // Создание модели проекта
     final projectModel = ProjectModel(
       id: projectId,
       title: _title,
@@ -357,11 +391,13 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
     try {
       if (widget.isNew) {
-        // ИСПРАВЛЕНИЕ: Вызываем addProject, который теперь возвращает ProjectModel?
         final savedProject = await provider.addProject(projectModel);
         if (savedProject == null) {
           throw Exception("Не удалось создать проект (ошибка провайдера).");
         }
+        // Если проект успешно создан, обновляем ID для последующих операций (вложений)
+        // Хотя в этом виджете мы сразу покинем экран, это хорошая практика.
+        // widget.project.id = savedProject.id; // Нельзя менять final, но логика на сервере должна быть учтена.
 
       } else {
         await provider.updateProject(projectModel);
@@ -394,11 +430,8 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
     final provider = context.read<ProjectProvider>();
     try {
-      // ИСПРАВЛЕНИЕ: Вызываем метод провайдера
       await provider.deleteAttachment(widget.project.id, attachment.filePath);
 
-      // После успешного удаления в провайдере (и обновления локального списка там),
-      // нам нужно обновить только _attachments здесь, чтобы UI не ждал полного rebuild.
       if (mounted) {
         setState(() => _attachments.removeWhere((a) => a.filePath == attachment.filePath));
         ScaffoldMessenger.of(context).showSnackBar(

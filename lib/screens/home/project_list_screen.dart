@@ -57,8 +57,8 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
             icon: const Icon(Icons.filter_list_alt),
             onSelected: (value) => _onSortFilter(value, prov),
             itemBuilder: (context) => [
-              const PopupMenuItem(value: 'dAsc', child: Text('Срок: сначала ранние')), // Русификация
-              const PopupMenuItem(value: 'dDesc', child: Text('Срок: сначала поздние')), // Русификация
+              const PopupMenuItem(value: 'dAsc', child: Text('Cначала новые')), // Русификация
+              const PopupMenuItem(value: 'dDesc', child: Text('Сначала старые')), // Русификация
               const PopupMenuItem(value: 'status', child: Text('По статусу')), // Русификация
               const PopupMenuDivider(),
               const PopupMenuItem(value: 'all', child: Text('Все проекты')), // Русификация
