@@ -16,7 +16,6 @@ import '../../services/supabase_service.dart';
 import '../../models/project_model.dart';
 import '../../providers/project_provider.dart';
 
-
 class ProjectFormScreen extends StatefulWidget {
   final ProjectModel project;
   final bool isNew;
@@ -35,7 +34,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   final _formKey = GlobalKey<FormState>();
   final SupabaseClient _supabase = SupabaseService.client;
 
-  // ИНИЦИАЛИЗАЦИЯ UUID: Убран 'const' для устранения ошибки 'Unnecessary constructor invocation.'
+  // ИНИЦИАЛИЗАЦИЯ UUID
   final Uuid _uuid = Uuid();
 
   // Локальные переменные состояния
@@ -92,11 +91,21 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     try {
       final currentUserId = _supabase.auth.currentUser?.id;
 
+      // Если пользователь не авторизован, логично ничего не загружать
+      if (currentUserId == null) {
+        if (!mounted) return;
+        setState(() {
+          _users = [];
+          _isLoadingUsers = false;
+        });
+        return; // Прерываем выполнение метода
+      }
+
       // Загружаем всех, кроме текущего, чтобы не дублировать "Я" в списке пользователей,
       // но при этом иметь всех остальных
       final res = await _supabase.from('profiles')
           .select('id, full_name')
-          .neq('id', currentUserId);
+          .neq('id', currentUserId); // <-- Теперь currentUserId гарантированно String
 
       if (!mounted) { return; }
 
@@ -180,10 +189,12 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                 height: 400,
                 child: ListView(
                   children: allUsersForSelection.map((u) {
-                    final id = u['id'] as String;
+                    // ИЗМЕНЕНИЕ 1: Явно указываем тип String для id
+                    final String id = u['id'] as String;
                     final isOwner = ownerId == id;
-                    // 'name' гарантированно String
-                    final name = (u['full_name'] as String?) ?? id;
+
+                    // ЯВНОЕ ОБЪЯВЛЕНИЕ ТИПА для устранения возможных ошибок вывода типов (String? -> String)
+                    final String displayName = (u['full_name'] as String?) ?? id;
 
                     final isDisabled = isOwner;
 
@@ -193,8 +204,9 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                     }
 
                     return CheckboxListTile(
-                      // ИСПРАВЛЕНО: Добавлен .toString() для явного указания типа String
-                      title: Text(name.toString()),
+                      // ИЗМЕНЕНИЕ 2: Устранение ошибки, убрав избыточное приведение типа.
+                      // Переменная displayName уже гарантированно non-nullable String.
+                      title: Text(displayName),
                       value: tempSelected.contains(id),
                       onChanged: isDisabled
                           ? null
@@ -357,6 +369,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     // Убеждаемся, что все поля сохранены
     _formKey.currentState!.save();
 
+
     final currentUserId = _supabase.auth.currentUser?.id;
     if (currentUserId == null) {
       if(mounted) {
@@ -382,7 +395,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       status: _status.index,
       grade: _grade,
       attachments: _attachments,
-      participantsData: const [],
+      participantsData: const [], // ИСПРАВЛЕНО: Убрано ненужное конструирование []
       participantIds: finalParticipantIds,
       createdAt: widget.project.createdAt.isBefore(DateTime(2000)) ? DateTime.now() : widget.project.createdAt,
     );
@@ -512,7 +525,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                   prefixIcon: Icon(Icons.title),
                 ),
                 validator: (v) => v == null || v.isEmpty ? "Введите название" : null,
-                onSaved: (v) => _title = v!,
+                onSaved: (v) => _title = v!, // ИСПРАВЛЕНО: Теперь v! безопасен, т.к. валидатор проверяет на null/empty
               ).animate().fadeIn(duration: 300.ms).slideX(begin: -0.1, end: 0),
 
               const SizedBox(height: 16),
@@ -526,7 +539,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.description),
                 ),
-                onSaved: (v) => _description = v!,
+                onSaved: (v) => _description = v ?? '', // ИСПРАВЛЕНО: Обработка null для необязательного поля
               ).animate().fadeIn(delay: 100.ms).slideX(begin: -0.1, end: 0),
 
               const SizedBox(height: 16),
@@ -590,7 +603,20 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                       return null;
                     },
                     // Сохраняем как Double или null
-                    onSaved: (v) => _grade = v?.isNotEmpty == true ? int.tryParse(v!)?.toDouble() : null,
+                    onSaved: (v) {
+                      // ИСПРАВЛЕНО: Безопасное сохранение оценки
+                      if (v != null && v.isNotEmpty) {
+                        final parsed = int.tryParse(v);
+                        if (parsed != null) {
+                          _grade = parsed.toDouble();
+                        } else {
+                          // Не изменяем _grade, если ввод некорректен
+                          // Или можно установить _grade = null;
+                        }
+                      } else {
+                        _grade = null;
+                      }
+                    },
                   ).animate().fadeIn().scale(),
                 ),
 

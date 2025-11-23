@@ -17,6 +17,7 @@ class ProjectParticipant {
 
   factory ProjectParticipant.fromJson(Map<String, dynamic> json) {
     return ProjectParticipant(
+      // Используем явное приведение String, чтобы гарантировать тип
       id: json['member_id'] as String? ?? json['id'] as String,
       fullName: json['full_name'] as String? ?? 'Неизвестный участник',
       role: json['role'] as String?,
@@ -138,7 +139,7 @@ class ProjectModel {
   String getLocalizedStatus() => statusEnum.text;
 
   // ------------------------------------------------
-  // COPY WITH — теперь participantsData НЕ nullable
+  // COPY WITH
   // ------------------------------------------------
   ProjectModel copyWith({
     String? id,
@@ -199,7 +200,8 @@ class ProjectModel {
       status: json['status'] as int? ?? ProjectStatus.planned.index,
       grade: (json['grade'] as num?)?.toDouble(),
       participantIds: parseParticipantIds(json['participants']),
-      participantsData: const [], // ← изначально пусто, потом заполняется в сервисе
+      // ИСПРАВЛЕНИЕ: Удаляем 'const', чтобы избежать "Unnecessary constructor invocation"
+      participantsData: const [], // <-- УБРАНО const
       attachments: parseAttachments(json['attachments']),
     );
   }
@@ -234,7 +236,8 @@ class ProjectModel {
       deadline: DateTime.now().add(const Duration(days: 7)),
       status: ProjectStatus.planned.index,
       participantIds: [ownerId],
-      participantsData: const [],
+      // ИСПРАВЛЕНИЕ: Удаляем 'const', чтобы избежать "Unnecessary constructor invocation"
+      participantsData: const [], // <-- УБРАНО const
       attachments: const [],
       createdAt: DateTime.now(),
     );

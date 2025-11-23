@@ -41,12 +41,15 @@ class ProjectProvider extends ChangeNotifier {
 
     switch (_sortBy) {
       case SortBy.deadlineAsc:
+      // Сортировка по возрастанию дедлайна (от старых к новым)
         result.sort((a, b) => a.deadline.compareTo(b.deadline));
         break;
       case SortBy.deadlineDesc:
+      // Сортировка по убыванию дедлайна (от новых к старым)
         result.sort((a, b) => b.deadline.compareTo(a.deadline));
         break;
       case SortBy.status:
+      // Сортировка по индексу статуса (важно, чтобы ProjectStatus был правильно упорядочен)
         result.sort((a, b) => a.statusEnum.index.compareTo(b.statusEnum.index));
         break;
     }
@@ -109,6 +112,7 @@ class ProjectProvider extends ChangeNotifier {
 
     } catch (e, st) {
       _projects.clear();
+      // Оставляем логику извлечения первой части ошибки, так как это полезно для пользователя
       _errorMessage = 'Ошибка загрузки: ${e.toString().split(':')[0].trim()}';
       debugPrint("ProjectProvider ERROR: fetchProjects ошибка: $e\n$st");
 
@@ -128,16 +132,24 @@ class ProjectProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Добавление проекта. Предполагаем, что _service.add() возвращает полностью созданную модель.
   Future<ProjectModel?> addProject(ProjectModel p) async {
-    if (isGuest || _userId == null) return null;
+    if (isGuest || _userId == null) {
+      _errorMessage = "guest_cannot_create_project".tr();
+      notifyListeners();
+      return null;
+    }
     _errorMessage = null;
 
     try {
-      await _service.add(p);
+      // 1. Добавляем проект и получаем его финальную версию с серверным ID/таймстемпами
+      final newProject = await _service.add(p);
 
-      final updatedProject = await _refreshSingle(p.id);
+      // 2. Обновляем локальный список
+      _projects.add(newProject);
+      notifyListeners();
 
-      return updatedProject;
+      return newProject; // Возвращаем созданный проект
 
     } catch (e, st) {
       _handleCrudError(e, st, "addProject");
@@ -145,21 +157,19 @@ class ProjectProvider extends ChangeNotifier {
     }
   }
 
+  /// Обновление проекта. Используем _refreshSingle для гарантии синхронизации.
   Future<void> updateProject(ProjectModel p) async {
     if (isGuest || _userId == null) return;
     _errorMessage = null;
 
     try {
+      // 1. Отправляем запрос на обновление
       await _service.update(p);
 
-      final index = _projects.indexWhere((existing) => existing.id == p.id);
-      if (index != -1) {
-        _projects[index] = p;
-      } else {
-        debugPrint('ProjectProvider WARNING: Обновляемый проект с ID ${p.id} не найден в локальном списке. Добавляем его.');
-        _projects.add(p);
-      }
-      notifyListeners();
+      // 2. Запрашиваем обновленный проект с сервера для полной синхронизации
+      await _refreshSingle(p.id);
+
+      // notifyListeners() вызывается внутри _refreshSingle
 
     } catch (e, st) {
       _handleCrudError(e, st, "updateProject");
@@ -183,10 +193,13 @@ class ProjectProvider extends ChangeNotifier {
 
   bool canEditProject(ProjectModel project) {
     if (_userId == null) return false;
+    // Нельзя редактировать завершенные проекты
     if (project.statusEnum == ProjectStatus.completed) return false;
 
+    // Владелец может редактировать всегда (если не завершен)
     if (project.ownerId == _userId) return true;
 
+    // Проверяем, является ли пользователь участником с ролью 'owner' или 'editor'
     final member = project.participantsData.firstWhere(
           (p) => p.id == _userId,
       orElse: () => ProjectParticipant(id: '', fullName: ''),
@@ -198,6 +211,7 @@ class ProjectProvider extends ChangeNotifier {
 
   Future<List<Map<String, dynamic>>> getParticipants(String projectId) async {
     try {
+      // Это отдельный вызов, который не меняет основной список проектов, поэтому notifyListeners не требуется.
       return await _service.getParticipants(projectId);
     } catch (e) {
       debugPrint("getParticipants error: $e");
@@ -210,6 +224,7 @@ class ProjectProvider extends ChangeNotifier {
     _errorMessage = null;
     try {
       await _service.addParticipant(projectId, userId);
+      // Обновляем проект после изменения списка участников
       await _refreshSingle(projectId);
     } catch (e, st) {
       _handleCrudError(e, st, "addParticipant");
@@ -221,6 +236,7 @@ class ProjectProvider extends ChangeNotifier {
     _errorMessage = null;
     try {
       await _service.removeParticipant(projectId, userId);
+      // Обновляем проект после изменения списка участников
       await _refreshSingle(projectId);
     } catch (e, st) {
       _handleCrudError(e, st, "removeParticipant");
@@ -234,8 +250,10 @@ class ProjectProvider extends ChangeNotifier {
     _errorMessage = null;
 
     try {
+      // Сервис возвращает обновленную модель с новым списком вложений
       final updatedProject = await _service.uploadAttachment(projectId, file);
 
+      // Обновляем локальный список
       final index = _projects.indexWhere((p) => p.id == projectId);
       if (index != -1) {
         _projects[index] = updatedProject;
@@ -259,16 +277,20 @@ class ProjectProvider extends ChangeNotifier {
 
     try {
       await _service.deleteAttachment(projectId, filePath);
+      // Обновляем проект после удаления вложения
       await _refreshSingle(projectId);
     } catch (e, st) {
       _handleCrudError(e, st, "deleteAttachment");
     }
   }
 
+  /// Запрашивает одну модель проекта с сервера и синхронизирует ее с локальным списком.
   Future<ProjectModel?> _refreshSingle(String projectId) async {
     try {
       final updated = await _service.getById(projectId);
+
       if (updated == null) {
+        // Проект был удален на сервере
         _projects.removeWhere((p) => p.id == projectId);
         notifyListeners();
         return null;
@@ -276,14 +298,17 @@ class ProjectProvider extends ChangeNotifier {
 
       final index = _projects.indexWhere((p) => p.id == projectId);
       if (index != -1) {
+        // Проект найден, заменяем его обновленной версией
         _projects[index] = updated;
       } else {
+        // Проект не найден, добавляем его (может быть после добавления или приглашения)
         _projects.add(updated);
       }
       notifyListeners();
       return updated;
     } catch (e) {
       debugPrint("ProjectProvider ERROR: _refreshSingle ошибка: $e");
+      // Не вызываем _handleCrudError здесь, чтобы не перезаписать основной _errorMessage
       return null;
     }
   }
@@ -297,6 +322,7 @@ class ProjectProvider extends ChangeNotifier {
       ownerId: _userId!,
       title: "new_project".tr(),
       description: "",
+      // Установка дедлайна, например, через 7 дней
       deadline: DateTime.now().add(const Duration(days: 7)),
       status: ProjectStatus.planned.index,
       grade: null,

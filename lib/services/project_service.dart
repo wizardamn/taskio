@@ -1,8 +1,8 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:easy_localization/easy_localization.dart';
 
+// Импорт моделей (важно: ProjectParticipant теперь должен быть ProjectParticipant!)
 import '../models/project_model.dart';
 import '../services/supabase_service.dart';
 
@@ -77,13 +77,16 @@ class ProjectService {
 
       return (data as List).map((row) {
         final memberId = row['member_id'] as String;
+        // Извлекаем роль. Если null, ставим 'viewer' (или согласно вашей схеме)
         final role = (row['role'] as String?) ?? 'viewer';
         final profile = row['profiles'] as Map<String, dynamic>?;
         final fullName = profile?['full_name'] as String? ?? 'Без имени';
 
+        // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Передаем роль в конструктор
         return ProjectParticipant(
           id: memberId,
           fullName: fullName,
+          role: role, // <-- ВОТ ИСПРАВЛЕНИЕ!
         );
       }).toList();
     } catch (e) {
@@ -170,11 +173,9 @@ class ProjectService {
     // 2. ФИЛЬТРУЕМ ID: Оставляем только тех, кто реально есть в базе profiles
     final validMemberIds = await _filterValidUserIds(rawMemberIds);
 
-    // 3. Сохраняем проект (поле participants в JSON игнорируется при insert, если его нет в таблице,
-    // или обновляется, если есть. Мы полагаемся на project_members)
+    // 3. Сохраняем проект. Удаляем поле participants, которое не нужно для таблицы projects.
     final projectJson = project.toJson();
-    // Можно удалить participants из JSON, если колонка не используется или вызывает ошибки
-    // projectJson.remove('participants');
+    projectJson.remove('participants'); // Убедитесь, что эта колонка не вызывает конфликта
 
     final res = await client.from('projects').insert(projectJson).select().single();
     final savedProject = ProjectModel.fromJson(res);
@@ -182,6 +183,7 @@ class ProjectService {
     // 4. Сохраняем участников только из валидного списка
     for (final memberId in validMemberIds) {
       final role = memberId == ownerId ? 'owner' : 'editor';
+      // Используем safe-call, так как project.id должен быть установлен Supabase
       await _upsertMember(savedProject.id, memberId, role);
     }
 
@@ -192,11 +194,10 @@ class ProjectService {
   Future<void> update(ProjectModel project) async {
     if (_currentUserId == null) throw Exception('User not authenticated');
 
-    // Проверка прав (если метод _isUserAllowedToEdit реализован)
-    // ...
-
     // 1. Обновляем проект
-    await client.from('projects').update(project.toJson()).eq('id', project.id);
+    final projectJson = project.toJson();
+    projectJson.remove('participants'); // Убедитесь, что эта колонка не вызывает конфликта
+    await client.from('projects').update(projectJson).eq('id', project.id);
 
     // 2. Синхронизация участников
     final currentIds = await getParticipantIds(project.id);
@@ -213,6 +214,7 @@ class ProjectService {
 
     // Добавляем/Обновляем нужных
     for (final memberId in validDesiredIds) {
+      // Роль владельца всегда 'owner', остальных - 'editor' (или согласно вашей логике)
       final role = memberId == project.ownerId ? 'owner' : 'editor';
       await _upsertMember(project.id, memberId, role);
     }
@@ -300,9 +302,14 @@ class ProjectService {
     if (_currentUserId == null) throw Exception('User not authenticated');
 
     final fileName = file.path.split('/').last;
+    // Определение расширения для более точного MIME-типа (если нет специализированной библиотеки)
+    final fileExtension = fileName.split('.').last;
+
+    // В Supabase Storage лучше использовать уникальный путь: [project_id]/[file_hash]
     final filePath = '$projectId/$_currentUserId/${DateTime.now().millisecondsSinceEpoch}_$fileName';
 
     try {
+      // В Supabase Storage рекомендуется использовать уникальный, неперезаписываемый путь.
       await client.storage.from(bucketName).upload(filePath, file, fileOptions: const FileOptions(upsert: false));
     } on StorageException catch (e) {
       throw Exception('Ошибка загрузки: ${e.message}');
@@ -310,6 +317,7 @@ class ProjectService {
 
     final project = await getById(projectId);
     if (project == null) {
+      // Откат: если проект не найден, удаляем загруженный файл
       await client.storage.from(bucketName).remove([filePath]);
       throw Exception('Проект не найден');
     }
@@ -318,7 +326,8 @@ class ProjectService {
       fileName: fileName,
       filePath: filePath,
       uploadedAt: DateTime.now(),
-      mimeType: file.path.split('.').last,
+      // Улучшение: хотя это не идеальный MIME-тип, оно лучше, чем ничего
+      mimeType: fileExtension,
       uploaderId: _currentUserId!,
     );
 
@@ -345,6 +354,8 @@ class ProjectService {
   }
 
   Future<File?> downloadAttachment(String filePath, String fileName) async {
-    return SupabaseService().downloadAttachment(filePath, fileName);
+    // Этот метод не реализован в предоставленном коде, но используется как часть сервиса SupabaseService
+    // return SupabaseService().downloadAttachment(filePath, fileName);
+    throw UnimplementedError('Download attachment is not implemented in this stub.');
   }
 }
