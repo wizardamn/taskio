@@ -22,12 +22,14 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   void initState() {
     super.initState();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // Использование context.read безопасно, так как нет async gap до него
-      final prov = context.read<ProjectProvider>();
-      // ✅ Загружаем/обновляем проекты при инициализации
-      await prov.fetchProjects();
-    });
+    // УБРАНО: WidgetsBinding.instance.addPostFrameCallback((_) async {
+    // final prov = context.read<ProjectProvider>();
+    // await prov.fetchProjects(); // <-- fetchProjects вызывается при инициализации
+    // });
+
+    // fetchProjects теперь вызывается только из ProjectListScreen._addProject,
+    // _confirmDelete, и onRefresh RefreshIndicator.
+    // Это централизует управление загрузкой данных и может устранить гонку.
   }
 
   // =====================================================

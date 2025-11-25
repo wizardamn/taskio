@@ -1,8 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-// Импорт моделей (важно: ProjectParticipant теперь должен быть ProjectParticipant!)
 import '../models/project_model.dart';
 import '../services/supabase_service.dart';
 
@@ -11,6 +9,7 @@ class ProjectService {
   final String bucketName = SupabaseService.bucket;
   String? _currentUserId;
 
+  /// Обновляет ID текущего пользователя, используемого сервисом для проверок прав.
   void updateOwner(String? userId) {
     _currentUserId = userId;
   }
@@ -19,7 +18,7 @@ class ProjectService {
   // 1. ВАЛИДАЦИЯ И САМОВОССТАНОВЛЕНИЕ
   // ------------------------------------------------
 
-  // Проверяет существование профилей и возвращает список валидных ID
+  /// Проверяет существование профилей и возвращает список валидных ID
   Future<List<String>> _filterValidUserIds(List<String> userIds) async {
     if (userIds.isEmpty) return [];
     final unique = userIds.toSet().toList();
@@ -32,7 +31,7 @@ class ProjectService {
     }
   }
 
-  // Гарантирует, что профиль текущего пользователя существует
+  /// Гарантирует, что профиль текущего пользователя существует
   Future<void> _ensureCurrentUserProfile() async {
     if (_currentUserId == null) return;
 
@@ -45,7 +44,6 @@ class ProjectService {
           .maybeSingle();
 
       if (check == null) {
-        // Если профиля нет, создаем заглушку, чтобы не упал FK constraint
         final user = client.auth.currentUser;
         final email = user?.email ?? '';
         final name = user?.userMetadata?['full_name'] ?? email.split('@').first;
@@ -68,6 +66,7 @@ class ProjectService {
   // 2. ЗАГРУЗКА ДАННЫХ
   // ------------------------------------------------
 
+  /// Загружает данные участников для указанного проекта
   Future<List<ProjectParticipant>> _fetchParticipantDetails(String projectId) async {
     try {
       final data = await client
@@ -77,16 +76,14 @@ class ProjectService {
 
       return (data as List).map((row) {
         final memberId = row['member_id'] as String;
-        // Извлекаем роль. Если null, ставим 'viewer' (или согласно вашей схеме)
         final role = (row['role'] as String?) ?? 'viewer';
         final profile = row['profiles'] as Map<String, dynamic>?;
         final fullName = profile?['full_name'] as String? ?? 'Без имени';
 
-        // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Передаем роль в конструктор
         return ProjectParticipant(
           id: memberId,
           fullName: fullName,
-          role: role, // <-- ВОТ ИСПРАВЛЕНИЕ!
+          role: role,
         );
       }).toList();
     } catch (e) {
@@ -95,6 +92,7 @@ class ProjectService {
     }
   }
 
+  /// Загружает все проекты, в которых участвует текущий пользователь
   Future<List<ProjectModel>> getAll() async {
     if (_currentUserId == null) return [];
     final userId = _currentUserId!;
@@ -122,7 +120,7 @@ class ProjectService {
       for (final raw in response as List) {
         try {
           final project = ProjectModel.fromJson(raw as Map<String, dynamic>);
-          // Обогащаем участниками
+
           final participants = await _fetchParticipantDetails(project.id);
 
           projects.add(project.copyWith(
@@ -140,6 +138,7 @@ class ProjectService {
     }
   }
 
+  /// Загружает один проект по его ID
   Future<ProjectModel?> getById(String id) async {
     try {
       final data = await client.from('projects').select().eq('id', id).maybeSingle();
@@ -162,6 +161,7 @@ class ProjectService {
   // 3. CRUD ОПЕРАЦИИ
   // ------------------------------------------------
 
+  /// Создаёт новый проект
   Future<ProjectModel> add(ProjectModel project) async {
     // 1. Гарантируем, что профиль создателя существует
     await _ensureCurrentUserProfile();
@@ -191,6 +191,7 @@ class ProjectService {
     return (await getById(savedProject.id))!;
   }
 
+  /// Обновляет существующий проект
   Future<void> update(ProjectModel project) async {
     if (_currentUserId == null) throw Exception('User not authenticated');
 
@@ -220,6 +221,7 @@ class ProjectService {
     }
   }
 
+  /// Вспомогательный метод для добавления/обновления записи участника
   Future<void> _upsertMember(String projectId, String memberId, String role) async {
     // Используем upsert с onConflict для атомарности
     await client.from('project_members').upsert(
@@ -228,10 +230,11 @@ class ProjectService {
         'member_id': memberId,
         'role': role,
       },
-      onConflict: 'project_id, member_id', // Важно указать уникальный ключ
+      onConflict: 'project_id, member_id',
     );
   }
 
+  /// Удаляет проект
   Future<void> delete(String id) async {
     if (_currentUserId == null) throw Exception('User not authenticated');
 
@@ -255,11 +258,13 @@ class ProjectService {
   // 4. ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
   // ------------------------------------------------
 
+  /// Получает список ID участников проекта
   Future<List<String>> getParticipantIds(String projectId) async {
     final data = await client.from('project_members').select('member_id').eq('project_id', projectId);
     return (data as List).map((e) => e['member_id'] as String).toList();
   }
 
+  /// Получает список участников проекта (ID, имя, роль)
   Future<List<Map<String, dynamic>>> getParticipants(String projectId) async {
     try {
       final data = await client
@@ -280,6 +285,7 @@ class ProjectService {
     }
   }
 
+  /// Добавляет участника в проект
   Future<void> addParticipant(String projectId, String memberId, [String role = "editor"]) async {
     // Проверяем существование перед добавлением
     final valid = await _filterValidUserIds([memberId]);
@@ -288,6 +294,7 @@ class ProjectService {
     }
   }
 
+  /// Удаляет участника из проекта
   Future<void> removeParticipant(String projectId, String memberId) async {
     await client.from('project_members').delete().match({
       'project_id': projectId, 'member_id': memberId
@@ -298,6 +305,7 @@ class ProjectService {
   // 5. ВЛОЖЕНИЯ
   // ------------------------------------------------
 
+  /// Загружает вложение в проект
   Future<ProjectModel> uploadAttachment(String projectId, File file) async {
     if (_currentUserId == null) throw Exception('User not authenticated');
 
@@ -341,6 +349,7 @@ class ProjectService {
     return (await getById(projectId))!;
   }
 
+  /// Удаляет вложение из проекта
   Future<void> deleteAttachment(String projectId, String filePath) async {
     try { await client.storage.from(bucketName).remove([filePath]); } catch (_) {}
 
@@ -353,9 +362,9 @@ class ProjectService {
     }).eq('id', projectId);
   }
 
+
   Future<File?> downloadAttachment(String filePath, String fileName) async {
-    // Этот метод не реализован в предоставленном коде, но используется как часть сервиса SupabaseService
-    // return SupabaseService().downloadAttachment(filePath, fileName);
+
     throw UnimplementedError('Download attachment is not implemented in this stub.');
   }
 }

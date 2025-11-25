@@ -132,7 +132,7 @@ class ProjectProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Добавление проекта. Предполагаем, что _service.add() возвращает полностью созданную модель.
+  /// Добавление проекта. Всегда перезагружает список для синхронизации с базой.
   Future<ProjectModel?> addProject(ProjectModel p) async {
     if (isGuest || _userId == null) {
       _errorMessage = "guest_cannot_create_project".tr();
@@ -142,12 +142,13 @@ class ProjectProvider extends ChangeNotifier {
     _errorMessage = null;
 
     try {
-      // 1. Добавляем проект и получаем его финальную версию с серверным ID/таймстемпами
+      // 1. Добавляем проект на сервер
       final newProject = await _service.add(p);
 
-      // 2. Обновляем локальный список
-      _projects.add(newProject);
-      notifyListeners();
+      // 2. ПЕРЕЗАГРУЖАЕМ ВСЕ проекты для синхронизации локального списка с базой
+      // Это гарантирует, что локальный список отражает актуальное состояние базы данных
+      // после завершения асинхронной операции создания.
+      await fetchProjects();
 
       return newProject; // Возвращаем созданный проект
 
@@ -183,8 +184,10 @@ class ProjectProvider extends ChangeNotifier {
     try {
       await _service.delete(id);
 
-      _projects.removeWhere((p) => p.id == id);
-      notifyListeners();
+      // Запрашиваем обновленный список проектов с сервера для синхронизации
+      // Это гарантирует, что локальный список отражает актуальное состояние базы данных
+      // после завершения асинхронной операции удаления.
+      await fetchProjects();
 
     } catch (e, st) {
       _handleCrudError(e, st, "deleteProject");
