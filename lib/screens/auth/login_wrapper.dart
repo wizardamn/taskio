@@ -4,13 +4,13 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../providers/project_provider.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/auth_service.dart';
 
 import '../home/project_list_screen.dart';
 import 'login_screen.dart';
 
-// Внутреннее состояние для LoginWrapper
-enum AuthStatus { loading, loggedIn, loggedOut }
+enum AuthStatus { loading, loggedIn, loggedOut, guest }
 
 class LoginWrapper extends StatefulWidget {
   const LoginWrapper({super.key});
@@ -21,23 +21,32 @@ class LoginWrapper extends StatefulWidget {
 
 class _LoginWrapperState extends State<LoginWrapper> {
   late final StreamSubscription<AuthState> _authStateSubscription;
-  final _authService = AuthService();
+  final AuthService _authService = AuthService();
 
-  // Храним текущее состояние аутентификации
   AuthStatus _status = AuthStatus.loading;
 
   @override
   void initState() {
     super.initState();
 
-    // Проверяем синхронно при запуске
     final currentUser = Supabase.instance.client.auth.currentUser;
-    if (currentUser == null) {
-      // Если пользователя точно нет, сразу ставим loggedOut, чтобы не показывать
-      // стандартный спиннер, если нет сохраненной сессии.
-      setState(() => _status = AuthStatus.loggedOut);
+    final authProvider = context.read<AuthProvider>(); // Получаем провайдер
+
+    // Проверяем, может быть, пользователь вошёл как гость
+    if (authProvider.isGuest) {
+      debugPrint("LoginWrapper: Статус провайдера - гость.");
+      if (mounted) {
+        setState(() => _status = AuthStatus.guest);
+      }
+    } else if (currentUser == null) {
+      debugPrint("LoginWrapper: Сессия не найдена (signed out).");
+      if (mounted) {
+        setState(() => _status = AuthStatus.loggedOut);
+      }
+    } else {
+      debugPrint("LoginWrapper: Сессия найдена. Загрузка профиля...");
+      // Остаемся в 'loading', пока не загрузим профиль или не узнаем, что сессии нет.
     }
-    // Если пользователь ЕСТЬ, мы оставляем 'loading', пока не загрузим профиль.
 
     _setupAuthListener();
   }
@@ -48,48 +57,70 @@ class _LoginWrapperState extends State<LoginWrapper> {
     super.dispose();
   }
 
-  /// Настраивает слушатель событий Supabase
   void _setupAuthListener() {
-    _authStateSubscription =
-        Supabase.instance.client.auth.onAuthStateChange.listen((data) async {
-          final session = data.session;
-          // Используем context.read(), так как мы ВНУТРИ initState/listener
-          final prov = context.read<ProjectProvider>();
+    _authStateSubscription = Supabase.instance.client.auth.onAuthStateChange.listen(
+          (data) async {
+        final session = data.session;
+        final authProvider = context.read<AuthProvider>();
+        final projectProvider = context.read<ProjectProvider>();
 
-          if (session != null) {
-            // СЕССИЯ ЕСТЬ (Пользователь вошел ИЛИ приложение запустилось с сохраненной сессией)
-            debugPrint("LoginWrapper: Сессия найдена. Загрузка профиля...");
-            try {
-              final profile = await _authService.getProfile();
+        // Если статус в провайдере - гость, игнорируем любые изменения сессии.
+        if (authProvider.isGuest) {
+          debugPrint("LoginWrapper: Провайдер в статусе гость, игнорируем сессию.");
+          return;
+        }
 
-              if (profile != null && mounted) {
-                debugPrint("LoginWrapper: Профиль ${profile.fullName} загружен.");
-                await prov.setUser(profile.id, profile.fullName);
+        if (session != null) {
+          // Сессия есть (вход или перезапуск приложения с сохранённой сессией)
+          debugPrint("LoginWrapper: Сессия найдена. Загрузка профиля...");
+          try {
+            final profile = await _authService.getProfile();
 
-                // Меняем состояние на loggedIn
+            if (profile != null && mounted) {
+              debugPrint("LoginWrapper: Профиль ${profile.fullName} загружен.");
+              await projectProvider.setUser(profile.id, profile.fullName);
+              if (mounted) {
                 setState(() => _status = AuthStatus.loggedIn);
-              } else {
-                throw Exception(
-                    "Профиль не найден для пользователя ${session.user.id}");
               }
-            } catch (e) {
-              debugPrint("LoginWrapper: Ошибка загрузки профиля: $e");
-              if (mounted) _handleSignOut(prov);
+            } else {
+              debugPrint("LoginWrapper: Ошибка: Профиль не найден для ${session.user.id}");
+              // Если профиль не найден, но сессия есть, это ошибка данных, НЕ выход.
+              // Вместо _handleSignOut, можно показать сообщение пользователю или попытаться восстановить.
+              // Для простоты, пока оставим как есть, но не вызываем signOut.
+              if (mounted) {
+                // Например, можно установить статус loggedOut и сообщить пользователю.
+                // Или вызвать authProvider.signOut() для очистки сломанной сессии.
+                // Но НЕ _handleSignOut, так как это не выход пользователя.
+                // authProvider.signOut(); // <-- Это может быть вариантом, если сессия сломана.
+              }
             }
-          } else {
-            // СЕССИИ НЕТ (Пользователь вышел)
-            debugPrint("LoginWrapper: Сессия не найдена (signed out).");
-            if (mounted) _handleSignOut(prov);
+          } catch (e) {
+            debugPrint("LoginWrapper: Ошибка загрузки профиля: $e");
+            // Ошибка загрузки профиля не означает, что пользователь вышел.
+            // Не вызываем _handleSignOut. Это не сессия, это ошибка данных.
           }
-        });
+        } else {
+          // Сессии нет (пользователь действительно вышел)
+          debugPrint("LoginWrapper: Сессия не найдена (signed out).");
+          if (mounted) _handleSignOut(projectProvider, authProvider);
+        }
+      },
+      onError: (error, stackTrace) {
+        debugPrint("LoginWrapper: Ошибка в потоке аутентификации: $error\n$stackTrace");
+        final authProvider = context.read<AuthProvider>();
+        final projectProvider = context.read<ProjectProvider>();
+        // Ошибка потока - это критическая ситуация. Лучше сбросить состояние.
+        if (mounted) _handleSignOut(projectProvider, authProvider);
+      },
+    );
   }
 
-  // Обработчик выхода
-  void _handleSignOut(ProjectProvider prov) {
-    prov.clear(keepProjects: false);
+  /// Обработчик выхода из системы (реальный выход или ошибка сессии)
+  void _handleSignOut(ProjectProvider projectProvider, AuthProvider authProvider) {
+    projectProvider.clear(keepProjects: false);
+    authProvider.clear(); // Сбрасывает isGuest и другие поля
 
-    // Меняем состояние на loggedOut
-    if (_status != AuthStatus.loggedOut) {
+    if (mounted && _status != AuthStatus.loggedOut) {
       setState(() => _status = AuthStatus.loggedOut);
     }
   }
@@ -98,18 +129,15 @@ class _LoginWrapperState extends State<LoginWrapper> {
   Widget build(BuildContext context) {
     Widget currentScreen;
 
-    // Определяем, какой экран нужно показать
     switch (_status) {
       case AuthStatus.loading:
-      // Показываем загрузку с русским текстом
-        currentScreen = const Scaffold( // Добавлена const, так как виджеты внутри константны
+        currentScreen = const Scaffold(
           body: Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 CircularProgressIndicator(),
                 SizedBox(height: 16),
-                // ✅ ИСПРАВЛЕНО: Заменена ключ локализации на русскую строку
                 Text('Загрузка статуса пользователя...'),
               ],
             ),
@@ -117,25 +145,22 @@ class _LoginWrapperState extends State<LoginWrapper> {
         );
         break;
       case AuthStatus.loggedIn:
-      // Показываем главный экран
         currentScreen = const ProjectListScreen();
         break;
       case AuthStatus.loggedOut:
-      // Показываем экран входа
         currentScreen = const LoginScreen();
+        break;
+      case AuthStatus.guest:
+        currentScreen = const ProjectListScreen();
         break;
     }
 
-    // ✅ АНИМАЦИИ: Используем AnimatedSwitcher для плавного перехода между экранами
     return AnimatedSwitcher(
-      // Длительность анимации
       duration: const Duration(milliseconds: 400),
-      // Тип перехода: плавное исчезновение/появление
       transitionBuilder: (Widget child, Animation<double> animation) {
-        // Используем FadeTransition для более гладкого кроссфейда
         return FadeTransition(opacity: animation, child: child);
       },
-      child: currentScreen,
+      child: SizedBox(key: UniqueKey(), child: currentScreen),
     );
   }
 }

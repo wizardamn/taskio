@@ -11,15 +11,18 @@ import 'providers/theme_provider.dart';
 
 // ✅ Сервисы
 import 'services/project_service.dart';
+import 'services/notification_service.dart'; // <-- ДОБАВЛЕН ИМПОРТ
 
 // ✅ Экраны
 import 'screens/auth/login_wrapper.dart';
-import 'screens/auth/login_screen.dart';
-import 'screens/home/project_list_screen.dart';
+// import 'screens/auth/login_screen.dart'; // Убран, так как не используется напрямую в routes
+// import 'screens/home/project_list_screen.dart'; // Убран, так как не используется напрямую в routes
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
+
+  // ИНИЦИАЛИЗАЦИЯ EasyLocalization
   await EasyLocalization.ensureInitialized();
 
   final supabaseUrl = dotenv.env['SUPABASE_URL'];
@@ -29,11 +32,14 @@ Future<void> main() async {
     throw Exception('SUPABASE_URL или SUPABASE_ANON_KEY отсутствуют в .env!');
   }
 
+  // ИНИЦИАЛИЗАЦИЯ Supabase
   await Supabase.initialize(
     url: supabaseUrl,
     anonKey: supabaseAnonKey,
   );
 
+  // ИНИЦИАЛИЗАЦИЯ NotificationService
+  await NotificationService().init(); // <-- ДОБАВЛЕНО
 
   runApp(
     EasyLocalization(
@@ -51,14 +57,14 @@ Future<void> main() async {
             ),
           ),
         ],
-        child: const StudentProjectsApp(),
+        child: const TaskioApp(), // <-- ИСПРАВЛЕНО: Имя класса
       ),
     ),
   );
 }
 
-class StudentProjectsApp extends StatelessWidget {
-  const StudentProjectsApp({super.key});
+class TaskioApp extends StatelessWidget { // <-- ИСПРАВЛЕНО: Имя класса
+  const TaskioApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -73,10 +79,7 @@ class StudentProjectsApp extends StatelessWidget {
       localizationsDelegates: context.localizationDelegates,
       supportedLocales: context.supportedLocales,
       locale: context.locale,
-      routes: {
-        '/login': (_) => const LoginScreen(),
-        '/home': (_) => const ProjectListScreen(),
-      },
+      // Убраны routes, так как навигация через ProjectListScreen и LoginWrapper
       home: const LoginWrapper(),
     );
   }

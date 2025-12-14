@@ -156,6 +156,17 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
   // Выбор участников через диалог
   Future<void> _selectParticipants() async {
+    // --- ПРОВЕРКА: Только владелец может изменять список участников ---
+    final prov = context.read<ProjectProvider>();
+    if (!prov.canEditProject(widget.project) || widget.project.ownerId != _supabase.auth.currentUser?.id) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Только владелец проекта может изменять список участников.')),
+        );
+      }
+      return;
+    }
+
     if (_users.isEmpty && _isLoadingUsers) { return; }
 
     if (!mounted) { return; }
@@ -189,11 +200,9 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                 height: 400,
                 child: ListView(
                   children: allUsersForSelection.map((u) {
-                    // ИЗМЕНЕНИЕ 1: Явно указываем тип String для id
                     final String id = u['id'] as String;
                     final isOwner = ownerId == id;
 
-                    // ЯВНОЕ ОБЪЯВЛЕНИЕ ТИПА для устранения возможных ошибок вывода типов (String? -> String)
                     final String displayName = (u['full_name'] as String?) ?? id;
 
                     final isDisabled = isOwner;
@@ -204,8 +213,6 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                     }
 
                     return CheckboxListTile(
-                      // ИЗМЕНЕНИЕ 2: Устранение ошибки, убрав избыточное приведение типа.
-                      // Переменная displayName уже гарантированно non-nullable String.
                       title: Text(displayName),
                       value: tempSelected.contains(id),
                       onChanged: isDisabled
@@ -250,7 +257,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   }
 
   // ============================
-  //  Загрузка вложений
+  //  Загрузка вложений (теперь доступна всем участникам)
   // ============================
   Future<void> _pickAttachment() async {
     if (widget.project.id.isEmpty) {
@@ -261,6 +268,18 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       }
       return;
     }
+
+    // --- ПРОВЕРКА: Любой участник может добавлять вложения ---
+    final prov = context.read<ProjectProvider>();
+    if (!prov.canViewProject(widget.project)) { // <-- Проверяем, может ли пользователь *видеть* проект
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Вы не состоите в этом проекте и не можете добавлять вложения.')),
+        );
+      }
+      return;
+    }
+
 
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -273,12 +292,12 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
     final pickedFile = result.files.single;
     final file = File(pickedFile.path!);
-    final provider = context.read<ProjectProvider>();
+    // final provider = context.read<ProjectProvider>(); // Уже получен выше
 
     setState(() => _isUploading = true);
 
     try {
-      final updatedProject = await provider.uploadAttachment(widget.project.id, file);
+      final updatedProject = await prov.uploadAttachment(widget.project.id, file); // <-- Вызываем через провайдер
 
       if (!mounted) { return; }
 
@@ -362,13 +381,23 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     }
   }
 
-  // Сохранение проекта
+  // Сохранение проекта (доступно только владельцу)
   Future<void> _saveProject() async {
+    // --- ПРОВЕРКА: Только владелец может сохранить проект ---
+    final prov = context.read<ProjectProvider>();
+    if (!prov.canEditProject(widget.project) || widget.project.ownerId != _supabase.auth.currentUser?.id) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Только владелец проекта может сохранить изменения.')),
+        );
+      }
+      return;
+    }
+
     if (!mounted || !_formKey.currentState!.validate()) { return; }
 
     // Убеждаемся, что все поля сохранены
     _formKey.currentState!.save();
-
 
     final currentUserId = _supabase.auth.currentUser?.id;
     if (currentUserId == null) {
@@ -400,11 +429,11 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       createdAt: widget.project.createdAt.isBefore(DateTime(2000)) ? DateTime.now() : widget.project.createdAt,
     );
 
-    final provider = context.read<ProjectProvider>();
+    // final provider = context.read<ProjectProvider>(); // Уже получен выше
 
     try {
       if (widget.isNew) {
-        final savedProject = await provider.addProject(projectModel);
+        final savedProject = await prov.addProject(projectModel);
         if (savedProject == null) {
           throw Exception("Не удалось создать проект (ошибка провайдера).");
         }
@@ -413,7 +442,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
         // widget.project.id = savedProject.id; // Нельзя менять final, но логика на сервере должна быть учтена.
 
       } else {
-        await provider.updateProject(projectModel);
+        await prov.updateProject(projectModel);
       }
 
       if (mounted) {
@@ -432,12 +461,23 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     }
   }
 
-  // Удаление вложений
+  // Удаление вложений (доступно только редакторам и владельцам)
   Future<void> _deleteAttachment(Attachment attachment) async {
     if (widget.project.id.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Ошибка: Проект не сохранен в базе.')),
       );
+      return;
+    }
+
+    // --- ПРОВЕРКА: Только владелец или редактор может удалить вложение ---
+    final prov = context.read<ProjectProvider>();
+    if (!prov.canEditProject(widget.project)) { // <-- Используем canEditProject для проверки прав на изменение
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Только участники с правами редактирования могут удалять вложения.')),
+        );
+      }
       return;
     }
 
@@ -461,8 +501,12 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     }
   }
 
-  // Виджет для плитки участников
+  // Виджет для плитки участников (теперь доступен только владельцу)
   Widget _buildParticipantsTile(BuildContext context, List<String> participantNames) {
+    // --- ПРОВЕРКА: Кнопка "Изменить" доступна только владельцу ---
+    final prov = context.read<ProjectProvider>();
+    final canEditParticipants = widget.project.ownerId == _supabase.auth.currentUser?.id;
+
     return ListTile(
       leading: const Icon(Icons.people),
       title: const Text("Участники команды"),
@@ -471,14 +515,15 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
             ? "Никто не выбран"
             : participantNames.join(', '),
       ),
-      trailing: ElevatedButton.icon(
+      trailing: canEditParticipants // <-- Показываем кнопку только владельцу
+          ? ElevatedButton.icon(
         icon: const Icon(Icons.edit),
         label: const Text("Изменить"),
         onPressed: _selectParticipants,
-      ),
+      )
+          : null, // Если не владелец, кнопка не показывается
     ).animate().fadeIn(delay: 300.ms);
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -490,6 +535,10 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
         .whereType<String>()
         .toList();
 
+    // --- ПРОВЕРКА ПРАВ ---
+    final prov = context.read<ProjectProvider>();
+    final canEditProject = prov.canEditProject(widget.project); // Владелец или редактор
+    final canEditParticipants = widget.project.ownerId == _supabase.auth.currentUser?.id; // Только владелец
 
     if (_isLoadingUsers) {
       return Scaffold(
@@ -502,11 +551,13 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       appBar: AppBar(
         title: Text(widget.isNew ? "Новый проект" : "Редактировать проект"),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.check),
-            tooltip: 'Сохранить',
-            onPressed: _saveProject,
-          ),
+          // --- КНОПКА СОХРАНЕНИЯ: ПОКАЗЫВАЕТСЯ ТОЛЬКО ВЛАДЕЛЬЦУ ---
+          if (canEditParticipants)
+            IconButton(
+              icon: const Icon(Icons.check),
+              tooltip: 'Сохранить',
+              onPressed: _saveProject,
+            ),
         ],
       ),
       body: SingleChildScrollView(
@@ -516,7 +567,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Название
+              // Название (редактируется только если canEditProject)
               TextFormField(
                 initialValue: _title,
                 decoration: const InputDecoration(
@@ -526,11 +577,12 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                 ),
                 validator: (v) => v == null || v.isEmpty ? "Введите название" : null,
                 onSaved: (v) => _title = v!, // ИСПРАВЛЕНО: Теперь v! безопасен, т.к. валидатор проверяет на null/empty
+                enabled: canEditProject, // <-- Редактируемость зависит от прав
               ).animate().fadeIn(duration: 300.ms).slideX(begin: -0.1, end: 0),
 
               const SizedBox(height: 16),
 
-              // Описание
+              // Описание (редактируется только если canEditProject)
               TextFormField(
                 initialValue: _description,
                 maxLines: 3,
@@ -540,18 +592,20 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                   prefixIcon: Icon(Icons.description),
                 ),
                 onSaved: (v) => _description = v ?? '', // ИСПРАВЛЕНО: Обработка null для необязательного поля
+                enabled: canEditProject, // <-- Редактируемость зависит от прав
               ).animate().fadeIn(delay: 100.ms).slideX(begin: -0.1, end: 0),
 
               const SizedBox(height: 16),
 
-              // Дата и Статус
+              // Дата и Статус (редактируются только если canEditProject)
               Row(
                 children: [
                   Expanded(
                     child: DatePickerField(
                       label: 'Дедлайн',
                       initialDate: _deadline,
-                      onChanged: (d) => setState(() => _deadline = d),
+                      // onChanged доступен только если canEditProject
+                      onChanged: canEditProject ? (d) => setState(() => _deadline = d) : null,
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -569,7 +623,8 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                           child: Text(s.text),
                         );
                       }).toList(),
-                      onChanged: (v) => setState(() => _status = v!),
+                      // onChanged доступно только если canEditProject
+                      onChanged: canEditProject ? (v) => setState(() => _status = v!) : null,
                     ),
                   ),
                 ],
@@ -577,8 +632,8 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
               const SizedBox(height: 16),
 
-              // Оценка (если завершен)
-              if (_status == ProjectStatus.completed)
+              // Оценка (редактируется только если canEditProject и статус == completed)
+              if (_status == ProjectStatus.completed && canEditProject)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 16),
                   child: TextFormField(
@@ -602,27 +657,26 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                       }
                       return null;
                     },
-                    // Сохраняем как Double или null
+                    // onSaved доступно только если canEditProject
                     onSaved: (v) {
-                      // ИСПРАВЛЕНО: Безопасное сохранение оценки
                       if (v != null && v.isNotEmpty) {
                         final parsed = int.tryParse(v);
                         if (parsed != null) {
                           _grade = parsed.toDouble();
                         } else {
-                          // Не изменяем _grade, если ввод некорректен
-                          // Или можно установить _grade = null;
+                          _grade = null;
                         }
                       } else {
                         _grade = null;
                       }
                     },
+                    enabled: canEditProject, // <-- Редактируемость зависит от прав
                   ).animate().fadeIn().scale(),
                 ),
 
               const Divider(),
 
-              // Участники
+              // Участники (кнопка "Изменить" доступна только владельцу)
               _buildParticipantsTile(context, participantNames),
 
               const SizedBox(height: 8),
@@ -635,10 +689,9 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                   ),
                 ),
 
-
               const Divider(),
 
-              // Вложения
+              // Вложения (кнопка "Добавить" доступна всем участникам, удаление - только редакторам/владельцу)
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -650,11 +703,15 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2)
                     )
                   else
-                    TextButton.icon(
-                      icon: const Icon(Icons.upload_file),
-                      label: const Text("Добавить"),
-                      onPressed: _pickAttachment,
-                    ),
+                  // --- КНОПКА ДОБАВЛЕНИЯ: ПОКАЗЫВАЕТСЯ ВСЕМ УЧАСТНИКАМ ---
+                    if (prov.canViewProject(widget.project)) // <-- Проверка, что пользователь *видит* проект
+                      TextButton.icon(
+                        icon: const Icon(Icons.upload_file),
+                        label: const Text("Добавить"),
+                        onPressed: _pickAttachment,
+                      )
+                    else
+                      const Text("Нет прав", style: TextStyle(color: Colors.grey)),
                 ],
               ).animate().fadeIn(delay: 400.ms),
 
@@ -673,6 +730,8 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                   for (var att in _attachments)
                     AttachmentThumb(
                       attachment: att,
+                      // --- Передаём canEditProject в AttachmentThumb ---
+                      canEdit: canEditProject, // <-- Позволяет показать/скрыть иконку удаления
                       onTap: () => _downloadAndOpenAttachment(att),
                       onDelete: () => _deleteAttachment(att),
                       isOpening: _currentlyOpeningFile == att.filePath,
@@ -692,20 +751,21 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 // Улучшенный DatePickerField
 class DatePickerField extends StatelessWidget {
   final DateTime initialDate;
-  final ValueChanged<DateTime> onChanged;
+  final ValueChanged<DateTime>? onChanged; // Может быть null
   final String label;
 
   const DatePickerField({
     super.key,
     required this.initialDate,
-    required this.onChanged,
+    required this.onChanged, // <-- Требуем, но может быть null
     required this.label,
   });
 
   @override
   Widget build(BuildContext context) {
+    // --- РЕДАКТИРУЕМОСТЬ: onTap доступен только если onChanged != null ---
     return InkWell(
-      onTap: () async {
+      onTap: onChanged != null ? () async { // <-- Проверка
         final initialDateTime = DateTime(initialDate.year, initialDate.month, initialDate.day);
 
         final picked = await showDatePicker(
@@ -715,9 +775,9 @@ class DatePickerField extends StatelessWidget {
           lastDate: DateTime(2100),
         );
         if (picked != null) {
-          onChanged(picked);
+          onChanged!(picked); // <-- Вызов безопасен, так как проверили на null
         }
-      },
+      } : null, // <-- Если null, onTap не сработает
       child: InputDecorator(
         decoration: InputDecoration(
           labelText: label,
@@ -739,13 +799,16 @@ class AttachmentThumb extends StatelessWidget {
   final VoidCallback? onDelete;
   final VoidCallback? onTap;
   final bool isOpening;
+  // --- НОВОЕ: Флаг canEdit для управления иконкой удаления ---
+  final bool canEdit; // <-- Добавлен флаг
 
   const AttachmentThumb({
     super.key,
     required this.attachment,
-    required this.onDelete,
-    this.onTap,
+    required this.onTap,
+    this.onDelete,
     this.isOpening = false,
+    required this.canEdit, // <-- Требуем флаг
   });
 
   bool _isImage(String fileName) {
@@ -798,7 +861,8 @@ class AttachmentThumb extends StatelessWidget {
             ),
           ),
         ),
-        if (onDelete != null && !isOpening)
+        // --- ИКОНКА УДАЛЕНИЯ: ПОКАЗЫВАЕТСЯ ТОЛЬКО ЕСЛИ canEdit ---
+        if (onDelete != null && !isOpening && canEdit) // <-- Проверка canEdit
           Positioned(
             top: -8,
             right: -8,

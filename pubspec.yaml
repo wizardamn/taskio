@@ -6,17 +6,14 @@ version: 1.0.0+1
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
+  flutter: ">=3.3.0" # Уточнение для flutter_local_notifications
 
 dependencies:
   flutter:
     sdk: flutter
 
-  flutter_localizations:
+  flutter_localizations: # Добавлено для локализации Flutter SDK
     sdk: flutter
-
-  # Firebase
-  firebase_core: ^3.0.0
-  firebase_auth: ^5.0.0
 
   # Backend
   supabase_flutter: ^2.9.1
@@ -35,7 +32,7 @@ dependencies:
   open_file: ^3.5.10
 
   # Notifications
-  flutter_local_notifications: ^17.0.0
+  flutter_local_notifications: ^17.2.1
   timezone: ^0.9.4
 
   # PDF generation
@@ -55,9 +52,10 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.13.1
+  mocktail: ^1.0.0
 
   integration_test:
-    sdk: flutter
+    sdk: flutter # Убрана версия, используем SDK
 
   shared_preferences: ^2.2.2
 

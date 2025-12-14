@@ -40,27 +40,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (profile != null && mounted) {
         _profile = profile;
+        // Обновляем контроллер только если _profile != null
         _nameController.text = profile.fullName;
+      } else {
+        // Если профиль не найден, можно установить значения по умолчанию или сообщить пользователю
+        debugPrint('[ProfileScreen] Профиль не найден при загрузке.');
+        // Например, можно установить _loading = false и показать ошибку в UI.
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _profile = null; // Убедимся, что _profile null
+          });
+        }
+        return; // Прерываем выполнение, если профиль не найден
       }
     } on Exception catch (e) {
       if (mounted) {
+        setState(() => _loading = false); // Убедимся, что спиннер исчезнет
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Ошибка загрузки профиля: ${e.toString().replaceFirst('Exception: ', '')}')),
         );
       }
     } finally {
-      if (mounted) {
+      if (mounted && _loading) { // Обновляем состояние только если оно не было обновлено в catch
         setState(() => _loading = false);
       }
     }
   }
 
   Future<void> _saveProfile() async {
+    // --- ИСПРАВЛЕНО: Проверка на mounted, валидацию и !_profile!.isNull ---
     if (!mounted || !_formKey.currentState!.validate() || _profile == null) return;
 
     final newName = _nameController.text.trim();
 
-    if (newName == _profile!.fullName) {
+    // --- ИСПРАВЛЕНО: Проверка на null перед сравнением ---
+    if (_profile != null && newName == _profile!.fullName) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Нет изменений для сохранения')),
@@ -71,9 +86,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       // 1. Обновляем полное имя в таблице profiles
-      await Supabase.instance.client.from('profiles').update({
-        'full_name': newName,
-      }).eq('id', _profile!.id);
+      // --- ИСПРАВЛЕНО: Проверка на null перед доступом к .id ---
+      if (_profile != null) {
+        await Supabase.instance.client.from('profiles').update({
+          'full_name': newName,
+        }).eq('id', _profile!.id);
+      }
 
       // 2. Обновляем метаданные Auth-пользователя
       await Supabase.instance.client.auth.updateUser(UserAttributes(
@@ -91,16 +109,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const SnackBar(content: Text('Профиль успешно обновлён')),
       );
 
-      // Обновляем локальное состояние
-      setState(() {
-        _profile = ProfileModel(
-          id: _profile!.id,
-          fullName: newName,
-          role: _profile!.role,
-          email: _profile!.email,
-          createdAt: _profile!.createdAt,
-        );
-      });
+      // --- ИСПРАВЛЕНО: Проверка на null перед обновлением локального состояния ---
+      if (_profile != null) {
+        // Обновляем локальное состояние
+        setState(() {
+          _profile = ProfileModel(
+            id: _profile!.id,
+            fullName: newName,
+            role: _profile!.role,
+            email: _profile!.email,
+            createdAt: _profile!.createdAt,
+          );
+        });
+      }
 
     } on PostgrestException catch (e) {
       if (mounted) {
@@ -139,11 +160,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     }
 
-    final profile = _profile!;
+    // --- ИСПРАВЛЕНО: Безопасная проверка на null перед использованием _profile ---
+    final profile = _profile;
+    if (profile == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Профиль')),
+        body: const Center(
+          child: Text('Не удалось загрузить профиль. Пожалуйста, выйдите и войдите снова.'),
+        ),
+      );
+    }
+
     final displayRole = _getRoleDisplayName(profile.role);
 
     return Scaffold(
-      // ✅ Текст на русском
       appBar: AppBar(title: const Text('Профиль')),
       body: Animate(
         effects: const [FadeEffect()],
@@ -168,10 +198,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 // Поле для редактирования полного имени
                 TextFormField(
                   controller: _nameController,
-                  // ✅ labelText на русском
                   decoration: const InputDecoration(
-                      labelText: 'Полное имя',
-                      hintText: 'Иванов Иван Иванович' // Добавлен hint для лучшего вида
+                      labelText: 'Поле имя',
+                      hintText: 'Иванов Иван Иванович'
                   ),
                   validator: (v) =>
                   v == null || v.isEmpty ? 'Введите имя' : null,
@@ -183,7 +212,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 TextFormField(
                   enabled: false,
                   initialValue: profile.email,
-                  // ✅ labelText на русском
                   decoration: const InputDecoration(labelText: 'Email'),
                 ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.1, delay: 200.ms, duration: 300.ms, curve: Curves.easeOut),
 
@@ -193,7 +221,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 TextFormField(
                   readOnly: true,
                   initialValue: displayRole,
-                  // ✅ labelText на русском
                   decoration: const InputDecoration(
                       labelText: 'Роль',
                       prefixIcon: Icon(Icons.badge_outlined)
@@ -206,7 +233,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ElevatedButton.icon(
                   onPressed: _saveProfile,
                   icon: const Icon(Icons.save),
-                  // ✅ Текст на кнопке на русском
                   label: const Text('Сохранить изменения'),
                 ).animate().fadeIn(delay: 400.ms).scaleY(begin: 0.5, alignment: Alignment.bottomCenter, delay: 400.ms, duration: 300.ms),
               ],

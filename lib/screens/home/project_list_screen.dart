@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+// --- ИМПОРТЫ ---
+import '../../providers/auth_provider.dart'; // <-- Импорт AuthProvider
 import '../../models/project_model.dart';
 import '../../providers/project_provider.dart';
 import 'project_form_screen.dart';
@@ -22,14 +24,17 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   void initState() {
     super.initState();
 
-    // УБРАНО: WidgetsBinding.instance.addPostFrameCallback((_) async {
-    // final prov = context.read<ProjectProvider>();
-    // await prov.fetchProjects(); // <-- fetchProjects вызывается при инициализации
-    // });
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final prov = context.read<ProjectProvider>();
+      final authProv = context.read<AuthProvider>(); // <-- Получаем AuthProvider
 
-    // fetchProjects теперь вызывается только из ProjectListScreen._addProject,
-    // _confirmDelete, и onRefresh RefreshIndicator.
-    // Это централизует управление загрузкой данных и может устранить гонку.
+      // --- ОБНОВЛЕНО: Проверка гостевого режима ---
+      if (authProv.isGuest) { // <-- Используем isGuest из AuthProvider
+        prov.setGuestUser(); // <-- Устанавливаем гостевой режим в ProjectProvider
+      } else {
+        await prov.fetchProjects(); // <-- Загружаем проекты для авторизованного пользователя
+      }
+    });
   }
 
   // =====================================================
@@ -39,20 +44,27 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   Widget build(BuildContext context) {
     // Используем context.watch для подписки на изменения в ProjectProvider
     final prov = context.watch<ProjectProvider>();
+    // --- ИСПРАВЛЕНО: Следим за AuthProvider ---
+    final authProv = context.watch<AuthProvider>();
     final projects = prov.view;
+
+    // --- ОБНОВЛЕНО: Проверка гостя ---
+    final isActuallyGuest = authProv.isGuest || prov.isGuest;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Мои проекты'), // Русификация
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Нет новых уведомлений')), // Русификация
-              );
-            },
-          ),
+          // --- ИКОНКА КОЛОКОЛЬЧИКА: ПОКАЗЫВАЕТСЯ НЕ ВСЕГДА ---
+          if (!isActuallyGuest) // <-- Скрываем колокольчик для гостя
+            IconButton(
+              icon: const Icon(Icons.notifications),
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Нет новых уведомлений')), // Русификация
+                );
+              },
+            ),
 
           // Фильтр и Сортировка
           PopupMenuButton<String>(
@@ -79,7 +91,8 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
         child: projects.isEmpty
             ? Center(
           child: Text(
-            prov.isGuest
+            // --- ИСПРАВЛЕНО: Используем объединённый флаг ---
+            isActuallyGuest
                 ? "Войдите в аккаунт, чтобы увидеть проекты"
                 : "Нет проектов",
             style: const TextStyle(fontSize: 16, color: Colors.grey),
@@ -88,8 +101,8 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
             : _buildProjectList(projects, prov), // Передаем провайдер
       ),
 
-      // Кнопка «добавить» показывается ТОЛЬКО когда пользователь авторизован
-      floatingActionButton: prov.isGuest
+      // Кнопка «добавить» показывается ТОЛЬКО когда пользователь авторизован и НЕ гость
+      floatingActionButton: isActuallyGuest // <-- Проверяем объединённый флаг
           ? null
           : AnimatedScale(
         scale: _fabScale,
@@ -113,19 +126,27 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
     // 1. Читаем провайдер до первого await
     final prov = context.read<ProjectProvider>();
 
+    // --- ПРОВЕРКА: Убедимся, что пользователь не гость ---
+    if (prov.isGuest) {
+      if (!mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед setState
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Гости не могут создавать проекты.')),
+      );
+      return;
+    }
+
     // Анимация нажатия
     setState(() => _fabScale = 0.9);
     await Future.delayed(const Duration(milliseconds: 100));
     // setState safe, так как вызывается в том же виджете, что и находится
-    if (!mounted) return;
+    if (!mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед setState
     setState(() => _fabScale = 1.0);
 
-    // Логика создания пустого проекта в провайдере теперь защищена
     ProjectModel newProject;
     try {
       newProject = prov.createEmptyProject();
     } catch (e) {
-      if (!context.mounted) return;
+      if (!context.mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед использованием context
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString())),
       );
@@ -142,7 +163,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
     );
 
     // 3. Проверка mounted после gap
-    if (!context.mounted) return;
+    if (!context.mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед использованием context
 
     if (created == true) { // Проверяем на true, как указано в ProjectFormScreen
       // Нет необходимости в await, так как ProjectListScreen и так подписан
@@ -180,9 +201,18 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   // Подтверждение удаления
   Future<void> _confirmDelete(
       BuildContext context, ProjectProvider prov, ProjectModel project) async {
+    // --- ПРОВЕРКА: Убедимся, что пользователь не гость ---
+    if (prov.isGuest) {
+      if (!context.mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед использованием context
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Гости не могут удалять проекты.')),
+      );
+      return;
+    }
+
     // Проверка прав перед вызовом диалога
     if (!prov.canEditProject(project)) {
-      if (!context.mounted) return;
+      if (!context.mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед использованием context
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('У вас нет прав на удаление этого проекта')), // Русификация
       );
@@ -212,13 +242,13 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
     );
 
     // Проверяем mounted перед использованием context после await
-    if (!context.mounted) return;
+    if (!context.mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед использованием context
 
     if (confirmed == true) {
       await prov.deleteProject(project.id);
 
       // Проверяем mounted перед использованием ScaffoldMessenger
-      if (!context.mounted) return;
+      if (!context.mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед использованием context
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Проект успешно удален')), // Русификация
@@ -237,7 +267,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
       itemBuilder: (context, index) {
         final p = projects[index];
         // Определяем права на редактирование, используя переданный провайдер
-        final canEdit = provider.canEditProject(p);
+        final canEdit = provider.canEditProject(p); // <-- Убедимся, что canEditProject проверяет isGuest
 
 
         return _ProjectCard(
@@ -258,7 +288,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
               );
 
               // Проверка mounted после await
-              if (!context.mounted) return;
+              if (!context.mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед использованием context
 
               if (updated == true) {
                 // Используем переданный провайдер для обновления данных
@@ -315,7 +345,7 @@ class _ProjectCard extends StatelessWidget {
       child: ListTile(
         // Разрешаем переход на форму, только если есть права на редактирование
         // ЭТОТ МЕТОД РАБОТАЕТ КОРРЕКТНО:
-        onTap: canEdit ? () => onEdit(project) : null,
+        onTap: canEdit ? () => onEdit(project) : null, // <-- onTap вызывает onEdit
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
 
         leading: Container(

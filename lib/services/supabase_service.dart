@@ -19,7 +19,6 @@ class SupabaseService {
   // ------------------------------------------------
   static Future<void> init() async {
     // Загружаем переменные окружения из .env
-    // Убедитесь, что файл .env находится в корне проекта и содержит SUPABASE_URL и SUPABASE_ANON_KEY.
     await dotenv.load(fileName: ".env");
 
     await Supabase.initialize(
@@ -60,14 +59,9 @@ class SupabaseService {
   // -------------------------------------------------------------------
   // ✅ 3. СКАЧИВАНИЕ ВЛОЖЕНИЯ
   // -------------------------------------------------------------------
-  /// Скачивает файл из Supabase Storage и сохраняет его во временную папку.
-  ///
-  /// [filePath] - путь к файлу внутри бакета.
-  /// [fileName] - имя файла для сохранения (включая расширение).
   Future<File?> downloadAttachment(String filePath, String fileName) async {
     try {
       // 1. Получаем байты файла из Supabase Storage
-      // Uint8List теперь доступен через flutter/foundation.dart
       final Uint8List bytes = await client.storage
           .from(bucket)
           .download(filePath);

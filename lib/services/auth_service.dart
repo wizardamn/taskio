@@ -5,22 +5,13 @@ import '../models/profile_model.dart';
 class AuthService {
   final SupabaseClient _client = Supabase.instance.client;
 
-  // URL для редиректа (для веб/диплинков)
+  // Убран лишний пробел в конце URL
   final String _emailRedirectTo = 'https://yqcywpkkdwkmqposwyoz.supabase.co/auth/v1/callback';
-
-  // ------------------------------------------------
-  // ✅ УПРАВЛЕНИЕ СОСТОЯНИЕМ
-  // ------------------------------------------------
 
   /// Поток для отслеживания состояния авторизации пользователя.
   Stream<User?> get authStateChanges => _client.auth.onAuthStateChange.map((event) {
-    // Возвращаем пользователя, если сессия существует
     return event.session?.user;
   });
-
-  // ------------------------------------------------
-  // ✅ АВТОРИЗАЦИЯ И РЕГИСТРАЦИЯ
-  // ------------------------------------------------
 
   /// Регистрация нового пользователя.
   Future<bool> signUp(String email, String password, String fullName, String role) async {
@@ -29,8 +20,7 @@ class AuthService {
         throw Exception('Все поля должны быть заполнены.');
       }
 
-      // Supabase Flutter SDK автоматически обрабатывает метаданные.
-      final AuthResponse response = await _client.auth.signUp(
+      await _client.auth.signUp(
         email: email,
         password: password,
         data: {
@@ -39,14 +29,6 @@ class AuthService {
         },
         emailRedirectTo: _emailRedirectTo,
       );
-
-      // Если user == null, значит требуется подтверждение email.
-      if (response.user == null) {
-        return true;
-      }
-
-      // После успешной регистрации и авторизации (если не требуется подтверждение),
-      // профиль либо будет создан триггером, либо мы его создадим в getProfile.
 
       return true;
     } on AuthException catch (e) {
@@ -65,24 +47,14 @@ class AuthService {
         throw Exception('Email и пароль должны быть заполнены.');
       }
 
-      final response = await _client.auth.signInWithPassword(
+      await _client.auth.signInWithPassword(
         email: email,
         password: password,
       );
 
-      if (response.user == null || response.session == null) {
-        // Это должно быть обработано AuthException, но для надежности
-        throw Exception('Вход не удался. Проверьте данные.');
-      }
-
-      // ✅ Надежный способ гарантировать сохранение сессии локально.
-      // Хотя это обычно происходит автоматически, явное сохранение повышает стабильность.
-      // await _client.auth.setSession(response.session!);
-
       return true;
     } on AuthException catch (e) {
       debugPrint('Supabase Auth Error (SignIn): ${e.message}');
-      // ✅ Бросаем переведенную ошибку для лучшей диагностики проблемы
       throw Exception(_mapAuthExceptionToRussian(e.message));
     } catch (e) {
       debugPrint('General Error (SignIn): $e');
@@ -93,7 +65,6 @@ class AuthService {
   /// Выход из аккаунта.
   Future<void> signOut() async {
     try {
-      // ✅ КРИТИЧЕСКИ ВАЖНО: Правильный вызов signOut, очищающий все сессии
       await _client.auth.signOut();
       debugPrint('User signed out successfully and session cleared.');
     } on AuthException catch (e) {
@@ -111,48 +82,74 @@ class AuthService {
     if (user == null) return null;
 
     try {
+      // Проверяем, существует ли профиль в таблице profiles
       final data = await _client
           .from('profiles')
           .select('id, full_name, role, created_at')
           .eq('id', user.id)
           .maybeSingle();
 
-      if (data == null) {
-        // Если профиль не найден (например, при отложенном подтверждении email),
-        // создаем его вручную, используя метаданные, сохраненные при регистрации.
-        final metadataRole = user.userMetadata?['role'] as String?;
-        final metadataName = user.userMetadata?['full_name'] as String?;
-
-        if (metadataRole != null && metadataName != null) {
-          await _client.from('profiles').insert({
-            'id': user.id,
-            'full_name': metadataName,
-            'role': metadataRole,
-            'email': user.email, // Добавляем email для надежности
-            'created_at': DateTime.now().toIso8601String(),
-          });
-          return getProfile(); // Рекурсивный вызов после создания
-        }
-        return null; // Не удалось найти или восстановить
+      if (data != null) {
+        // Если профиль найден, преобразуем его в модель ProfileModel
+        return ProfileModel.fromJson(data, user);
       }
 
-      return ProfileModel.fromJson(data, user);
+      // Если профиль не найден, создаем его из метаданных пользователя или email
+      debugPrint('[AuthService] Профиль для ${user.id} не найден в profiles. Создаю из userMetadata или email.');
+
+      // 1. Извлекаем данные из userMetadata
+      String? metadataName = user.userMetadata?['full_name'] as String?;
+      String? metadataRole = user.userMetadata?['role'] as String?;
+
+      // 2. Если metadataName или metadataRole отсутствуют, используем fallback
+      final name = metadataName ?? user.email?.split('@').first ?? 'Пользователь';
+      final role = metadataRole ?? 'user'; // Установите роль по умолчанию
+
+      // 3. Вставляем новый профиль
+      await _client.from('profiles').insert({
+        'id': user.id,
+        'full_name': name,
+        'role': role,
+        'email': user.email,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+
+      debugPrint('[AuthService] Профиль для ${user.id} создан автоматически.');
+
+      // 4. Возвращаем новый профиль, не вызывая рекурсивно getProfile
+      // Вместо этого, просто возвращаем созданный объект на основе вставленных данных
+      // или делаем один повторный запрос, чтобы получить созданный объект целиком.
+      // Повторный запрос надёжнее, так как вставляемые данные могут отличаться от возвращаемых (например, из-за триггеров в БД).
+      final newData = await _client
+          .from('profiles')
+          .select('id, full_name, role, created_at')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (newData != null) {
+        return ProfileModel.fromJson(newData, user);
+      } else {
+        // Это крайне маловероятно, но если сразу после вставки не нашли - ошибка
+        debugPrint('[AuthService] ERROR: Не удалось загрузить только что созданный профиль для ${user.id}');
+        return null;
+      }
+
     } on PostgrestException catch (e) {
+      debugPrint('Supabase DB Error (getProfile): ${e.message}');
       throw Exception('Ошибка БД при загрузке профиля: ${e.message}');
     } catch (e) {
+      debugPrint('General Error (getProfile): $e');
       throw Exception('Ошибка при загрузке профиля: $e');
     }
   }
 
-  // ------------------------------------------------
-  // ✅ ВСПОМОГАТЕЛЬНЫЕ
-  // ------------------------------------------------
-
-  /// Преобразует стандартные сообщения об ошибках Supabase в русский текст
+  /// Преобразует стандартные сообщения об ошибках Supabase в русский текст.
   String _mapAuthExceptionToRussian(String message) {
     final lowerCaseMessage = message.toLowerCase();
 
-    if (lowerCaseMessage.contains('invalid login credentials') || lowerCaseMessage.contains('invalid credentials')) {
+    if (lowerCaseMessage.contains('invalid login credentials') ||
+        lowerCaseMessage.contains('invalid credentials') ||
+        lowerCaseMessage.contains('user not found')) {
       return 'Неверный адрес электронной почты или пароль.';
     }
     if (lowerCaseMessage.contains('user already exists')) {
@@ -164,8 +161,10 @@ class AuthService {
     if (lowerCaseMessage.contains('password should be at least 6 characters')) {
       return 'Пароль должен содержать не менее 6 символов.';
     }
+    if (lowerCaseMessage.contains('email rate limit exceeded')) {
+      return 'Слишком много попыток. Попробуйте позже.';
+    }
 
-    // Резервное сообщение с оригинальной ошибкой
     return 'Ошибка авторизации: $message';
   }
 }

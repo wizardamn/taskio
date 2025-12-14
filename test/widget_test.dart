@@ -1,30 +1,82 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
+// test/widget_test.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:provider/provider.dart';
+import 'package:taskio/models/project_model.dart';
+import 'package:taskio/providers/project_provider.dart';
+import 'package:taskio/screens/home/project_list_screen.dart';
 
-import 'package:taskio/main.dart';
+// Создаем мок-класс для ProjectProvider
+class MockProjectProvider extends Mock implements ProjectProvider {}
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(StudentProjectsApp());
+  // Регистрируем моки
+  setUpAll(() {
+    registerFallbackValue(MockProjectProvider());
+  });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  testWidgets('ProjectListScreen отображает заголовок и FAB', (WidgetTester tester) async {
+    // 1. Создаем мок-провайдер и настраиваем его поведение
+    final mockProvider = MockProjectProvider();
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // Имитируем, что пользователь не гость
+    when(() => mockProvider.isGuest).thenReturn(false);
+    // Имитируем, что загрузка данных не идет
+    when(() => mockProvider.isLoading).thenReturn(false);
+    // Имитируем пустой список проектов
+    when(() => mockProvider.view).thenReturn([]);
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // 2. Строим только ProjectListScreen, оборачивая его в Provider
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChangeNotifierProvider<ProjectProvider>.value(
+          value: mockProvider,
+          child: const ProjectListScreen(),
+        ),
+      ),
+    );
+
+    // 3. Проверяем наличие ключевых элементов
+    expect(find.text('Мои проекты'), findsOneWidget);
+    expect(find.byIcon(Icons.add), findsOneWidget);
+  });
+
+  testWidgets('ProjectListScreen отображает список проектов', (WidgetTester tester) async {
+    final mockProvider = MockProjectProvider();
+
+    when(() => mockProvider.isGuest).thenReturn(false);
+    when(() => mockProvider.isLoading).thenReturn(false);
+    // Имитируем список из одного проекта
+    final testProject = ProjectModel(
+      id: '1',
+      title: 'Тестовый проект',
+      description: 'Описание',
+      ownerId: 'owner_id',
+      deadline: DateTime.now(),
+      status: 1,
+      grade: null,
+      attachments: const [],
+      participantsData: const [],
+      participantIds: const [],
+      createdAt: DateTime.now(),
+    );
+    when(() => mockProvider.view).thenReturn([testProject]);
+
+    // !!! КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ !!!
+    // Настраиваем мок для метода canEditProject, чтобы он возвращал true для нашего тестового проекта
+    when(() => mockProvider.canEditProject(testProject)).thenReturn(true);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChangeNotifierProvider<ProjectProvider>.value(
+          value: mockProvider,
+          child: const ProjectListScreen(),
+        ),
+      ),
+    );
+
+    // Проверяем, что проект отображается в списке
+    expect(find.text('Тестовый проект'), findsOneWidget);
   });
 }

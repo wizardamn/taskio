@@ -1,43 +1,40 @@
+// lib/screens/auth/login_screen.dart
+// ...
 import 'package:flutter/material.dart';
-import 'package:taskio/screens/auth/register_screen.dart'; // Импорт RegisterScreen
-import '../../services/auth_service.dart';
+import 'package:taskio/screens/auth/register_screen.dart';
+import 'package:taskio/screens/home/project_list_screen.dart';
+import 'package:taskio/providers/auth_provider.dart'; // Убедитесь, что импортировали AuthProvider
+import 'package:provider/provider.dart'; // Убедитесь, что импортировали Provider
 
-// Для ручной анимации необходим SingleTickerProviderStateMixin
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState(); // ИСПРАВЛЕНО: Должен возвращать _LoginScreenState
+  State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
-  final _auth = AuthService();
   final _email = TextEditingController();
   final _password = TextEditingController();
 
   bool _isLoading = false;
   bool _isPasswordVisible = false;
 
-  // Контроллер для анимации формы
   late AnimationController _animationController;
   late Animation<double> _animation;
 
   @override
   void initState() {
     super.initState();
-    // Инициализация контроллера анимации
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
     );
-    // Анимация (кривая - отскок для большего эффекта)
     _animation = CurvedAnimation(
       parent: _animationController,
       curve: Curves.easeOutCubic,
     );
-
-    // Запускаем анимацию сразу после создания виджета
     _animationController.forward();
   }
 
@@ -45,17 +42,15 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   void dispose() {
     _email.dispose();
     _password.dispose();
-    _animationController.dispose(); // Освобождаем контроллер
+    _animationController.dispose();
     super.dispose();
   }
 
-  // Функция для показа стильных подсказок (Snackbar)
   void _showSnackBar(String message, {bool isError = true}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        // Используем цветовую схему темы
         backgroundColor: isError
             ? Theme.of(context).colorScheme.error
             : Colors.green.shade600,
@@ -67,30 +62,26 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     );
   }
 
-  void _login() async {
-    if (_isLoading) return;
-    if (!_formKey.currentState!.validate()) return;
+  Future<void> _login() async {
+    if (_isLoading || !_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
 
     try {
-      final success = await _auth.signIn(
-        _email.text.trim(),
-        _password.text.trim(),
-      );
+      // Используем AuthProvider для вызова signIn
+      final authProvider = context.read<AuthProvider>();
+      await authProvider.signIn(_email.text.trim(), _password.text.trim());
 
       if (!mounted) return;
 
-      if (success) {
-        // Успешный вход: Стильная подсказка
-        _showSnackBar('Успешный вход', isError: false);
-        // Предполагаем, что здесь будет навигация на главный экран
-        // Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => HomeScreen()));
-      }
+      _showSnackBar('Успешный вход', isError: false);
 
+      // После успешного входа переходим на ProjectListScreen
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const ProjectListScreen()),
+      );
     } on Exception catch (e) {
       if (mounted) {
-        // Отображение ошибок
         _showSnackBar(e.toString().replaceFirst('Exception: ', ''), isError: true);
       }
     } finally {
@@ -100,13 +91,50 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     }
   }
 
-  // Вспомогательный виджет для анимации смещения (slide-up)
+  // --- НОВЫЙ МЕТОД: Вход как гость ---
+  Future<void> _signInAsGuest() async {
+    if (_isLoading) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      // Используем AuthProvider для вызова входа как гость
+      final authProvider = context.read<AuthProvider>();
+      await authProvider.signInAsGuest(); // Предполагаем, что этот метод будет добавлен в AuthProvider
+
+      if (!mounted) return;
+
+      _showSnackBar('Вход как гость', isError: false);
+
+      // После входа как гость переходим на ProjectListScreen
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const ProjectListScreen()),
+      );
+    } on Exception catch (e) {
+      if (mounted) {
+        _showSnackBar(e.toString().replaceFirst('Exception: ', ''), isError: true);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+  // --- КОНЕЦ НОВОГО МЕТОДА ---
+
+  void _navigateToRegister() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const RegisterScreen(),
+      ),
+    );
+  }
+
   Widget _buildAnimatedContent(Widget child, double delay) {
     return AnimatedBuilder(
       animation: _animationController,
       builder: (context, child) {
         final double value = _animation.value;
-        // Задержка анимации для элементов
         if (value * 1000 < delay) return Opacity(opacity: 0, child: child);
 
         final adjustedValue = (value * 1000 - delay) / (700 - delay);
@@ -125,18 +153,8 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     );
   }
 
-  // Функция перехода на экран регистрации
-  void _navigateToRegister() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const RegisterScreen(),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    // Регулярное выражение для строгой проверки почты
     const emailRegex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}$';
 
     return Scaffold(
@@ -149,14 +167,14 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // 1. Поле Email (Задержка 0ms)
                 _buildAnimatedContent(
                   TextFormField(
                     controller: _email,
                     keyboardType: TextInputType.emailAddress,
                     decoration: const InputDecoration(
-                        labelText: 'Email',
-                        hintText: 'Введите ваш Email'),
+                      labelText: 'Email',
+                      hintText: 'Введите ваш Email',
+                    ),
                     validator: (v) {
                       if (v == null || v.isEmpty) {
                         return 'Пожалуйста, введите email';
@@ -171,7 +189,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                 ),
                 const SizedBox(height: 16),
 
-                // 2. Поле Пароль (Задержка 100ms)
                 _buildAnimatedContent(
                   TextFormField(
                     controller: _password,
@@ -183,7 +200,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                             ? Icons.visibility
                             : Icons.visibility_off),
                         onPressed: () {
-                          // Переключает состояние видимости
                           setState(() => _isPasswordVisible = !_isPasswordVisible);
                         },
                       ),
@@ -203,13 +219,11 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                 ),
                 const SizedBox(height: 30),
 
-                // 3. Кнопка Входа (Задержка 200ms)
                 _buildAnimatedContent(
                   _isLoading
                       ? const CircularProgressIndicator()
                       : ElevatedButton(
                       onPressed: _login,
-                      // Улучшение: Увеличиваем размер кнопки
                       style: ElevatedButton.styleFrom(
                         minimumSize: const Size(double.infinity, 50),
                         shape: RoundedRectangleBorder(
@@ -222,14 +236,30 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
                 const SizedBox(height: 20),
 
-                // 4. Ссылка на регистрацию (Задержка 300ms)
+                // --- КНОПКА "ВОЙТИ КАК ГОСТЬ" ---
+                _buildAnimatedContent(
+                  OutlinedButton(
+                    onPressed: _signInAsGuest, // Вызываем новый метод
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 50),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: const Text('Войти как гость'),
+                  ),
+                  250, // Задержка для анимации
+                ),
+                const SizedBox(height: 20),
+                // --- КОНЕЦ КНОПКИ ---
+
                 _buildAnimatedContent(
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       const Text('Нет аккаунта?'),
                       TextButton(
-                        onPressed: _navigateToRegister, // Используем функцию перехода
+                        onPressed: _navigateToRegister,
                         child: const Text(
                           'Зарегистрироваться',
                           style: TextStyle(fontWeight: FontWeight.bold),

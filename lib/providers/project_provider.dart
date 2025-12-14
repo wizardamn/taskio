@@ -1,9 +1,10 @@
 import 'dart:io';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:easy_localization/easy_localization.dart';
 
 import '../models/project_model.dart';
 import '../services/project_service.dart';
+import '../services/notification_service.dart'; // <-- ИМПОРТ NotificationService
 
 enum ProjectFilter { all, inProgressOnly }
 enum SortBy { deadlineAsc, deadlineDesc, status }
@@ -11,12 +12,14 @@ enum SortBy { deadlineAsc, deadlineDesc, status }
 class ProjectProvider extends ChangeNotifier {
   final ProjectService _service;
 
-  bool isGuest = true;
-  bool _isLoading = false;
-  String? _errorMessage;
-
+  // --- Состояние пользователя ---
+  bool isGuest = true; // <-- Используется как индикатор гостевого режима
   String? _userId;
   String _currentUserName = 'Гость';
+  // --- Конец состояния пользователя ---
+
+  bool _isLoading = false;
+  String? _errorMessage;
 
   final List<ProjectModel> _projects = [];
 
@@ -25,6 +28,7 @@ class ProjectProvider extends ChangeNotifier {
 
   ProjectProvider(this._service);
 
+  // --- Геттеры ---
   String get currentUserName => _currentUserName;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
@@ -41,31 +45,44 @@ class ProjectProvider extends ChangeNotifier {
 
     switch (_sortBy) {
       case SortBy.deadlineAsc:
-      // Сортировка по возрастанию дедлайна (от старых к новым)
         result.sort((a, b) => a.deadline.compareTo(b.deadline));
         break;
       case SortBy.deadlineDesc:
-      // Сортировка по убыванию дедлайна (от новых к старым)
         result.sort((a, b) => b.deadline.compareTo(a.deadline));
         break;
       case SortBy.status:
-      // Сортировка по индексу статуса (важно, чтобы ProjectStatus был правильно упорядочен)
         result.sort((a, b) => a.statusEnum.index.compareTo(b.statusEnum.index));
         break;
     }
     return result;
   }
+  // --- Конец геттеров ---
 
+  // --- Управление состоянием пользователя ---
+  /// Устанавливает данные авторизованного пользователя
   Future<void> setUser(String userId, String userName) async {
     _userId = userId;
     _currentUserName = userName;
-    isGuest = false;
+    isGuest = false; // <-- Сбрасываем флаг гостя
 
     _service.updateOwner(_userId);
-    await fetchProjects();
-    notifyListeners();
+    await fetchProjects(); // <-- Загружаем проекты для нового пользователя
+    notifyListeners(); // <-- Уведомляем об изменении состояния пользователя
   }
 
+  /// Устанавливает состояние гостя
+  void setGuestUser() {
+    _userId = null;
+    _currentUserName = 'Гость';
+    isGuest = true; // <-- Устанавливаем флаг гостя
+    _projects.clear(); // <-- Очищаем список проектов
+    _isLoading = false;
+    _errorMessage = null;
+    _service.updateOwner(null); // <-- Убираем владельца у сервиса
+    notifyListeners(); // <-- Уведомляем об изменении состояния пользователя
+  }
+
+  /// Обновляет имя пользователя
   void updateUserName(String newName) {
     if (_currentUserName != newName) {
       _currentUserName = newName;
@@ -73,8 +90,9 @@ class ProjectProvider extends ChangeNotifier {
     }
   }
 
+  /// Сбрасывает все данные провайдера
   void clear({bool keepProjects = false}) {
-    isGuest = true;
+    isGuest = true; // <-- Сбрасываем флаг гостя
     _userId = null;
     _currentUserName = 'Гость';
     _service.updateOwner(null);
@@ -86,9 +104,11 @@ class ProjectProvider extends ChangeNotifier {
     }
     notifyListeners();
   }
+  // --- Конец управления состоянием пользователя ---
 
+  /// Загружает проекты для текущего пользователя (если не гость)
   Future<void> fetchProjects() async {
-    if (_userId == null || isGuest) {
+    if (isGuest || _userId == null) {
       _projects.clear();
       _isLoading = false;
       _errorMessage = null;
@@ -99,7 +119,7 @@ class ProjectProvider extends ChangeNotifier {
 
     _isLoading = true;
     _errorMessage = null;
-    notifyListeners();
+    notifyListeners(); // <-- Уведомляем об начале загрузки
     debugPrint('ProjectProvider: Начинаем загрузку проектов для ID: $_userId...');
 
     try {
@@ -112,16 +132,16 @@ class ProjectProvider extends ChangeNotifier {
 
     } catch (e, st) {
       _projects.clear();
-      // Оставляем логику извлечения первой части ошибки, так как это полезно для пользователя
       _errorMessage = 'Ошибка загрузки: ${e.toString().split(':')[0].trim()}';
       debugPrint("ProjectProvider ERROR: fetchProjects ошибка: $e\n$st");
 
     } finally {
       _isLoading = false;
-      notifyListeners();
+      notifyListeners(); // <-- Уведомляем о завершении загрузки (успешной или с ошибкой)
     }
   }
 
+  // --- Сортировка и фильтрация ---
   void setSort(SortBy sortBy) {
     _sortBy = sortBy;
     notifyListeners();
@@ -131,8 +151,9 @@ class ProjectProvider extends ChangeNotifier {
     _filter = filter;
     notifyListeners();
   }
+  // --- Конец сортировки и фильтрации ---
 
-  /// Добавление проекта. Всегда перезагружает список для синхронизации с базой.
+  /// Добавляет проект (доступно только авторизованным пользователям)
   Future<ProjectModel?> addProject(ProjectModel p) async {
     if (isGuest || _userId == null) {
       _errorMessage = "guest_cannot_create_project".tr();
@@ -142,15 +163,22 @@ class ProjectProvider extends ChangeNotifier {
     _errorMessage = null;
 
     try {
-      // 1. Добавляем проект на сервер
       final newProject = await _service.add(p);
 
-      // 2. ПЕРЕЗАГРУЖАЕМ ВСЕ проекты для синхронизации локального списка с базой
-      // Это гарантирует, что локальный список отражает актуальное состояние базы данных
-      // после завершения асинхронной операции создания.
-      await fetchProjects();
+      // --- НОВОЕ: Отправка уведомления о создании ---
+      await NotificationService().showSimple(
+        'Проект создан',
+        'Проект "${newProject.title}" успешно создан.',
+      );
+      // --- КОНЕЦ НОВОГО ---
 
-      return newProject; // Возвращаем созданный проект
+      // НЕ обновляем локальный список _projects напрямую
+      // Вместо этого, перезагружаем всё, чтобы гарантировать синхронизацию с базой данных
+      await fetchProjects(); // <-- ПЕРЕЗАГРУЗКА ВСЕХ ПРОЕКТОВ ПОСЛЕ ДОБАВЛЕНИЯ
+
+      // Возвращаем обновленный проект (тот, что загружен из базы)
+      final createdProject = _projects.firstWhere((proj) => proj.id == newProject.id, orElse: () => newProject);
+      return createdProject;
 
     } catch (e, st) {
       _handleCrudError(e, st, "addProject");
@@ -158,63 +186,117 @@ class ProjectProvider extends ChangeNotifier {
     }
   }
 
-  /// Обновление проекта. Используем _refreshSingle для гарантии синхронизации.
+  /// Обновляет проект (доступно только авторизованным пользователям)
   Future<void> updateProject(ProjectModel p) async {
     if (isGuest || _userId == null) return;
     _errorMessage = null;
 
     try {
-      // 1. Отправляем запрос на обновление
+      // --- НОВОЕ: Получаем старый проект для сравнения ---
+      final oldProject = await _service.getById(p.id);
+      // --- КОНЕЦ НОВОГО ---
+
       await _service.update(p);
 
-      // 2. Запрашиваем обновленный проект с сервера для полной синхронизации
-      await _refreshSingle(p.id);
+      // --- НОВОЕ: Отправка уведомления об изменении ---
+      if (oldProject != null) {
+        String notificationTitle = 'Проект обновлён';
+        String notificationBody = 'Проект "${p.title}" был изменён.';
 
-      // notifyListeners() вызывается внутри _refreshSingle
+        if (oldProject.status != p.status) {
+          notificationBody += ' Статус изменён с "${oldProject.statusEnum.text}" на "${p.statusEnum.text}".';
+        }
+        if (oldProject.deadline != p.deadline) {
+          notificationBody += ' Дедлайн изменён с "${DateFormat('dd.MM.yyyy HH:mm').format(oldProject.deadline)}" на "${DateFormat('dd.MM.yyyy HH:mm').format(p.deadline)}".';
+        }
+        if (oldProject.title != p.title) {
+          notificationTitle = 'Проект переименован';
+          notificationBody = 'Проект "${oldProject.title}" переименован в "${p.title}".';
+        }
+
+        await NotificationService().showSimple(notificationTitle, notificationBody);
+      }
+      // --- КОНЕЦ НОВОГО ---
+
+      // НЕ обновляем локальный список _projects напрямую
+      // Вместо этого, перезагружаем всё, чтобы гарантировать синхронизацию с базой данных
+      await fetchProjects(); // <-- ПЕРЕЗАГРУЗКА ВСЕХ ПРОЕКТОВ ПОСЛЕ ОБНОВЛЕНИЯ
 
     } catch (e, st) {
       _handleCrudError(e, st, "updateProject");
     }
   }
 
+  /// Удаляет проект (доступно только авторизованным пользователям)
   Future<void> deleteProject(String id) async {
     if (isGuest || _userId == null) return;
     _errorMessage = null;
 
+    // --- НОВОЕ: Получаем проект перед удалением для уведомления ---
+    final projectToDelete = await _service.getById(id);
+    // --- КОНЕЦ НОВОГО ---
+
     try {
       await _service.delete(id);
 
-      // Запрашиваем обновленный список проектов с сервера для синхронизации
-      // Это гарантирует, что локальный список отражает актуальное состояние базы данных
-      // после завершения асинхронной операции удаления.
-      await fetchProjects();
+      // --- НОВОЕ: Отправка уведомления об удалении ---
+      if (projectToDelete != null) {
+        await NotificationService().showSimple(
+          'Проект удалён',
+          'Проект "${projectToDelete.title}" был успешно удалён.',
+        );
+      }
+      // --- КОНЕЦ НОВОГО ---
+
+      // НЕ удаляем локально из _projects
+      // Вместо этого, перезагружаем всё, чтобы гарантировать синхронизацию с базой данных
+      await fetchProjects(); // <-- ПЕРЕЗАГРУЗКА ВСЕХ ПРОЕКТОВ ПОСЛЕ УДАЛЕНИЯ
 
     } catch (e, st) {
       _handleCrudError(e, st, "deleteProject");
     }
   }
 
+  /// Проверяет, может ли текущий пользователь редактировать проект
   bool canEditProject(ProjectModel project) {
-    if (_userId == null) return false;
-    // Нельзя редактировать завершенные проекты
-    if (project.statusEnum == ProjectStatus.completed) return false;
+    if (isGuest || _userId == null) return false;
 
-    // Владелец может редактировать всегда (если не завершен)
+    // Владелец всегда может редактировать
     if (project.ownerId == _userId) return true;
+
+    // Нельзя редактировать завершенные проекты, если не владелец
+    if (project.statusEnum == ProjectStatus.completed) return false;
 
     // Проверяем, является ли пользователь участником с ролью 'owner' или 'editor'
     final member = project.participantsData.firstWhere(
           (p) => p.id == _userId,
-      orElse: () => ProjectParticipant(id: '', fullName: ''),
+      orElse: () => ProjectParticipant(id: '', fullName: '', role: 'viewer'), // <-- ИСПРАВЛЕНО: Возвращаем заглушку с ролью
     );
 
-    return member.id == _userId &&
-        (member.role == 'owner' || member.role == 'editor');
+    // --- ИСПРАВЛЕНО: Проверка роли ---
+    return member.id == _userId && (member.role == 'owner' || member.role == 'editor');
   }
 
+  /// Проверяет, может ли текущий пользователь просматривать проект (учитывая, что он участник)
+  bool canViewProject(ProjectModel project) {
+    if (isGuest || _userId == null) return false;
+
+    // Владелец всегда может просматривать
+    if (project.ownerId == _userId) return true;
+
+    // Проверяем, является ли пользователь участником (любой роли)
+    final member = project.participantsData.firstWhere(
+          (p) => p.id == _userId,
+      orElse: () => ProjectParticipant(id: '', fullName: '', role: ''), // <-- ИСПРАВЛЕНО: Возвращаем заглушку с ролью
+    );
+
+    // --- ИСПРАВЛЕНО: Проверка участия ---
+    return member.id == _userId;
+  }
+
+  // --- Управление участниками (доступно только авторизованным пользователям) ---
   Future<List<Map<String, dynamic>>> getParticipants(String projectId) async {
     try {
-      // Это отдельный вызов, который не меняет основной список проектов, поэтому notifyListeners не требуется.
       return await _service.getParticipants(projectId);
     } catch (e) {
       debugPrint("getParticipants error: $e");
@@ -222,13 +304,28 @@ class ProjectProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> addParticipant(String projectId, String userId) async {
+  Future<void> addParticipant(String projectId, String userId, [String role = "editor"]) async {
     if (isGuest || _userId == null) return;
     _errorMessage = null;
     try {
-      await _service.addParticipant(projectId, userId);
+      await _service.addParticipant(projectId, userId, role);
+
+      // --- НОВОЕ: Отправка уведомления о добавлении участника ---
+      final project = await _service.getById(projectId);
+      if (project != null) {
+        final newMember = project.participantsData.firstWhere(
+              (p) => p.id == userId,
+          orElse: () => ProjectParticipant(id: '', fullName: 'Неизвестный', role: 'viewer'), // <-- ИСПРАВЛЕНО: Возвращаем заглушку с ролью
+        );
+        await NotificationService().showSimple(
+          'Участник добавлен',
+          'Пользователь "${newMember.fullName}" добавлен в проект "${project.title}".',
+        );
+      }
+      // --- КОНЕЦ НОВОГО ---
+
       // Обновляем проект после изменения списка участников
-      await _refreshSingle(projectId);
+      await fetchProjects(); // <-- ПЕРЕЗАГРУЗКА ПРОЕКТОВ ПОСЛЕ ДОБАВЛЕНИЯ УЧАСТНИКА
     } catch (e, st) {
       _handleCrudError(e, st, "addParticipant");
     }
@@ -239,13 +336,26 @@ class ProjectProvider extends ChangeNotifier {
     _errorMessage = null;
     try {
       await _service.removeParticipant(projectId, userId);
+
+      // --- НОВОЕ: Отправка уведомления об удалении участника ---
+      final project = await _service.getById(projectId);
+      if (project != null) {
+        await NotificationService().showSimple(
+          'Участник удалён',
+          'Пользователь "$userId" удален из проекта "${project.title}".',
+        );
+      }
+      // --- КОНЕЦ НОВОГО ---
+
       // Обновляем проект после изменения списка участников
-      await _refreshSingle(projectId);
+      await fetchProjects(); // <-- ПЕРЕЗАГРУЗКА ПРОЕКТОВ ПОСЛЕ УДАЛЕНИЯ УЧАСТНИКА
     } catch (e, st) {
       _handleCrudError(e, st, "removeParticipant");
     }
   }
+  // --- Конец управления участниками ---
 
+  // --- Управление вложениями (доступно только авторизованным пользователям) ---
   Future<ProjectModel> uploadAttachment(String projectId, File file) async {
     if (isGuest || _userId == null) {
       throw Exception("operation_denied_guest".tr());
@@ -253,17 +363,23 @@ class ProjectProvider extends ChangeNotifier {
     _errorMessage = null;
 
     try {
-      // Сервис возвращает обновленную модель с новым списком вложений
       final updatedProject = await _service.uploadAttachment(projectId, file);
 
-      // Обновляем локальный список
-      final index = _projects.indexWhere((p) => p.id == projectId);
-      if (index != -1) {
-        _projects[index] = updatedProject;
-      }
-      notifyListeners();
+      // --- НОВОЕ: Отправка уведомления о загрузке вложения ---
+      final fileName = file.path.split('/').last;
+      await NotificationService().showSimple(
+        'Файл загружен',
+        'Файл "$fileName" добавлен к проекту "${updatedProject.title}".',
+      );
+      // --- КОНЕЦ НОВОГО ---
 
-      return updatedProject;
+      // НЕ обновляем локальный список _projects напрямую
+      // Вместо этого, перезагружаем всё, чтобы гарантировать синхронизацию с базой данных
+      await fetchProjects(); // <-- ПЕРЕЗАГРУЗКА ПРОЕКТОВ ПОСЛЕ ЗАГРУЗКИ ВЛОЖЕНИЯ
+
+      // Возвращаем обновленный проект (тот, что загружен из базы)
+      final projectWithNewAttachment = _projects.firstWhere((proj) => proj.id == projectId, orElse: () => updatedProject);
+      return projectWithNewAttachment;
     } catch (e, st) {
       _handleCrudError(e, st, "uploadAttachment");
       rethrow;
@@ -280,52 +396,34 @@ class ProjectProvider extends ChangeNotifier {
 
     try {
       await _service.deleteAttachment(projectId, filePath);
+
+      // --- НОВОЕ: Отправка уведомления об удалении вложения ---
+      final fileName = filePath.split('/').last;
+      await NotificationService().showSimple(
+        'Файл удалён',
+        'Файл "$fileName" удален из проекта "$projectId".',
+      );
+      // --- КОНЕЦ НОВОГО ---
+
       // Обновляем проект после удаления вложения
-      await _refreshSingle(projectId);
+      await fetchProjects(); // <-- ПЕРЕЗАГРУЗКА ПРОЕКТОВ ПОСЛЕ УДАЛЕНИЯ ВЛОЖЕНИЯ
     } catch (e, st) {
       _handleCrudError(e, st, "deleteAttachment");
     }
   }
+  // --- Конец управления вложениями ---
 
-  /// Запрашивает одну модель проекта с сервера и синхронизирует ее с локальным списком.
-  Future<ProjectModel?> _refreshSingle(String projectId) async {
-    try {
-      final updated = await _service.getById(projectId);
-
-      if (updated == null) {
-        // Проект был удален на сервере
-        _projects.removeWhere((p) => p.id == projectId);
-        notifyListeners();
-        return null;
-      }
-
-      final index = _projects.indexWhere((p) => p.id == projectId);
-      if (index != -1) {
-        // Проект найден, заменяем его обновленной версией
-        _projects[index] = updated;
-      } else {
-        // Проект не найден, добавляем его (может быть после добавления или приглашения)
-        _projects.add(updated);
-      }
-      notifyListeners();
-      return updated;
-    } catch (e) {
-      debugPrint("ProjectProvider ERROR: _refreshSingle ошибка: $e");
-      // Не вызываем _handleCrudError здесь, чтобы не перезаписать основной _errorMessage
-      return null;
-    }
-  }
-
+  /// Создаёт пустую модель проекта для заполнения в форме
   ProjectModel createEmptyProject() {
     if (isGuest || _userId == null) {
       throw Exception("guest_cannot_create_project".tr());
     }
+
     return ProjectModel(
       id: "",
       ownerId: _userId!,
       title: "new_project".tr(),
       description: "",
-      // Установка дедлайна, например, через 7 дней
       deadline: DateTime.now().add(const Duration(days: 7)),
       status: ProjectStatus.planned.index,
       grade: null,
@@ -336,6 +434,7 @@ class ProjectProvider extends ChangeNotifier {
     );
   }
 
+  /// Обрабатывает ошибки CRUD-операций
   void _handleCrudError(Object e, StackTrace st, String operation) {
     _errorMessage = 'Ошибка операции $operation: ${e.toString().split(':')[0].trim()}';
     debugPrint("ProjectProvider ERROR: $operation ошибка: $e\n$st");
