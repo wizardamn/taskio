@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_animate/flutter_animate.dart'; // Анимации сохранены
+import 'package:flutter_animate/flutter_animate.dart';
 
 import '../../services/auth_service.dart';
 import '../../providers/project_provider.dart';
@@ -40,41 +40,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (profile != null && mounted) {
         _profile = profile;
-        // Обновляем контроллер только если _profile != null
         _nameController.text = profile.fullName;
       } else {
-        // Если профиль не найден, можно установить значения по умолчанию или сообщить пользователю
         debugPrint('[ProfileScreen] Профиль не найден при загрузке.');
-        // Например, можно установить _loading = false и показать ошибку в UI.
         if (mounted) {
           setState(() {
             _loading = false;
-            _profile = null; // Убедимся, что _profile null
+            _profile = null;
           });
         }
-        return; // Прерываем выполнение, если профиль не найден
+        return;
       }
     } on Exception catch (e) {
       if (mounted) {
-        setState(() => _loading = false); // Убедимся, что спиннер исчезнет
+        setState(() => _loading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Ошибка загрузки профиля: ${e.toString().replaceFirst('Exception: ', '')}')),
         );
       }
     } finally {
-      if (mounted && _loading) { // Обновляем состояние только если оно не было обновлено в catch
+      if (mounted && _loading) {
         setState(() => _loading = false);
       }
     }
   }
 
   Future<void> _saveProfile() async {
-    // --- ИСПРАВЛЕНО: Проверка на mounted, валидацию и !_profile!.isNull ---
     if (!mounted || !_formKey.currentState!.validate() || _profile == null) return;
 
     final newName = _nameController.text.trim();
 
-    // --- ИСПРАВЛЕНО: Проверка на null перед сравнением ---
     if (_profile != null && newName == _profile!.fullName) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -85,33 +80,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     try {
-      // 1. Обновляем полное имя в таблице profiles
-      // --- ИСПРАВЛЕНО: Проверка на null перед доступом к .id ---
+      // 1. Обновляем в БД
       if (_profile != null) {
         await Supabase.instance.client.from('profiles').update({
           'full_name': newName,
         }).eq('id', _profile!.id);
       }
 
-      // 2. Обновляем метаданные Auth-пользователя
+      // 2. Обновляем метаданные Auth
       await Supabase.instance.client.auth.updateUser(UserAttributes(
         data: {'full_name': newName},
       ));
 
-
       if (!mounted) return;
 
-      // Уведомляем ProjectProvider об изменении имени
+      // Уведомляем ProjectProvider
       final prov = context.read<ProjectProvider>();
-      prov.updateUserName(newName);
+      // ИСПРАВЛЕНИЕ: Используем setUser вместо updateUserName.
+      // Это обновит имя и безопасно перезагрузит состояние пользователя.
+      await prov.setUser(_profile!.id, newName);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Профиль успешно обновлён')),
       );
 
-      // --- ИСПРАВЛЕНО: Проверка на null перед обновлением локального состояния ---
       if (_profile != null) {
-        // Обновляем локальное состояние
         setState(() {
           _profile = ProfileModel(
             id: _profile!.id,
@@ -138,17 +131,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // Утилита для получения отображаемого названия роли на русском
   String _getRoleDisplayName(String role) {
     switch (role) {
-      case 'student':
-        return 'Учащийся';
-      case 'teacher':
-        return 'Преподаватель';
-      case 'leader':
-        return 'Руководитель проекта';
-      default:
-        return role;
+      case 'student': return 'Учащийся';
+      case 'teacher': return 'Преподаватель';
+      case 'leader': return 'Руководитель проекта';
+      default: return role;
     }
   }
 
@@ -160,7 +148,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     }
 
-    // --- ИСПРАВЛЕНО: Безопасная проверка на null перед использованием _profile ---
     final profile = _profile;
     if (profile == null) {
       return Scaffold(
@@ -184,7 +171,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: ListView(
               children: [
                 const SizedBox(height: 12),
-                // Аватар
                 Center(
                   child: CircleAvatar(
                     radius: 45,
@@ -195,20 +181,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                 const SizedBox(height: 30),
 
-                // Поле для редактирования полного имени
                 TextFormField(
                   controller: _nameController,
                   decoration: const InputDecoration(
-                      labelText: 'Поле имя',
+                      labelText: 'Имя',
                       hintText: 'Иванов Иван Иванович'
                   ),
-                  validator: (v) =>
-                  v == null || v.isEmpty ? 'Введите имя' : null,
+                  validator: (v) => v == null || v.isEmpty ? 'Введите имя' : null,
                 ).animate().fadeIn(delay: 100.ms).slideY(begin: 0.1, delay: 100.ms, duration: 300.ms, curve: Curves.easeOut),
 
                 const SizedBox(height: 12),
 
-                // Поле для email (только чтение)
                 TextFormField(
                   enabled: false,
                   initialValue: profile.email,
@@ -217,7 +200,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                 const SizedBox(height: 12),
 
-                // Поле для роли (только чтение)
                 TextFormField(
                   readOnly: true,
                   initialValue: displayRole,
@@ -229,7 +211,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                 const SizedBox(height: 30),
 
-                // Кнопка сохранения
                 ElevatedButton.icon(
                   onPressed: _saveProfile,
                   icon: const Icon(Icons.save),

@@ -3,20 +3,20 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/project_model.dart';
 import '../services/supabase_service.dart';
-import '../services/notification_service.dart'; // <-- ИМПОРТ NotificationService
+import '../services/notification_service.dart';
 
 class ProjectService {
   final SupabaseClient client = SupabaseService.client;
   final String bucketName = SupabaseService.bucket;
   String? _currentUserId;
 
-  /// Обновляет ID текущего пользователя, используемого сервисом для проверок прав.
+  /// Обновляет ID текущего пользователя
   void updateOwner(String? userId) {
     _currentUserId = userId;
   }
 
   // ------------------------------------------------
-  // 1. ВАЛИДАЦИЯ И САМОВОССТАНОВЛЕНИЕ
+  // 1. ВАЛИДАЦИЯ И ПОДГОТОВКА
   // ------------------------------------------------
 
   /// Проверяет существование профилей и возвращает список валидных ID
@@ -24,7 +24,9 @@ class ProjectService {
     if (userIds.isEmpty) return [];
     final unique = userIds.toSet().toList();
     try {
-      final res = await client.from('profiles').select('id').inFilter('id', unique);
+      // ИСПРАВЛЕНО: Используем .filter('col', 'in', list) вместо .in_()
+      final res = await client.from('profiles').select('id').filter('id', 'in', unique);
+      // ИСПРАВЛЕНО: Убрано (res as List), так как res уже является списком
       return res.map<String>((e) => e['id'] as String).toList();
     } catch (e) {
       _handleError(e, 'Ошибка фильтрации ID пользователей');
@@ -32,7 +34,7 @@ class ProjectService {
     }
   }
 
-  /// Гарантирует, что профиль текущего пользователя существует
+  /// Гарантирует создание профиля для текущего юзера, если его нет
   Future<void> _ensureCurrentUserProfile() async {
     if (_currentUserId == null) return;
 
@@ -52,10 +54,10 @@ class ProjectService {
           'id': _currentUserId,
           'full_name': name,
           'email': email,
-          'role': 'user',
+          'role': 'student', // Дефолтная роль
           'created_at': DateTime.now().toIso8601String(),
         });
-        debugPrint('[ProjectService] Auto-created missing profile for $_currentUserId');
+        debugPrint('[ProjectService] Профиль автоматически создан для $_currentUserId');
       }
     } catch (e) {
       _handleError(e, 'Ошибка создания профиля');
@@ -66,37 +68,57 @@ class ProjectService {
   // 2. ЗАГРУЗКА ДАННЫХ
   // ------------------------------------------------
 
-  /// Загружает все проекты, в которых участвует текущий пользователь
+  /// Загружает проекты пользователя (где он владелец или участник)
   Future<List<ProjectModel>> getAll() async {
     if (_currentUserId == null) return [];
 
     try {
-      final memberData = await client.from('project_members').select('project_id').eq('member_id', _currentUserId!);
-      final ownerData = await client.from('projects').select('id').eq('owner_id', _currentUserId!);
+      // 1. Находим проекты, где юзер - участник
+      final memberData = await client
+          .from('project_members')
+          .select('project_id')
+          .eq('member_id', _currentUserId!);
 
-      final allIds = {
-        ...(memberData as List).map((e) => e['project_id'] as String),
-        ...(ownerData as List).map((e) => e['id'] as String)
-      }.toList();
+      // 2. Находим проекты, где юзер - владелец
+      final ownerData = await client
+          .from('projects')
+          .select('id')
+          .eq('owner_id', _currentUserId!);
+
+      // Собираем уникальные ID проектов
+      final Set<String> allIds = {};
+      // memberData и ownerData уже списки, as List не требуется
+      for (var item in memberData) {
+        allIds.add(item['project_id'] as String);
+      }
+      for (var item in ownerData) {
+        allIds.add(item['id'] as String);
+      }
 
       if (allIds.isEmpty) return [];
 
+      // 3. Загружаем полные данные проектов с участниками
+      // ИСПРАВЛЕНО: Используем .filter('id', 'in', list)
       final response = await client
           .from('projects')
           .select('*, project_members(*, profiles:member_id(id, full_name))')
-          .inFilter('id', allIds)
+          .filter('id', 'in', allIds.toList())
           .order('created_at', ascending: false);
 
       final List<ProjectModel> projects = [];
-      for (final raw in response as List) {
+
+      for (final raw in response) {
         try {
           final project = ProjectModel.fromJson(raw as Map<String, dynamic>);
+
+          // Парсим участников из join-запроса
           final participantsRaw = (raw['project_members'] as List?) ?? [];
           final participants = participantsRaw.map((row) {
             final memberId = row['member_id'] as String;
             final role = (row['role'] as String?) ?? 'viewer';
             final profile = row['profiles'] as Map<String, dynamic>?;
             final fullName = profile?['full_name'] as String? ?? 'Без имени';
+
             return ProjectParticipant(
               id: memberId,
               fullName: fullName,
@@ -109,37 +131,21 @@ class ProjectService {
             participantIds: participants.map((p) => p.id).toList(),
           ));
 
-          // --- НОВОЕ: Планирование уведомления о дедлайне ---
-          // Проверяем, близок ли дедлайн (например, в течение 24 часов)
-          final now = DateTime.now();
-          final deadline = project.deadline;
-          final timeToDeadline = deadline.difference(now);
+          // --- Проверка дедлайна для уведомления ---
+          _checkDeadlineNotification(project);
 
-          if (timeToDeadline.inHours <= 24 && timeToDeadline.inHours > 0) {
-            // Планируем уведомление за 1 час до дедлайна
-            final notificationTime = deadline.subtract(const Duration(hours: 1));
-
-            // Используем NotificationService для планирования уведомления
-            await NotificationService().scheduleNotification(
-              id: project.id.hashCode, // Уникальный ID для уведомления на основе ID проекта
-              title: 'Напоминание: ${project.title}',
-              body: 'Дедлайн проекта "${project.title}" наступает ${deadline.hour}:${deadline.minute.toString().padLeft(2, '0')} ${deadline.day}.${deadline.month}.${deadline.year}.',
-              scheduledTime: notificationTime,
-            );
-          }
-          // --- КОНЕЦ НОВОГО ---
         } catch (e) {
-          _handleError(e, 'Ошибка парсинга проекта');
+          debugPrint('Ошибка парсинга конкретного проекта: $e');
         }
       }
       return projects;
     } catch (e) {
-      _handleError(e, 'Ошибка загрузки проектов');
+      _handleError(e, 'Ошибка загрузки списка проектов');
       return [];
     }
   }
 
-  /// Загружает один проект по его ID
+  /// Получение одного проекта
   Future<ProjectModel?> getById(String id) async {
     try {
       final data = await client
@@ -151,12 +157,14 @@ class ProjectService {
       if (data == null) return null;
 
       final project = ProjectModel.fromJson(data as Map<String, dynamic>);
+
       final participantsRaw = (data['project_members'] as List?) ?? [];
       final participants = participantsRaw.map((row) {
         final memberId = row['member_id'] as String;
         final role = (row['role'] as String?) ?? 'viewer';
         final profile = row['profiles'] as Map<String, dynamic>?;
         final fullName = profile?['full_name'] as String? ?? 'Без имени';
+
         return ProjectParticipant(
           id: memberId,
           fullName: fullName,
@@ -178,32 +186,35 @@ class ProjectService {
   // 3. CRUD ОПЕРАЦИИ
   // ------------------------------------------------
 
-  /// Создаёт новый проект
   Future<ProjectModel> add(ProjectModel project) async {
     await _ensureCurrentUserProfile();
 
     final ownerId = project.ownerId;
+    // Собираем всех участников, включая владельца
     final rawMemberIds = {...project.participantIds, ownerId}.toList();
+    // Фильтруем, чтобы добавлять только существующих пользователей
     final validMemberIds = await _filterValidUserIds(rawMemberIds);
 
+    // Подготовка JSON для таблицы projects (удаляем лишние поля)
     final projectJson = project.toJson();
-    projectJson.remove('participants');
+    projectJson.remove('participants'); // Убираем, если база генерит или не использует это поле напрямую
 
     try {
+      // Вставка проекта
       final res = await client.from('projects').insert(projectJson).select().single();
       final savedProject = ProjectModel.fromJson(res);
 
+      // Вставка связей в project_members
       for (final memberId in validMemberIds) {
         final role = memberId == ownerId ? 'owner' : 'editor';
         await _upsertMember(savedProject.id, memberId, role);
       }
 
-      // --- НОВОЕ: Отправка уведомления о создании ---
+      // Уведомление
       await NotificationService().showSimple(
         'Проект создан',
         'Проект "${savedProject.title}" успешно создан.',
       );
-      // --- КОНЕЦ НОВОГО ---
 
       return (await getById(savedProject.id))!;
     } catch (e) {
@@ -212,7 +223,6 @@ class ProjectService {
     }
   }
 
-  /// Обновляет существующий проект
   Future<void> update(ProjectModel project) async {
     if (_currentUserId == null) throw Exception('User not authenticated');
 
@@ -220,45 +230,37 @@ class ProjectService {
     projectJson.remove('participants');
 
     try {
-      // --- НОВОЕ: Получаем старый проект для сравнения ---
       final oldProject = await getById(project.id);
-      // --- КОНЕЦ НОВОГО ---
 
+      // Обновление основной таблицы
       await client.from('projects').update(projectJson).eq('id', project.id);
 
+      // Синхронизация участников
       final currentIds = await getParticipantIds(project.id);
       final desiredRawIds = {...project.participantIds, project.ownerId}.toList();
       final validDesiredIds = await _filterValidUserIds(desiredRawIds);
 
+      // Удаляем тех, кого нет в новом списке (кроме владельца)
       final toRemove = currentIds.where((id) => !validDesiredIds.contains(id) && id != project.ownerId).toList();
       if (toRemove.isNotEmpty) {
-        await client.from('project_members').delete().inFilter('member_id', toRemove).eq('project_id', project.id);
+        // ИСПРАВЛЕНО: Используем .filter('col', 'in', list)
+        await client
+            .from('project_members')
+            .delete()
+            .filter('member_id', 'in', toRemove)
+            .eq('project_id', project.id);
       }
 
+      // Добавляем/Обновляем текущих
       for (final memberId in validDesiredIds) {
         final role = memberId == project.ownerId ? 'owner' : 'editor';
         await _upsertMember(project.id, memberId, role);
       }
 
-      // --- НОВОЕ: Отправка уведомления об изменении ---
+      // Уведомления об изменениях
       if (oldProject != null) {
-        String notificationTitle = 'Проект обновлён';
-        String notificationBody = 'Проект "${project.title}" был изменён.';
-
-        if (oldProject.status != project.status) {
-          notificationBody += ' Статус изменён с "${oldProject.statusEnum.text}" на "${project.statusEnum.text}".';
-        }
-        if (oldProject.deadline != project.deadline) {
-          notificationBody += ' Дедлайн изменён с "${oldProject.deadline}" на "${project.deadline}".';
-        }
-        if (oldProject.title != project.title) {
-          notificationTitle = 'Проект переименован';
-          notificationBody = 'Проект "${oldProject.title}" переименован в "${project.title}".';
-        }
-
-        await NotificationService().showSimple(notificationTitle, notificationBody);
+        _sendUpdateNotification(oldProject, project);
       }
-      // --- КОНЕЦ НОВОГО ---
 
     } catch (e) {
       _handleError(e, 'Ошибка обновления проекта');
@@ -266,7 +268,6 @@ class ProjectService {
     }
   }
 
-  /// Удаляет проект
   Future<void> delete(String id) async {
     if (_currentUserId == null) throw Exception('User not authenticated');
 
@@ -276,23 +277,22 @@ class ProjectService {
     }
 
     try {
+      // Удаляем файлы из Storage
       if (project != null && project.attachments.isNotEmpty) {
         final paths = project.attachments.map((a) => a.filePath).toList();
         await client.storage.from(bucketName).remove(paths);
       }
 
+      // Удаляем записи из БД (Cascade должен сработать, но удаляем вручную для надежности)
       await client.from('project_members').delete().eq('project_id', id);
       await client.from('projects').delete().eq('id', id);
 
-      // --- НОВОЕ: Отправка уведомления об удалении ---
       if (project != null) {
         await NotificationService().showSimple(
           'Проект удалён',
           'Проект "${project.title}" был успешно удалён.',
         );
       }
-      // --- КОНЕЦ НОВОГО ---
-
     } catch (e) {
       _handleError(e, 'Ошибка удаления проекта');
       rethrow;
@@ -300,21 +300,24 @@ class ProjectService {
   }
 
   // ------------------------------------------------
-  // 4. ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
+  // 4. УПРАВЛЕНИЕ УЧАСТНИКАМИ
   // ------------------------------------------------
 
-  /// Получает список ID участников проекта
   Future<List<String>> getParticipantIds(String projectId) async {
     try {
-      final data = await client.from('project_members').select('member_id').eq('project_id', projectId);
-      return (data as List).map((e) => e['member_id'] as String).toList();
+      final data = await client
+          .from('project_members')
+          .select('member_id')
+          .eq('project_id', projectId);
+
+      // ИСПРАВЛЕНО: Убрано (data as List)
+      return data.map((e) => e['member_id'] as String).toList();
     } catch (e) {
       _handleError(e, 'Ошибка получения ID участников');
       return [];
     }
   }
 
-  /// Получает список участников проекта (ID, имя, роль)
   Future<List<Map<String, dynamic>>> getParticipants(String projectId) async {
     try {
       final data = await client
@@ -322,7 +325,8 @@ class ProjectService {
           .select('member_id, role, profiles:member_id(id, full_name)')
           .eq('project_id', projectId);
 
-      return (data as List).map((row) {
+      // ИСПРАВЛЕНО: Убрано (data as List)
+      return data.map((row) {
         final profile = row['profiles'] as Map<String, dynamic>?;
         return {
           'id': row['member_id'] as String,
@@ -331,54 +335,46 @@ class ProjectService {
         };
       }).toList();
     } catch (e) {
-      _handleError(e, 'Ошибка получения участников');
+      _handleError(e, 'Ошибка получения списка участников');
       return [];
     }
   }
 
-  /// Добавляет участника в проект
   Future<void> addParticipant(String projectId, String memberId, [String role = "editor"]) async {
     final valid = await _filterValidUserIds([memberId]);
     if (valid.isNotEmpty) {
       await _upsertMember(projectId, memberId, role);
 
-      // --- НОВОЕ: Отправка уведомления о добавлении участника ---
       final project = await getById(projectId);
       if (project != null) {
-        final newMember = project.participantsData.firstWhere(
-              (p) => p.id == memberId,
-          orElse: () => ProjectParticipant(id: '', fullName: 'Неизвестный', role: 'viewer'), // <-- ИСПРАВЛЕНО: Возвращаем заглушку с ролью
-        );
+        // Уведомление
         await NotificationService().showSimple(
           'Участник добавлен',
-          'Пользователь "${newMember.fullName}" добавлен в проект "${project.title}".',
+          'Пользователь добавлен в проект "${project.title}".',
         );
       }
-      // --- КОНЕЦ НОВОГО ---
     }
   }
 
-  /// Удаляет участника из проекта
   Future<void> removeParticipant(String projectId, String memberId) async {
     try {
-      await client.from('project_members').delete().match({'project_id': projectId, 'member_id': memberId});
+      await client
+          .from('project_members')
+          .delete()
+          .match({'project_id': projectId, 'member_id': memberId});
 
-      // --- НОВОЕ: Отправка уведомления об удалении участника ---
       final project = await getById(projectId);
       if (project != null) {
         await NotificationService().showSimple(
           'Участник удалён',
-          'Пользователь "$memberId" удален из проекта "${project.title}".',
+          'Пользователь удален из проекта "${project.title}".',
         );
       }
-      // --- КОНЕЦ НОВОГО ---
-
     } catch (e) {
       _handleError(e, 'Ошибка удаления участника');
     }
   }
 
-  /// Вспомогательный метод для добавления/обновления записи участника
   Future<void> _upsertMember(String projectId, String memberId, String role) async {
     try {
       await client.from('project_members').upsert(
@@ -390,33 +386,34 @@ class ProjectService {
         onConflict: 'project_id, member_id',
       );
     } catch (e) {
-      _handleError(e, 'Ошибка добавления/обновления участника');
+      debugPrint("Ошибка upsert участника: $e");
     }
   }
 
   // ------------------------------------------------
-  // 5. ВЛОЖЕНИЯ
+  // 5. ВЛОЖЕНИЯ (Storage + JSONB)
   // ------------------------------------------------
 
-  /// Загружает вложение в проект
   Future<ProjectModel> uploadAttachment(String projectId, File file) async {
     if (_currentUserId == null) throw Exception('User not authenticated');
 
     final fileName = file.path.split('/').last;
+    // Уникальный путь
     final filePath = '$projectId/$_currentUserId/${DateTime.now().millisecondsSinceEpoch}_$fileName';
 
     try {
-      await client.storage.from(bucketName).upload(filePath, file, fileOptions: const FileOptions(upsert: false));
+      await client.storage.from(bucketName).upload(
+        filePath,
+        file,
+        fileOptions: const FileOptions(upsert: false),
+      );
     } on StorageException catch (e) {
-      _handleError(e, 'Ошибка загрузки вложения');
+      _handleError(e, 'Ошибка загрузки файла в Storage');
       rethrow;
     }
 
     final project = await getById(projectId);
-    if (project == null) {
-      await client.storage.from(bucketName).remove([filePath]);
-      throw Exception('Проект не найден');
-    }
+    if (project == null) throw Exception('Проект не найден');
 
     final newAttachment = Attachment(
       fileName: fileName,
@@ -426,64 +423,84 @@ class ProjectService {
       uploaderId: _currentUserId!,
     );
 
+    // Добавляем к текущему списку
     final updatedAttachments = [...project.attachments, newAttachment];
+
+    // Обновляем JSONB колонку
     await client.from('projects').update({
       'attachments': updatedAttachments.map((a) => a.toJson()).toList()
     }).eq('id', projectId);
 
-    // --- НОВОЕ: Отправка уведомления о загрузке вложения ---
     await NotificationService().showSimple(
       'Файл загружен',
-      'Файл "$fileName" добавлен к проекту "${project.title}".',
+      'Файл "$fileName" добавлен к проекту.',
     );
-    // --- КОНЕЦ НОВОГО ---
 
     return (await getById(projectId))!;
   }
 
-  /// Удаляет вложение из проекта
-  Future<void> deleteAttachment(String projectId, String filePath) async {
+  Future<ProjectModel> deleteAttachment(String projectId, String filePath) async {
+    // Удаляем из хранилища
     try {
       await client.storage.from(bucketName).remove([filePath]);
-    } catch (_) {}
+    } catch (_) {
+      // Игнорируем ошибку, если файла уже нет
+    }
 
     final project = await getById(projectId);
-    if (project == null) return;
+    if (project == null) throw Exception('Проект не найден');
 
+    // Фильтруем список
     final updatedAttachments = project.attachments.where((a) => a.filePath != filePath).toList();
+
     await client.from('projects').update({
       'attachments': updatedAttachments.map((a) => a.toJson()).toList()
     }).eq('id', projectId);
 
-    // --- НОВОЕ: Отправка уведомления об удалении вложения ---
-    final fileName = filePath.split('/').last;
     await NotificationService().showSimple(
       'Файл удалён',
-      'Файл "$fileName" удален из проекта "${project.title}".',
+      'Файл удален из проекта.',
     );
-    // --- КОНЕЦ НОВОГО ---
-  }
 
-  /// Скачивает вложение
-  Future<File> downloadAttachment(String filePath, String fileName) async {
-    try {
-      final response = await client.storage.from(bucketName).download(filePath);
-      final tempDir = Directory.systemTemp;
-      final file = File('${tempDir.path}/$fileName');
-      await file.writeAsBytes(response);
-      return file;
-    } catch (e) {
-      _handleError(e, 'Ошибка скачивания вложения');
-      rethrow;
-    }
+    return (await getById(projectId))!;
   }
 
   // ------------------------------------------------
-  // 6. ОБЩАЯ ОБРАБОТКА ОШИБОК
+  // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
   // ------------------------------------------------
 
   void _handleError(Object e, String operation) {
-    debugPrint('[ProjectService] $operation: ${e.toString()}');
+    debugPrint('[ProjectService] $operation: $e');
     throw Exception('$operation: ${e.toString().split(':')[0].trim()}');
+  }
+
+  Future<void> _checkDeadlineNotification(ProjectModel project) async {
+    final now = DateTime.now();
+    final deadline = project.deadline;
+    final timeToDeadline = deadline.difference(now);
+
+    if (timeToDeadline.inHours <= 24 && timeToDeadline.inHours > 0) {
+      final notificationTime = deadline.subtract(const Duration(hours: 1));
+      await NotificationService().scheduleNotification(
+        id: project.id.hashCode,
+        title: 'Дедлайн близко: ${project.title}',
+        body: 'Остался 1 час до дедлайна.',
+        scheduledTime: notificationTime,
+      );
+    }
+  }
+
+  Future<void> _sendUpdateNotification(ProjectModel oldProject, ProjectModel newProject) async {
+    String title = 'Проект обновлён';
+    String body = 'Проект "${newProject.title}" изменён.';
+
+    if (oldProject.status != newProject.status) {
+      body += ' Статус: ${newProject.statusEnum.text}.';
+    }
+    if (oldProject.deadline != newProject.deadline) {
+      body += ' Новый дедлайн.';
+    }
+
+    await NotificationService().showSimple(title, body);
   }
 }

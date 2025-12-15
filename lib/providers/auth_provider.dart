@@ -1,6 +1,4 @@
-// lib/providers/auth_provider.dart
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/auth_service.dart';
 
@@ -14,100 +12,86 @@ class AuthProvider extends ChangeNotifier {
   User? get user => supabase.auth.currentUser;
   bool get isAuthenticated => user != null;
 
-  // --- СОСТОЯНИЕ: Гость ---
+  // --- Гостевой режим ---
   bool _isGuest = false;
   bool get isGuest => _isGuest;
   String _guestId = '';
   String _guestName = 'Гость';
-  // --- КОНЕЦ СОСТОЯНИЯ ---
 
   /// Вход как гость
   Future<void> signInAsGuest() async {
     _setLoading(true);
     try {
-      // 1. Сначала выходим из текущей сессии (если есть)
-      await _authService.signOut(); // Вызываем метод из AuthService
-
-      // 2. Устанавливаем гостевые данные
-      _setGuestUser(true); // Устанавливаем флаг гостя
-
-      // 3. Уведомляем слушателей об изменении состояния
-      notifyListeners();
+      await _authService.signOut();
+      _setGuestUser(true);
     } catch (e) {
-      debugPrint('Ошибка входа как гость (AuthProvider): $e');
-      rethrow; // Пробрасываем ошибку дальше для обработки в UI
+      debugPrint('AuthProvider Error (Guest Login): $e');
+      rethrow;
     } finally {
       _setLoading(false);
     }
   }
 
-  // --- ВСПОМОГАТЕЛЬНЫЙ МЕТОД: Установка гостевого состояния ---
   void _setGuestUser(bool isGuest) {
     _isGuest = isGuest;
     if (isGuest) {
-      // Если это гость, устанавливаем уникальный ID и имя
       _guestId = 'guest_user_${DateTime.now().millisecondsSinceEpoch}';
       _guestName = 'Гость';
     } else {
-      // Если не гость, сбрасываем на пустые значения
       _guestId = '';
-      _guestName = 'Гость'; // Имя по умолчанию, если не гость
+      _guestName = 'Гость';
     }
-    notifyListeners(); // Уведомляем слушателей об изменении состояния
+    notifyListeners();
   }
-  // --- КОНЕЦ ВСПОМОГАТЕЛЬНОГО МЕТОДА ---
 
-  /// Возвращает ID пользователя или гостя
   String? get userId => isGuest ? _guestId : user?.id;
 
-  /// Возвращает имя пользователя или гостя
-  String get userName => isGuest ? _guestName : (user?.userMetadata?['full_name'] ?? user?.email?.split('@').first ?? 'Пользователь');
+  String get userName {
+    if (isGuest) return _guestName;
+    return user?.userMetadata?['full_name'] ??
+        user?.email?.split('@').first ??
+        'Пользователь';
+  }
 
-  /// Вход в систему
   Future<void> signIn(String email, String password) async {
     _setLoading(true);
     try {
       await _authService.signIn(email, password);
-      _setGuestUser(false); // Сбрасываем гостевой режим при входе
-      notifyListeners();
+      _setGuestUser(false);
     } catch (e) {
-      debugPrint('Ошибка входа (AuthProvider): $e');
+      debugPrint('AuthProvider Error (SignIn): $e');
       rethrow;
     } finally {
       _setLoading(false);
     }
   }
 
-  /// Регистрация
+  /// Регистрация. Важно: role передается для создания записи в profiles
   Future<void> signUp(String email, String password, String fullName, String role) async {
     _setLoading(true);
     try {
       await _authService.signUp(email, password, fullName, role);
-      _setGuestUser(false); // Сбрасываем гостевой режим при регистрации
-      notifyListeners();
+      _setGuestUser(false);
     } catch (e) {
-      debugPrint('Ошибка регистрации (AuthProvider): $e');
+      debugPrint('AuthProvider Error (SignUp): $e');
       rethrow;
     } finally {
       _setLoading(false);
     }
   }
 
-  /// Выход из системы
   Future<void> signOut() async {
     _setLoading(true);
     try {
       await _authService.signOut();
-      _setGuestUser(false); // Сбрасываем гостевой режим при выходе
-      notifyListeners();
+      _setGuestUser(false);
     } finally {
       _setLoading(false);
     }
   }
 
-  /// Очистка состояния (например, при выходе или ошибке)
   void clear() {
-    _setGuestUser(false); // Сбрасываем гостевой режим
+    _setGuestUser(false);
   }
 
   void _setLoading(bool value) {

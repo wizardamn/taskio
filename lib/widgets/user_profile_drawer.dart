@@ -6,8 +6,8 @@ import 'package:flutter_animate/flutter_animate.dart';
 
 import '../providers/project_provider.dart';
 import '../providers/theme_provider.dart';
-import '../providers/auth_provider.dart'; // <-- КЛЮЧЕВОЙ ИМПОРТ
-import '../screens/profile/profile_screen.dart'; // <-- Проверьте путь к ProfileScreen
+import '../providers/auth_provider.dart';
+import '../screens/profile/profile_screen.dart';
 
 class UserProfileDrawer extends StatelessWidget {
   const UserProfileDrawer({super.key});
@@ -31,10 +31,10 @@ class UserProfileDrawer extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: Material(
-          color: isDestructive ? color!.withAlpha(20) : Colors.transparent, // Фон для деструктивных действий (0.08 * 255 ≈ 20)
+          color: isDestructive ? color!.withAlpha(20) : Colors.transparent,
           child: InkWell(
             onTap: onTap,
-            // Красивый эффект нажатия
+            // Эффект нажатия
             splashColor: isDestructive ? color!.withAlpha(51) : theme.colorScheme.primary.withAlpha(26),
             highlightColor: isDestructive ? color!.withAlpha(26) : theme.colorScheme.primary.withAlpha(13),
 
@@ -65,8 +65,8 @@ class UserProfileDrawer extends StatelessWidget {
         ),
       ),
     ).animate()
-        .fadeIn(delay: (100 * index).ms, duration: 300.ms) // Плавное появление
-        .slideX(begin: 0.1, end: 0, delay: (100 * index).ms, duration: 300.ms); // Плавный сдвиг
+        .fadeIn(delay: (100 * index).ms, duration: 300.ms)
+        .slideX(begin: 0.1, end: 0, delay: (100 * index).ms, duration: 300.ms);
   }
 
   // Функция для навигации на экран профиля
@@ -78,34 +78,32 @@ class UserProfileDrawer extends StatelessWidget {
     );
   }
 
-  // --- Персонализированный Header (Сплошной, кликабельный) ---
+  // --- Персонализированный Header ---
   Widget _buildHeader(BuildContext context) {
     final theme = Theme.of(context);
+
     return Consumer<ProjectProvider>(
       builder: (context, prov, child) {
-        // --- ИСПРАВЛЕНО: Используем AuthProvider для проверки isGuest ---
         final authProv = context.watch<AuthProvider>();
-        final isGuest = authProv.isGuest; // <-- Проверяем isGuest из AuthProvider
-        final displayName = isGuest ? 'Гость' : prov.currentUserName; // <-- Убран tr(), используем строку
-        // Используем Supabase для получения email, если пользователь не гость
+        final isGuest = authProv.isGuest;
+
+        final displayName = isGuest ? 'Гость' : prov.currentUserName;
+        // Берем email через authProv, так как он уже инициализирован
         final displayEmail = isGuest
             ? 'Войдите в аккаунт'
-            : Supabase.instance.client.auth.currentUser?.email ?? 'N/A'; // <-- Убран tr()
+            : authProv.user?.email ?? 'Email не указан';
 
-
-        // Используем цвет primary для более яркого акцента на шапке
         return InkWell(
-          onTap: isGuest ? null : () => _navigateToProfile(context), // Только если не гость
+          onTap: isGuest ? null : () => _navigateToProfile(context),
           splashColor: theme.colorScheme.onPrimary.withAlpha(51),
           highlightColor: theme.colorScheme.onPrimary.withAlpha(26),
           child: Container(
             padding: const EdgeInsets.only(top: 40, left: 16, right: 16, bottom: 20),
-            // Убраны BorderRadius, чтобы цвет был сплошным по ширине Drawer
             color: theme.colorScheme.primary,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Аватар / Иконка профиля
+                // Аватар
                 CircleAvatar(
                   radius: 30,
                   backgroundColor: theme.colorScheme.onPrimary,
@@ -114,10 +112,10 @@ class UserProfileDrawer extends StatelessWidget {
                     color: theme.colorScheme.primary,
                     size: 30,
                   ),
-                ).animate().scale(duration: 300.ms, curve: Curves.easeOutBack), // Анимация увеличения
+                ).animate().scale(duration: 300.ms, curve: Curves.easeOutBack),
 
                 const SizedBox(height: 12),
-                // Имя пользователя
+                // Имя
                 Text(
                   displayName,
                   style: theme.textTheme.headlineSmall!.copyWith(
@@ -127,11 +125,11 @@ class UserProfileDrawer extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
-                // Email / Приглашение
+                // Email
                 Text(
                   displayEmail,
                   style: theme.textTheme.bodySmall!.copyWith(
-                    color: theme.colorScheme.onPrimary.withAlpha(179), // 0.7 * 255 ≈ 179
+                    color: theme.colorScheme.onPrimary.withAlpha(179),
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -145,21 +143,13 @@ class UserProfileDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // --- ИСПРАВЛЕНО: Удалена неиспользуемая переменная 'user' ---
-    // final user = Supabase.instance.client.auth.currentUser;
-
-    // --- ИСПРАВЛЕНО: Используем AuthProvider для получения состояния ---
     final authProv = context.watch<AuthProvider>();
     final isGuest = authProv.isGuest;
-
-    // --- ИСПРАВЛЕНО: Используем Provider.of с listen: false для ProjectProvider ---
     final prov = Provider.of<ProjectProvider>(context, listen: false);
-    // --- ИСПРАВЛЕНО: Используем ThemeProvider ---
     final themeProv = context.watch<ThemeProvider>();
     final colorScheme = Theme.of(context).colorScheme;
 
     return Drawer(
-      // Закругленные края Drawer'а остались, чтобы он выглядел современно
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.only(
           topRight: Radius.circular(20),
@@ -168,22 +158,20 @@ class UserProfileDrawer extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // 1. Персонализированная кликабельная шапка (сплошной цвет)
+          // 1. Шапка
           _buildHeader(context),
 
-          // 2. Основное содержимое с отступами
+          // 2. Меню
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(top: 8.0),
               child: ListView(
                 padding: EdgeInsets.zero,
                 children: [
-                  // --- ОСНОВНЫЕ ПУНКТЫ (Index 0, 1) ---
-
                   // Переключение темы (Index 0)
                   _buildDrawerItem(
                     context: context,
-                    icon: themeProv.currentTheme == ThemeMode.dark ? Icons.wb_sunny_outlined : Icons.dark_mode_outlined, // <-- Исправлены иконки
+                    icon: themeProv.currentTheme == ThemeMode.dark ? Icons.wb_sunny_outlined : Icons.dark_mode_outlined,
                     title: themeProv.currentTheme == ThemeMode.dark ? 'Светлая тема' : 'Тёмная тема',
                     onTap: () => themeProv.toggleTheme(),
                     index: 0,
@@ -198,7 +186,7 @@ class UserProfileDrawer extends StatelessWidget {
                   _buildDrawerItem(
                     context: context,
                     icon: Icons.language,
-                    title: 'Выбрать язык', // <-- Убран tr(), используем строку
+                    title: 'Выбрать язык',
                     onTap: () => _showLanguageDialog(context),
                     index: 1,
                     trailing: Text(
@@ -207,9 +195,7 @@ class UserProfileDrawer extends StatelessWidget {
                     ),
                   ),
 
-                  // Убран разделитель
-
-                  // --- ПУНКТЫ ДЛЯ АВТОРИЗОВАННОГО ПОЛЬЗОВАТЕЛЯ (Index 2+) ---
+                  // Секция для авторизованных пользователей (Index 2+)
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 300),
                     transitionBuilder: (child, animation) {
@@ -218,7 +204,7 @@ class UserProfileDrawer extends StatelessWidget {
                         child: SizeTransition(sizeFactor: animation, axisAlignment: -1.0, child: child),
                       );
                     },
-                    child: isGuest // <-- Используем isGuest из authProv
+                    child: isGuest
                         ? const SizedBox.shrink(key: ValueKey('guest'))
                         : Column(
                       key: const ValueKey('user'),
@@ -227,11 +213,10 @@ class UserProfileDrawer extends StatelessWidget {
                         _buildDrawerItem(
                             context: context,
                             icon: Icons.refresh,
-                            title: 'Обновить проекты', // <-- Убран tr(), используем строку
+                            title: 'Обновить проекты',
                             index: 2,
                             onTap: () async {
-                              Navigator.pop(context); // Закрываем, чтобы показать прогресс
-                              // Сначала вызываем загрузку
+                              Navigator.pop(context);
                               await prov.fetchProjects();
                             }
                         ),
@@ -240,18 +225,16 @@ class UserProfileDrawer extends StatelessWidget {
                         _buildDrawerItem(
                           context: context,
                           icon: Icons.picture_as_pdf,
-                          title: 'Сформировать отчет', // <-- Убран tr(), используем строку
+                          title: 'Сформировать отчет',
                           index: 3,
                           color: colorScheme.secondary,
                           onTap: () {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Функция отчетов не реализована')), // <-- Убран tr(), используем строку
+                              const SnackBar(content: Text('Функция отчетов не реализована')),
                             );
                             Navigator.pop(context);
                           },
                         ),
-
-                        // Убран разделитель
                       ],
                     ),
                   ),
@@ -260,33 +243,27 @@ class UserProfileDrawer extends StatelessWidget {
             ),
           ),
 
-          // --- ВЫХОД / ВХОД (Фиксированный внизу, Index 4) ---
+          // Выход / Вход (Index 4)
           Padding(
             padding: const EdgeInsets.only(bottom: 20.0, left: 8.0, right: 8.0),
             child: _buildDrawerItem(
               context: context,
-              icon: isGuest ? Icons.login : Icons.logout, // <-- Используем isGuest из authProv
-              title: isGuest ? 'Войти' : 'Выйти', // <-- Убран tr(), используем строку
+              icon: isGuest ? Icons.login : Icons.logout,
+              title: isGuest ? 'Войти' : 'Выйти',
               index: isGuest ? 2 : 4,
               color: isGuest ? colorScheme.primary : colorScheme.error,
               onTap: () async {
-                // ИСПРАВЛЕНО: Используем AuthProvider для signOut
                 final authProvider = context.read<AuthProvider>();
                 if (isGuest) {
-                  // Навигация на логин
-                  // Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false); // <-- Предполагается, что маршрут '/login' существует
-                  // Для упрощения, можно просто закрыть Drawer и оставить пользователя на LoginScreen, если он уже там
-                  Navigator.pop(context); // Закрываем Drawer
+                  Navigator.pop(context);
                 } else {
-                  // Выход через AuthProvider
-                  await authProvider.signOut(); // <-- Вызываем signOut через AuthProvider
-                  // Очистка данных провайдера теперь происходит в AuthProvider.clear() и ProjectProvider.clear()
+                  await authProvider.signOut();
+                  // ProjectProvider.clear() будет вызван в UI слое или через слушателя,
+                  // но для надежности можно вызвать и тут, если необходимо.
+                  // prov.clear();
 
                   if (context.mounted) {
-                    // Переход на логин после выхода (предполагается, что LoginWrapper перехватит состояние)
-                    // Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
-                    // Или просто закрываем Drawer, и LoginWrapper переключится на LoginScreen
-                    Navigator.pop(context); // Закрываем Drawer
+                    Navigator.pop(context);
                   }
                 }
               },
@@ -297,12 +274,11 @@ class UserProfileDrawer extends StatelessWidget {
     );
   }
 
-  // Диалог выбора языка
   void _showLanguageDialog(BuildContext context) {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Выберите язык'), // <-- Убран tr(), используем строку
+        title: const Text('Выберите язык'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

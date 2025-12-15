@@ -4,7 +4,6 @@ import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
 
 import '../../providers/project_provider.dart';
-// Используем модель проекта
 import '../../models/project_model.dart';
 
 class CalendarScreen extends StatefulWidget {
@@ -31,7 +30,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
       body: Column(
         children: [
           TableCalendar(
-            locale: 'ru_RU',
+            locale: 'ru_RU', // Убедитесь, что инициализация локали в main.dart поддерживает это
             firstDay: DateTime.utc(2023, 1, 1),
             lastDay: DateTime.utc(2030, 12, 31),
             focusedDay: _focusedDay,
@@ -53,14 +52,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 color: Colors.green,
                 shape: BoxShape.circle,
               ),
-              // Маркеры (точки) показывают, что в этот день есть события
               markerDecoration: BoxDecoration(
                 color: Colors.deepOrange,
                 shape: BoxShape.circle,
               ),
             ),
             headerStyle: const HeaderStyle(
-              formatButtonVisible: false, // Отключаем кнопку формата (неделя/месяц)
+              formatButtonVisible: false,
               titleCentered: true,
             ),
           ),
@@ -68,7 +66,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
           Expanded(
             child: _selectedDay == null
                 ? const Center(child: Text('Выберите дату для просмотра проектов'))
-            // Отображаем список проектов для выбранного дня
                 : _buildEventList(events[DateUtils.dateOnly(_selectedDay!)] ?? []),
           ),
         ],
@@ -76,11 +73,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
-
   Map<DateTime, List<ProjectModel>> _groupProjectsByDate(List<ProjectModel> projects) {
     final Map<DateTime, List<ProjectModel>> data = {};
     for (final project in projects) {
-      // Используем DateUtils.dateOnly, чтобы игнорировать время и группировать только по дате
+      // Используем DateUtils.dateOnly, чтобы игнорировать время
       final DateTime date = DateUtils.dateOnly(project.deadline);
       data.putIfAbsent(date, () => []);
       data[date]!.add(project);
@@ -88,7 +84,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
     return data;
   }
 
-  /// Список проектов для выбранного дня
   Widget _buildEventList(List<ProjectModel> projects) {
     if (projects.isEmpty) {
       return const Center(child: Text('На этот день нет проектов'));
@@ -100,10 +95,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
       itemBuilder: (context, index) {
         final ProjectModel p = projects[index];
         return ListTile(
-          leading: const Icon(Icons.assignment, color: Colors.blue),
+          leading: Icon(Icons.assignment, color: p.statusEnum.color), // Используем цвет статуса
           title: Text(p.title, style: const TextStyle(fontWeight: FontWeight.bold)),
           subtitle: Text(
-            // Используем статус из ProjectModel (предполагая наличие геттера .text у ProjectStatus)
             'Дедлайн: ${DateFormat('dd.MM.yyyy HH:mm').format(p.deadline)}\nСтатус: ${p.statusEnum.text}',
           ),
           onTap: () => _showProjectDetails(context, p),
@@ -112,7 +106,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
-  /// Диалог с подробностями проекта
   void _showProjectDetails(BuildContext context, ProjectModel project) {
     showDialog(
       context: context,
@@ -124,7 +117,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
           children: [
             Text('Описание: ${project.description.isEmpty ? "Нет" : project.description}'),
             const SizedBox(height: 8),
-            // Используем статус из ProjectModel
             Text('Статус: ${project.statusEnum.text}'),
             Text('Дедлайн: ${DateFormat('dd.MM.yyyy HH:mm').format(project.deadline)}'),
           ],

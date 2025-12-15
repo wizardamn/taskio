@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide SortBy; // <-- ИСПРАВЛЕНИЕ 1: Скрываем SortBy из Supabase
 
 // --- ИМПОРТЫ ---
-import '../../providers/auth_provider.dart'; // <-- Импорт AuthProvider
+import '../../providers/auth_provider.dart';
 import '../../models/project_model.dart';
 import '../../providers/project_provider.dart';
+import '../../services/supabase_service.dart'; // Для имени бакета
 import 'project_form_screen.dart';
 import '../../widgets/user_profile_drawer.dart';
 
@@ -25,16 +27,23 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
     super.initState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final prov = context.read<ProjectProvider>();
-      final authProv = context.read<AuthProvider>(); // <-- Получаем AuthProvider
+      if (!mounted) return;
 
-      // --- ОБНОВЛЕНО: Проверка гостевого режима ---
-      if (authProv.isGuest) { // <-- Используем isGuest из AuthProvider
-        prov.setGuestUser(); // <-- Устанавливаем гостевой режим в ProjectProvider
+      final prov = context.read<ProjectProvider>();
+      final authProv = context.read<AuthProvider>();
+
+      // Инициализация данных в зависимости от режима
+      if (authProv.isGuest) {
+        prov.setGuestUser();
       } else {
-        await prov.fetchProjects(); // <-- Загружаем проекты для авторизованного пользователя
+        await prov.fetchProjects();
       }
     });
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
   }
 
   // =====================================================
@@ -42,26 +51,26 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   // =====================================================
   @override
   Widget build(BuildContext context) {
-    // Используем context.watch для подписки на изменения в ProjectProvider
+    // Подписка на изменения
     final prov = context.watch<ProjectProvider>();
-    // --- ИСПРАВЛЕНО: Следим за AuthProvider ---
     final authProv = context.watch<AuthProvider>();
+
     final projects = prov.view;
 
-    // --- ОБНОВЛЕНО: Проверка гостя ---
+    // Проверка гостя
     final isActuallyGuest = authProv.isGuest || prov.isGuest;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Мои проекты'), // Русификация
+        title: const Text('Мои проекты'),
         actions: [
-          // --- ИКОНКА КОЛОКОЛЬЧИКА: ПОКАЗЫВАЕТСЯ НЕ ВСЕГДА ---
-          if (!isActuallyGuest) // <-- Скрываем колокольчик для гостя
+          if (!isActuallyGuest)
             IconButton(
               icon: const Icon(Icons.notifications),
               onPressed: () {
+                if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Нет новых уведомлений')), // Русификация
+                  const SnackBar(content: Text('Нет новых уведомлений')),
                 );
               },
             ),
@@ -71,12 +80,12 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
             icon: const Icon(Icons.filter_list_alt),
             onSelected: (value) => _onSortFilter(value, prov),
             itemBuilder: (context) => [
-              const PopupMenuItem(value: 'dAsc', child: Text('Cначала новые')), // Русификация
-              const PopupMenuItem(value: 'dDesc', child: Text('Сначала старые')), // Русификация
-              const PopupMenuItem(value: 'status', child: Text('По статусу')), // Русификация
+              const PopupMenuItem(value: 'dAsc', child: Text('Cначала новые')),
+              const PopupMenuItem(value: 'dDesc', child: Text('Сначала старые')),
+              const PopupMenuItem(value: 'status', child: Text('По статусу')),
               const PopupMenuDivider(),
-              const PopupMenuItem(value: 'all', child: Text('Все проекты')), // Русификация
-              const PopupMenuItem(value: 'inProgress', child: Text('В работе')), // Русификация
+              const PopupMenuItem(value: 'all', child: Text('Все проекты')),
+              const PopupMenuItem(value: 'inProgress', child: Text('В работе')),
             ],
           ),
         ],
@@ -91,18 +100,16 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
         child: projects.isEmpty
             ? Center(
           child: Text(
-            // --- ИСПРАВЛЕНО: Используем объединённый флаг ---
             isActuallyGuest
                 ? "Войдите в аккаунт, чтобы увидеть проекты"
                 : "Нет проектов",
             style: const TextStyle(fontSize: 16, color: Colors.grey),
           ),
         )
-            : _buildProjectList(projects, prov), // Передаем провайдер
+            : _buildProjectList(projects, prov, authProv),
       ),
 
-      // Кнопка «добавить» показывается ТОЛЬКО когда пользователь авторизован и НЕ гость
-      floatingActionButton: isActuallyGuest // <-- Проверяем объединённый флаг
+      floatingActionButton: isActuallyGuest
           ? null
           : AnimatedScale(
         scale: _fabScale,
@@ -110,7 +117,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
         curve: Curves.easeIn,
         child: FloatingActionButton(
           onPressed: _addProject,
-          tooltip: 'Создать проект', // Русификация
+          tooltip: 'Создать проект',
           child: const Icon(Icons.add),
         ),
       ),
@@ -121,40 +128,34 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   //               ОБРАБОТЧИКИ ДЕЙСТВИЙ
   // =====================================================
 
-  /// Обработчик нажатия на FAB
   Future<void> _addProject() async {
-    // 1. Читаем провайдер до первого await
     final prov = context.read<ProjectProvider>();
+    final authProv = context.read<AuthProvider>();
 
-    // --- ПРОВЕРКА: Убедимся, что пользователь не гость ---
-    if (prov.isGuest) {
-      if (!mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед setState
+    if (authProv.isGuest || prov.isGuest) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Гости не могут создавать проекты.')),
       );
       return;
     }
 
-    // Анимация нажатия
     setState(() => _fabScale = 0.9);
     await Future.delayed(const Duration(milliseconds: 100));
-    // setState safe, так как вызывается в том же виджете, что и находится
-    if (!mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед setState
+    if (!mounted) return;
     setState(() => _fabScale = 1.0);
 
     ProjectModel newProject;
     try {
       newProject = prov.createEmptyProject();
     } catch (e) {
-      if (!context.mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед использованием context
+      if (!mounted) return; // ИСПРАВЛЕНИЕ: используем mounted
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
       );
       return;
     }
 
-
-    // 2. Асинхронный gap
     final created = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -162,22 +163,17 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
       ),
     );
 
-    // 3. Проверка mounted после gap
-    if (!context.mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед использованием context
+    if (!mounted) return; // ИСПРАВЛЕНИЕ: используем mounted
 
-    if (created == true) { // Проверяем на true, как указано в ProjectFormScreen
-      // Нет необходимости в await, так как ProjectListScreen и так подписан
-      // на провайдера через context.watch, но для немедленного обновления вызываем fetchProjects.
+    if (created == true) {
       await prov.fetchProjects();
-
-      // 4. Используем context безопасно
+      if (!mounted) return; // Дополнительная проверка перед использованием context
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Проект успешно создан')), // Русификация
+        const SnackBar(content: Text('Проект успешно создан')),
       );
     }
   }
 
-  // Фильтрация и сортировка
   void _onSortFilter(String value, ProjectProvider prov) {
     switch (value) {
       case 'dAsc':
@@ -198,60 +194,57 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
     }
   }
 
-  // Подтверждение удаления
   Future<void> _confirmDelete(
       BuildContext context, ProjectProvider prov, ProjectModel project) async {
-    // --- ПРОВЕРКА: Убедимся, что пользователь не гость ---
-    if (prov.isGuest) {
-      if (!context.mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед использованием context
+    // Внимание: здесь context должен быть передан от родительского виджета (экрана),
+    // чтобы он был валиден после закрытия диалога.
+
+    // Используем listen: false, так как мы внутри метода действия
+    final authProv = Provider.of<AuthProvider>(context, listen: false);
+
+    if (authProv.isGuest || prov.isGuest) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Гости не могут удалять проекты.')),
       );
       return;
     }
 
-    // Проверка прав перед вызовом диалога
-    if (!prov.canEditProject(project)) {
-      if (!context.mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед использованием context
+    if (project.ownerId != authProv.userId) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('У вас нет прав на удаление этого проекта')), // Русификация
+        const SnackBar(content: Text('Только владелец может удалить проект.')),
       );
       return;
     }
 
-
-    // showDialog использует переданный context, что безопасно
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Удаление проекта'), // Русификация
-        content: const Text('Вы уверены, что хотите удалить этот проект?'), // Русификация
+        title: const Text('Удаление проекта'),
+        content: const Text('Вы уверены, что хотите удалить этот проект?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Отмена'), // Русификация
+            child: const Text('Отмена'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.error),
-            child: const Text('Удалить'), // Русификация
+            child: const Text('Удалить'),
           ),
         ],
       ),
     );
 
-    // Проверяем mounted перед использованием context после await
-    if (!context.mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед использованием context
+    // ИСПРАВЛЕНИЕ: Проверяем mounted.
+    // Поскольку мы в State классе, используем this.mounted.
+    if (!mounted) return;
 
     if (confirmed == true) {
       await prov.deleteProject(project.id);
-
-      // Проверяем mounted перед использованием ScaffoldMessenger
-      if (!context.mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед использованием context
-
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Проект успешно удален')), // Русификация
+        const SnackBar(content: Text('Проект успешно удален')),
       );
     }
   }
@@ -259,27 +252,28 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   // =====================================================
   //               СПИСОК И КАРТОЧКА
   // =====================================================
-  // Принимаем провайдер как аргумент
-  Widget _buildProjectList(List<ProjectModel> projects, ProjectProvider provider) {
+  Widget _buildProjectList(List<ProjectModel> projects, ProjectProvider provider, AuthProvider authProvider) {
+    final currentUserId = authProvider.userId;
+
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 80),
       itemCount: projects.length,
-      itemBuilder: (context, index) {
+      // ИСПРАВЛЕНИЕ 2: Переименовываем context в itemContext, чтобы избежать shadowing (скрытия)
+      // контекста стейта (this.context). Это позволяет безопасно использовать this.context
+      // в асинхронных колбэках.
+      itemBuilder: (itemContext, index) {
         final p = projects[index];
-        // Определяем права на редактирование, используя переданный провайдер
-        final canEdit = provider.canEditProject(p); // <-- Убедимся, что canEditProject проверяет isGuest
-
+        final canEdit = provider.canEditProject(p);
+        final isOwner = p.ownerId == currentUserId;
 
         return _ProjectCard(
             project: p,
-            canEdit: canEdit, // Передаем права в карточку
+            canEdit: canEdit,
+            isOwner: isOwner,
             onEdit: (project) async {
-              // Если нет прав, просто выходим
-              // Тут не нужна дополнительная проверка canEdit, т.к. она есть в _ProjectCard.onTap
-              // но оставляем ее на всякий случай, если функция onEdit вызывается напрямую
               if (!canEdit) return;
 
-              // Здесь не используем context.read, а просто обращаемся к Navigation
+              // Используем context (от State), а не itemContext
               final updated = await Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -287,20 +281,16 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                 ),
               );
 
-              // Проверка mounted после await
-              if (!context.mounted) return; // <-- ИСПРАВЛЕНО: Проверка mounted перед использованием context
+              if (!mounted) return;
 
               if (updated == true) {
-                // Используем переданный провайдер для обновления данных
                 await provider.fetchProjects();
-
-                // Дополнительное уведомление об успехе
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Проект успешно обновлен')),
                 );
               }
             },
-            // Используем переданный провайдер
+            // Используем context (от State) для _confirmDelete
             onDelete: (project) => _confirmDelete(context, provider, project)
         );
       },
@@ -315,119 +305,193 @@ class _ProjectCard extends StatelessWidget {
   final ProjectModel project;
   final Function(ProjectModel) onEdit;
   final Function(ProjectModel) onDelete;
-  final bool canEdit; // Новое поле для прав
+  final bool canEdit;
+  final bool isOwner;
 
   const _ProjectCard({
     required this.project,
     required this.onEdit,
     required this.onDelete,
-    required this.canEdit, // Требуем права
+    required this.canEdit,
+    required this.isOwner,
   });
 
   /// Получает имена ВСЕХ участников
   List<String> _getAllParticipantNames(ProjectModel project) {
-    // Включаем всех, так как `participantsData` уже должен содержать
-    // всех актуальных участников, включая владельца.
     return project.participantsData
         .map((p) => p.fullName)
         .toList();
+  }
+
+  /// Получает иконку для файла
+  IconData _getFileIcon(String mimeType) {
+    if (mimeType.contains('pdf')) return Icons.picture_as_pdf;
+    if (mimeType.contains('word') || mimeType.contains('doc')) return Icons.description;
+    if (mimeType.contains('audio') || mimeType.contains('mp3')) return Icons.audiotrack;
+    if (mimeType.contains('image')) return Icons.image;
+    return Icons.insert_drive_file;
+  }
+
+  /// Цвет иконки для файла
+  Color _getFileColor(String mimeType) {
+    if (mimeType.contains('pdf')) return Colors.red;
+    if (mimeType.contains('word')) return Colors.blue;
+    if (mimeType.contains('audio')) return Colors.orange;
+    if (mimeType.contains('image')) return Colors.purple;
+    return Colors.grey;
   }
 
   @override
   Widget build(BuildContext context) {
     final allParticipants = _getAllParticipantNames(project);
     final participantCount = project.participantsData.length;
+    final attachments = project.attachments;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       elevation: 5,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      child: ListTile(
-        // Разрешаем переход на форму, только если есть права на редактирование
-        // ЭТОТ МЕТОД РАБОТАЕТ КОРРЕКТНО:
-        onTap: canEdit ? () => onEdit(project) : null, // <-- onTap вызывает onEdit
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-
-        leading: Container(
-          width: 10,
-          decoration: BoxDecoration(
-            // Используем цвет из расширения
-            color: project.statusEnum.color,
-            borderRadius: BorderRadius.circular(5),
-          ),
-        ),
-
-        title: Text(
-          project.title,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-        ),
-
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 4),
-            // Срок
-            Text('Срок: ${DateFormat('dd.MM.yyyy').format(project.deadline)}'),
-
-            // Статус
-            Text('Статус: ${project.statusEnum.text}'),
-
-            // ✅ УЧАСТНИКИ: Теперь этот список должен быть заполнен, если RLS позволяет
-            if (participantCount > 0)
-              Text(
-                // Теперь отображаются все участники, разделенные запятыми
-                'Участники: ${allParticipants.join(', ')} (Всего $participantCount чел.)',
-                style: const TextStyle(fontSize: 12, color: Colors.black54),
-              )
-            else
-              const Text(
-                'Участники: Нет данных',
-                style: TextStyle(fontSize: 12, color: Colors.black54),
+      child: InkWell(
+        onTap: canEdit ? () => onEdit(project) : null,
+        borderRadius: BorderRadius.circular(15),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // --- ЗАГОЛОВОК И СТАТУС ---
+              Row(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: project.statusEnum.color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      project.title,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (canEdit)
+                    PopupMenuButton<String>(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onSelected: (value) {
+                        if (value == 'edit') {
+                          onEdit(project);
+                        } else if (value == 'delete') {
+                          onDelete(project);
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(value: 'edit', child: Text('Открыть/Изменить')),
+                        // Удаление только для владельца
+                        if (isOwner)
+                          const PopupMenuItem(value: 'delete', child: Text('Удалить', style: TextStyle(color: Colors.red))),
+                      ],
+                      child: const Icon(Icons.more_vert, size: 20),
+                    ),
+                ],
               ),
 
-            // Оценка
-            if (project.grade != null && project.statusEnum == ProjectStatus.completed)
-              Text('Оценка: ${project.grade!.truncate()}', // Отображаем как целое число
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.primary,
+              const SizedBox(height: 8),
+
+              // --- ИНФОРМАЦИЯ ---
+              Text('Срок: ${DateFormat('dd.MM.yyyy').format(project.deadline)}', style: const TextStyle(fontSize: 13)),
+              Text('Статус: ${project.statusEnum.text}', style: const TextStyle(fontSize: 13)),
+
+              const SizedBox(height: 4),
+              if (participantCount > 0)
+                Text(
+                  'Участники: ${allParticipants.join(', ')}',
+                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                )
+              else
+                const Text(
+                  'Участники: Нет',
+                  style: TextStyle(fontSize: 12, color: Colors.black54),
                 ),
-              ),
 
-            // --- ДОБАВЛЕНО ДЛЯ ОТЛАДКИ ПРАВ ---
-            if (!canEdit)
-              Padding(
-                padding: const EdgeInsets.only(top: 4.0),
-                child: Text(
-                  'Нет прав на редактирование/удаление.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.error,
-                    fontWeight: FontWeight.bold,
+              if (project.grade != null && project.statusEnum == ProjectStatus.completed)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4.0),
+                  child: Text('Оценка: ${project.grade!.truncate()}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
                   ),
                 ),
-              ),
-            // ------------------------------------
-          ],
-        ),
 
-        // Меню: редактировать/удалить показывается только если есть права
-        trailing: canEdit
-            ? PopupMenuButton<String>(
-          onSelected: (value) {
-            if (value == 'edit') {
-              onEdit(project);
-            } else if (value == 'delete') {
-              onDelete(project); // Передаем весь проект
-            }
-          },
-          itemBuilder: (context) => [
-            const PopupMenuItem(value: 'edit', child: Text('Изменить')),
-            const PopupMenuItem(value: 'delete', child: Text('Удалить')),
-          ],
-          icon: const Icon(Icons.more_vert),
-        )
-            : null, // Если нет прав, кнопка не показывается
+              // --- ВЛОЖЕНИЯ ---
+              if (attachments.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 40,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: attachments.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (context, index) {
+                      final att = attachments[index];
+                      final isImage = att.mimeType.contains('image');
+                      final publicUrl = Supabase.instance.client.storage
+                          .from(SupabaseService.bucket)
+                          .getPublicUrl(att.filePath);
+
+                      return Tooltip(
+                        message: att.fileName,
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.grey.shade300),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: isImage
+                                ? Image.network(
+                              publicUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Icon(Icons.broken_image, size: 20, color: Colors.grey),
+                            )
+                                : Icon(
+                              _getFileIcon(att.mimeType),
+                              color: _getFileColor(att.mimeType),
+                              size: 24,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+
+              if (!canEdit)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(
+                    'Только просмотр',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

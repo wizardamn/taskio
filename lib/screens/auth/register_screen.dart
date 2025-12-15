@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart'; // Оставлен и используется для анимации
-import '../../services/auth_service.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:provider/provider.dart';
+import '../../providers/auth_provider.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -11,29 +12,26 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _auth = AuthService();
-  final _email = TextEditingController();
-  final _password = TextEditingController();
-  final _fullName = TextEditingController();
-  String _role = 'student'; // Роль по умолчанию (используется ключ для логики)
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _fullNameController = TextEditingController();
+  String _role = 'student';
   bool _isLoading = false;
   bool _isPasswordVisible = false;
 
   @override
   void dispose() {
-    _email.dispose();
-    _password.dispose();
-    _fullName.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _fullNameController.dispose();
     super.dispose();
   }
 
-  // Функция для показа стильных подсказок (Snackbar)
   void _showSnackBar(String message, {bool isError = true}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        // Используем цветовую схему темы
         backgroundColor: isError
             ? Theme.of(context).colorScheme.error
             : Colors.green.shade600,
@@ -46,36 +44,29 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   void _register() async {
-    if (_isLoading) return;
-    if (!_formKey.currentState!.validate()) return;
+    if (_isLoading || !_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
 
     try {
-      // Передаем ключ роли в сервис
-      final success = await _auth.signUp(
-        _email.text.trim(),
-        _password.text.trim(),
-        _fullName.text.trim(),
+      final authProvider = context.read<AuthProvider>();
+      await authProvider.signUp(
+        _emailController.text.trim(),
+        _passwordController.text.trim(),
+        _fullNameController.text.trim(),
         _role,
       );
 
       if (!mounted) return;
 
-      if (success) {
-        // Успешная регистрация: Стильная подсказка
-        _showSnackBar('Успешная регистрация', isError: false);
-        // ВОЗВРАТ НА ЭКРАН ВХОДА
-        Navigator.pop(context);
-      }
+      _showSnackBar('Успешная регистрация', isError: false);
+
+      // Возвращаемся на экран входа
+      Navigator.of(context).pop();
 
     } on Exception catch (e) {
       if (mounted) {
-        // Отображение ошибок
         _showSnackBar(e.toString().replaceFirst('Exception: ', ''), isError: true);
-      }
-    } finally {
-      if (mounted) {
         setState(() => _isLoading = false);
       }
     }
@@ -83,14 +74,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Регулярное выражение для строгой проверки почты
     const emailRegex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}$';
 
     return Scaffold(
-      // AppBar добавлен для автоматической кнопки "назад"
-      appBar: AppBar(
-        title: const Text('Регистрация'),
-      ),
+      appBar: AppBar(title: const Text('Регистрация')),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -99,57 +86,49 @@ class _RegisterScreenState extends State<RegisterScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // 1. Поле Полное имя (Анимация flutter_animate)
                 TextFormField(
-                  controller: _fullName,
+                  controller: _fullNameController,
                   decoration: const InputDecoration(
-                      labelText: 'Имя'),
-                  validator: (v) =>
-                  v == null || v.isEmpty ? 'Пожалуйста, введите имя' : null,
+                    labelText: 'Имя',
+                    prefixIcon: Icon(Icons.person_outline),
+                  ),
+                  validator: (v) => v == null || v.isEmpty ? 'Пожалуйста, введите имя' : null,
                 )
                     .animate(delay: 0.ms)
                     .fadeIn(duration: 500.ms)
-                    .slide(duration: 500.ms, begin: const Offset(0, 0.3)), // Анимация
+                    .slide(duration: 500.ms, begin: const Offset(0, 0.3)),
 
                 const SizedBox(height: 16),
 
-                // 2. Поле Email (Анимация flutter_animate)
                 TextFormField(
-                  controller: _email,
+                  controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
                   decoration: const InputDecoration(
-                      labelText: 'Email',
-                      hintText: 'Email'),
+                    labelText: 'Email',
+                    hintText: 'Email',
+                    prefixIcon: Icon(Icons.email_outlined),
+                  ),
                   validator: (v) {
-                    if (v == null || v.isEmpty) {
-                      return 'Пожалуйста, введите email';
-                    }
-                    if (!RegExp(emailRegex).hasMatch(v)) {
-                      return 'Неверный формат email';
-                    }
+                    if (v == null || v.isEmpty) return 'Пожалуйста, введите email';
+                    if (!RegExp(emailRegex).hasMatch(v)) return 'Неверный формат email';
                     return null;
                   },
                 )
                     .animate(delay: 100.ms)
                     .fadeIn(duration: 500.ms)
-                    .slide(duration: 500.ms, begin: const Offset(0, 0.3)), // Анимация с задержкой
+                    .slide(duration: 500.ms, begin: const Offset(0, 0.3)),
 
                 const SizedBox(height: 16),
 
-                // 3. Поле Пароль (Анимация flutter_animate)
                 TextFormField(
-                  controller: _password,
+                  controller: _passwordController,
                   decoration: InputDecoration(
                     labelText: 'Пароль',
                     hintText: 'Пароль',
+                    prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
-                      icon: Icon(_isPasswordVisible
-                          ? Icons.visibility
-                          : Icons.visibility_off),
-                      onPressed: () {
-                        // Переключает состояние видимости
-                        setState(() => _isPasswordVisible = !_isPasswordVisible);
-                      },
+                      icon: Icon(_isPasswordVisible ? Icons.visibility : Icons.visibility_off),
+                      onPressed: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
                     ),
                   ),
                   obscureText: !_isPasswordVisible,
@@ -159,52 +138,43 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 )
                     .animate(delay: 200.ms)
                     .fadeIn(duration: 500.ms)
-                    .slide(duration: 500.ms, begin: const Offset(0, 0.3)), // Анимация с задержкой
+                    .slide(duration: 500.ms, begin: const Offset(0, 0.3)),
 
                 const SizedBox(height: 16),
 
-                // 4. Выбор роли (Анимация flutter_animate)
                 DropdownButtonFormField<String>(
                   value: _role,
                   items: const [
-                    // Текст Dropdown заменен на русский
-                    DropdownMenuItem(
-                        value: 'student', child: Text('Студент')),
-                    DropdownMenuItem(
-                        value: 'teacher', child: Text('Учитель')),
-                    DropdownMenuItem(
-                        value: 'leader', child: Text('Тимлид')),
+                    DropdownMenuItem(value: 'student', child: Text('Студент')),
+                    DropdownMenuItem(value: 'teacher', child: Text('Учитель')),
+                    DropdownMenuItem(value: 'leader', child: Text('Тимлид')),
                   ],
-                  decoration:
-                  const InputDecoration(labelText: 'Выберите роль'),
+                  decoration: const InputDecoration(
+                    labelText: 'Выберите роль',
+                    prefixIcon: Icon(Icons.work_outline),
+                  ),
                   onChanged: (v) {
-                    if (v != null) {
-                      setState(() => _role = v);
-                    }
+                    if (v != null) setState(() => _role = v);
                   },
                 )
                     .animate(delay: 300.ms)
                     .fadeIn(duration: 500.ms)
-                    .slide(duration: 500.ms, begin: const Offset(0, 0.3)), // Анимация с задержкой
+                    .slide(duration: 500.ms, begin: const Offset(0, 0.3)),
 
                 const SizedBox(height: 30),
 
-                // 5. Кнопка Регистрации (Анимация flutter_animate)
                 _isLoading
                     ? const CircularProgressIndicator()
                     : ElevatedButton(
-                    onPressed: _register,
-                    // Улучшение: Увеличиваем размер кнопки
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 50),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    child: const Text('Зарегистрироваться'))
+                  onPressed: _register,
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 50),
+                  ),
+                  child: const Text('Зарегистрироваться'),
+                )
                     .animate(delay: 400.ms)
                     .fadeIn(duration: 500.ms)
-                    .slide(duration: 500.ms, begin: const Offset(0, 0.3)), // Анимация с задержкой
+                    .slide(duration: 500.ms, begin: const Offset(0, 0.3)),
               ],
             ),
           ),

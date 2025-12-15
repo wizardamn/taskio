@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 // ----------------------------------------------------------------------
-// 1. Модель участника проекта — теперь с ролью!
+// 1. Модель участника проекта (данные из profiles + роль из project_members)
 // ----------------------------------------------------------------------
 class ProjectParticipant {
   final String id;
   final String fullName;
-  final String? role; // ← "owner" | "editor" | null
+  final String? role; // "owner" | "editor" | "viewer"
 
   ProjectParticipant({
     required this.id,
@@ -17,7 +17,7 @@ class ProjectParticipant {
 
   factory ProjectParticipant.fromJson(Map<String, dynamic> json) {
     return ProjectParticipant(
-      // Используем явное приведение String, чтобы гарантировать тип
+      // Поддержка разных вариантов naming в зависимости от того, как мы джойним таблицы
       id: json['member_id'] as String? ?? json['id'] as String,
       fullName: json['full_name'] as String? ?? 'Неизвестный участник',
       role: json['role'] as String?,
@@ -110,8 +110,13 @@ class ProjectModel {
   final DateTime deadline;
   final int status;
   final double? grade;
+
+  // Список ID участников (из колонки projects.participants)
   final List<String> participantIds;
-  final List<ProjectParticipant> participantsData; // ← теперь с role!
+
+  // Подробные данные участников (подгружаются отдельно через project_members JOIN profiles)
+  final List<ProjectParticipant> participantsData;
+
   final List<Attachment> attachments;
   final DateTime createdAt;
 
@@ -124,7 +129,7 @@ class ProjectModel {
     required this.status,
     this.grade,
     this.participantIds = const [],
-    this.participantsData = const [], // ← дефолт: пустой список (не null!)
+    this.participantsData = const [],
     this.attachments = const [],
     required this.createdAt,
   });
@@ -170,9 +175,10 @@ class ProjectModel {
   }
 
   // ------------------------------------------------
-  // FROM JSON
+  // FROM JSON (Парсинг строки из таблицы projects)
   // ------------------------------------------------
   factory ProjectModel.fromJson(Map<String, dynamic> json) {
+
     List<String> parseParticipantIds(dynamic value) {
       if (value is List) {
         return value.map((e) => e.toString()).toList();
@@ -200,8 +206,9 @@ class ProjectModel {
       status: json['status'] as int? ?? ProjectStatus.planned.index,
       grade: (json['grade'] as num?)?.toDouble(),
       participantIds: parseParticipantIds(json['participants']),
-      // ИСПРАВЛЕНИЕ: Удаляем 'const', чтобы избежать "Unnecessary constructor invocation"
-      participantsData: const [], // <-- УБРАНО const
+      // ИСПРАВЛЕНО: Убрано const, пустой список по дефолту.
+      // Данные заполняются в сервисе отдельным запросом к project_members
+      participantsData: [],
       attachments: parseAttachments(json['attachments']),
     );
   }
@@ -225,7 +232,7 @@ class ProjectModel {
   }
 
   // ------------------------------------------------
-  // Фабрика для пустого проекта
+  // Фабрика для пустого проекта (для создания нового)
   // ------------------------------------------------
   static ProjectModel createEmpty({required String ownerId}) {
     return ProjectModel(
@@ -236,9 +243,10 @@ class ProjectModel {
       deadline: DateTime.now().add(const Duration(days: 7)),
       status: ProjectStatus.planned.index,
       participantIds: [ownerId],
-      // ИСПРАВЛЕНИЕ: Удаляем 'const', чтобы избежать "Unnecessary constructor invocation"
-      participantsData: const [], // <-- УБРАНО const
-      attachments: const [],
+      // ИСПРАВЛЕНО: Убрано const
+      participantsData: [],
+      // ИСПРАВЛЕНО: Убрано const
+      attachments: [],
       createdAt: DateTime.now(),
     );
   }
