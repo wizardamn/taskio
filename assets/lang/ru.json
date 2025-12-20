@@ -20,5 +20,17 @@
   "light_theme": "Светлая тема",
   "generate_report": "Сформировать отчет",
   "report_functionality_not_impl": "Функция отчетов будет реализована",
-  "login": "Войти"
+  "login": "Войти",
+  "settings": "Настройки",
+  "language": "Язык",
+  "management": "Управление",
+  "calendar": "Календарь",
+  "reports": "Отчеты",
+  "about_app": "О приложении",
+  "email_not_provided": "Email не указан",
+  "logout_title": "Выход",
+  "logout_confirmation": "Вы уверены, что хотите выйти из аккаунта?",
+  "cancel": "Отмена",
+  "app_description": "Приложение для управления учебными проектами. Планируйте, выполняйте и отслеживайте прогресс вместе с командой.",
+  "copyright": "© 2025 Taskio Team"
 }

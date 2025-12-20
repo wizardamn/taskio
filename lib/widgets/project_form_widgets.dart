@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../models/project_model.dart'; // Путь к вашей модели Attachment
+import '../models/project_model.dart';
 import '../services/supabase_service.dart';
 
 // --- Компонент выбора даты ---
@@ -76,6 +76,9 @@ class AttachmentThumb extends StatelessWidget {
     final isImage = _isImage(attachment.fileName);
     const size = 100.0;
 
+    // Используем цвета текущей темы для адаптации под темный/светлый режим
+    final colorScheme = Theme.of(context).colorScheme;
+
     final String fullPublicUrl = SupabaseService.client.storage
         .from(SupabaseService.bucket)
         .getPublicUrl(attachment.filePath);
@@ -89,24 +92,25 @@ class AttachmentThumb extends StatelessWidget {
             width: size,
             height: size,
             decoration: BoxDecoration(
-              color: isOpening ? Colors.blue.shade50 : Colors.grey[100],
+              // Адаптивные цвета фона и рамки
+              color: isOpening ? colorScheme.primaryContainer : colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                  color: Colors.grey.shade300, width: isOpening ? 2.5 : 1),
+                  color: isOpening ? colorScheme.primary : colorScheme.outlineVariant,
+                  width: isOpening ? 2.5 : 1),
             ),
             child: isOpening
                 ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const SizedBox(
+                  SizedBox(
                       width: 25,
                       height: 25,
-                      child: CircularProgressIndicator(strokeWidth: 2.5)),
+                      child: CircularProgressIndicator(strokeWidth: 2.5, color: colorScheme.primary)),
                   const SizedBox(height: 8),
-                  Text('Загрузка...',
-                      style: TextStyle(
-                          fontSize: 10, color: Colors.blue.shade800))
+                  Text('...',
+                      style: TextStyle(fontSize: 10, color: colorScheme.primary))
                 ],
               ),
             )
@@ -116,12 +120,14 @@ class AttachmentThumb extends StatelessWidget {
                   ? Image.network(
                 fullPublicUrl,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _buildFileIcon(),
+                errorBuilder: (_, __, ___) => _buildFileIcon(context),
               )
-                  : _buildFileIcon(),
+                  : _buildFileIcon(context),
             ),
           ),
         ),
+
+        // Кнопка удаления (крестик)
         if (onDelete != null && !isOpening && canEdit)
           Positioned(
             top: -8,
@@ -130,11 +136,11 @@ class AttachmentThumb extends StatelessWidget {
               onTap: onDelete,
               child: Container(
                 padding: const EdgeInsets.all(4),
-                decoration: const BoxDecoration(
-                  color: Colors.red,
+                decoration: BoxDecoration(
+                  color: colorScheme.error,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.close, color: Colors.white, size: 16),
+                child: Icon(Icons.close, color: colorScheme.onError, size: 16),
               ),
             ),
           ),
@@ -142,11 +148,12 @@ class AttachmentThumb extends StatelessWidget {
     );
   }
 
-  Widget _buildFileIcon() {
+  Widget _buildFileIcon(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const Icon(Icons.insert_drive_file, color: Colors.blueGrey, size: 32),
+        Icon(Icons.insert_drive_file, color: colorScheme.outline, size: 32),
         const SizedBox(height: 4),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -154,7 +161,7 @@ class AttachmentThumb extends StatelessWidget {
             attachment.fileName,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 10, color: Colors.black87),
+            style: TextStyle(fontSize: 10, color: colorScheme.onSurface),
             textAlign: TextAlign.center,
           ),
         ),
@@ -162,4 +169,3 @@ class AttachmentThumb extends StatelessWidget {
     );
   }
 }
-// Мы удалили расширение extension ListExtensions отсюда, чтобы избежать конфликта.

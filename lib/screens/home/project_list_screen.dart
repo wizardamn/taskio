@@ -19,6 +19,7 @@ class ProjectListScreen extends StatefulWidget {
 }
 
 class _ProjectListScreenState extends State<ProjectListScreen> {
+  // Для анимации FloatingActionButton
   double _fabScale = 1.0;
 
   @override
@@ -31,6 +32,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
       final prov = context.read<ProjectProvider>();
       final authProv = context.read<AuthProvider>();
 
+      // Инициализация данных в зависимости от режима
       if (authProv.isGuest) {
         prov.setGuestUser();
       } else {
@@ -44,13 +46,21 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
     super.dispose();
   }
 
+  // =====================================================
+  //               ГЛАВНЫЙ BUILD МЕТОД
+  // =====================================================
   @override
   Widget build(BuildContext context) {
+    // Подписка на изменения
     final prov = context.watch<ProjectProvider>();
     final authProv = context.watch<AuthProvider>();
 
     final projects = prov.view;
+
+    // Проверка гостя
     final isActuallyGuest = authProv.isGuest || prov.isGuest;
+    // Цвета темы
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -67,6 +77,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
               },
             ),
 
+          // Фильтр и Сортировка
           PopupMenuButton<String>(
             icon: const Icon(Icons.filter_list_alt),
             onSelected: (value) => _onSortFilter(value, prov),
@@ -94,7 +105,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
             isActuallyGuest
                 ? "Войдите в аккаунт, чтобы увидеть проекты"
                 : "Нет проектов",
-            style: const TextStyle(fontSize: 16, color: Colors.grey),
+            style: TextStyle(fontSize: 16, color: colorScheme.onSurfaceVariant),
           ),
         )
             : _buildProjectList(projects, prov, authProv),
@@ -114,6 +125,10 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
       ),
     );
   }
+
+  // =====================================================
+  //               ОБРАБОТЧИКИ ДЕЙСТВИЙ
+  // =====================================================
 
   Future<void> _addProject() async {
     final prov = context.read<ProjectProvider>();
@@ -231,15 +246,19 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
     }
   }
 
+  // =====================================================
+  //               СПИСОК И КАРТОЧКА
+  // =====================================================
   Widget _buildProjectList(List<ProjectModel> projects, ProjectProvider provider, AuthProvider authProvider) {
     final currentUserId = authProvider.userId;
 
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 80),
       itemCount: projects.length,
+      // Используем itemContext, чтобы избежать скрытия (shadowing) основного context
       itemBuilder: (itemContext, index) {
         final p = projects[index];
-        final canEdit = provider.canEditProject(p); // Владелец или Редактор
+        final canEdit = provider.canEditProject(p);
         final isOwner = p.ownerId == currentUserId;
 
         return _ProjectCard(
@@ -249,6 +268,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
             onEdit: (project) async {
               if (!canEdit) return;
 
+              // Используем context (от State), а не itemContext
               final updated = await Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -260,6 +280,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
 
               if (updated == true) {
                 await provider.fetchProjects();
+
                 if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Проект успешно обновлен')),
@@ -273,6 +294,9 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   }
 }
 
+// =====================================================
+//               ОТДЕЛЬНАЯ КАРТОЧКА ПРОЕКТА
+// =====================================================
 class _ProjectCard extends StatelessWidget {
   final ProjectModel project;
   final Function(ProjectModel) onEdit;
@@ -288,12 +312,14 @@ class _ProjectCard extends StatelessWidget {
     required this.isOwner,
   });
 
+  /// Получает имена ВСЕХ участников
   List<String> _getAllParticipantNames(ProjectModel project) {
     return project.participantsData
         .map((p) => p.fullName)
         .toList();
   }
 
+  /// Получает иконку для файла
   IconData _getFileIcon(String mimeType) {
     if (mimeType.contains('pdf')) return Icons.picture_as_pdf;
     if (mimeType.contains('word') || mimeType.contains('doc') || mimeType.contains('officedocument')) return Icons.description;
@@ -302,9 +328,10 @@ class _ProjectCard extends StatelessWidget {
     return Icons.insert_drive_file;
   }
 
+  /// Цвет иконки для файла
   Color _getFileColor(String mimeType) {
     if (mimeType.contains('pdf')) return Colors.red;
-    if (mimeType.contains('word') || mimeType.contains('doc') || mimeType.contains('officedocument')) return Colors.blue;
+    if (mimeType.contains('word')) return Colors.blue;
     if (mimeType.contains('audio')) return Colors.orange;
     if (mimeType.contains('image')) return Colors.purple;
     return Colors.grey;
@@ -315,11 +342,15 @@ class _ProjectCard extends StatelessWidget {
     final allParticipants = _getAllParticipantNames(project);
     final participantCount = project.participantsData.length;
     final attachments = project.attachments;
+    final progress = project.progress;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       elevation: 5,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      // Адаптивный цвет карточки
+      color: colorScheme.surfaceContainerLow,
       child: InkWell(
         onTap: canEdit ? () => onEdit(project) : null,
         borderRadius: BorderRadius.circular(15),
@@ -328,15 +359,23 @@ class _ProjectCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // --- ЗАГОЛОВОК ---
+              // --- ЗАГОЛОВОК И МЕНЮ ---
               Row(
                 children: [
+                  // --- ЦВЕТОВОЙ ИНДИКАТОР (ЦВЕТ ПРОЕКТА) ---
                   Container(
-                    width: 10,
-                    height: 10,
+                    width: 12,
+                    height: 12,
                     decoration: BoxDecoration(
-                      color: project.statusEnum.color,
+                      color: project.colorObj, // Используем цвет проекта
                       shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                            color: project.colorObj.withValues(alpha: 0.4),
+                            blurRadius: 4,
+                            spreadRadius: 1
+                        )
+                      ],
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -361,33 +400,63 @@ class _ProjectCard extends StatelessWidget {
                       },
                       itemBuilder: (context) => [
                         const PopupMenuItem(value: 'edit', child: Text('Открыть')),
-                        // Кнопка удаления только для владельца
+                        // Удаление только для владельца
                         if (isOwner)
                           const PopupMenuItem(value: 'delete', child: Text('Удалить', style: TextStyle(color: Colors.red))),
                       ],
-                      child: const Icon(Icons.more_vert, size: 20),
+                      child: Icon(Icons.more_vert, size: 20, color: colorScheme.onSurface),
                     ),
                 ],
               ),
 
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
+
+              // --- ПРОГРЕСС БАР ---
+              if (project.totalTasks > 0) ...[
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Прогресс',
+                      style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+                    ),
+                    Text(
+                      '${(progress * 100).toInt()}% (${project.completedTasks}/${project.totalTasks})',
+                      style: TextStyle(fontSize: 12, color: colorScheme.onSurface, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 6,
+                    backgroundColor: colorScheme.surfaceContainerHighest,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      progress == 1.0 ? Colors.green : project.colorObj,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
 
               // --- ИНФОРМАЦИЯ ---
-              Text('Срок: ${DateFormat('dd.MM.yyyy').format(project.deadline)}', style: const TextStyle(fontSize: 13)),
-              Text('Статус: ${project.statusEnum.text}', style: const TextStyle(fontSize: 13)),
+              Text('Срок: ${DateFormat('dd.MM.yyyy').format(project.deadline)}', style: TextStyle(fontSize: 13, color: colorScheme.onSurface)),
+              Text('Статус: ${project.statusEnum.text}', style: TextStyle(fontSize: 13, color: colorScheme.onSurface)),
 
               const SizedBox(height: 4),
               if (participantCount > 0)
                 Text(
                   'Участники: ${allParticipants.join(', ')}',
-                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 )
               else
-                const Text(
+                Text(
                   'Участники: Нет',
-                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                  style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
                 ),
 
               if (project.grade != null && project.statusEnum == ProjectStatus.completed)
@@ -396,56 +465,56 @@ class _ProjectCard extends StatelessWidget {
                   child: Text('Оценка: ${project.grade!.truncate()}',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.primary,
+                      color: colorScheme.primary,
                     ),
                   ),
                 ),
 
-              // --- ОТОБРАЖЕНИЕ ВЛОЖЕНИЙ В КАРТОЧКЕ ---
+              // --- ВЛОЖЕНИЯ ---
               if (attachments.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                const Divider(height: 1),
+                Divider(height: 1, color: colorScheme.outlineVariant),
                 const SizedBox(height: 8),
-                SizedBox(
-                  height: 40,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: attachments.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
-                    itemBuilder: (context, index) {
-                      final att = attachments[index];
+                // Используем SingleChildScrollView + Row для надежности
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: attachments.map((att) {
                       final isImage = att.mimeType.contains('image');
                       final publicUrl = Supabase.instance.client.storage
                           .from(SupabaseService.bucket)
                           .getPublicUrl(att.filePath);
 
-                      return Tooltip(
-                        message: att.fileName,
-                        child: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.grey.shade300),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: isImage
-                                ? Image.network(
-                              publicUrl,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => Icon(Icons.broken_image, size: 20, color: Colors.grey),
-                            )
-                                : Icon(
-                              _getFileIcon(att.mimeType),
-                              color: _getFileColor(att.mimeType),
-                              size: 24,
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8.0),
+                        child: Tooltip(
+                          message: att.fileName,
+                          child: Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: colorScheme.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: colorScheme.outline),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: isImage
+                                  ? Image.network(
+                                publicUrl,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Icon(Icons.broken_image, size: 20, color: colorScheme.onSurfaceVariant),
+                              )
+                                  : Icon(
+                                _getFileIcon(att.mimeType),
+                                color: _getFileColor(att.mimeType),
+                                size: 24,
+                              ),
                             ),
                           ),
                         ),
                       );
-                    },
+                    }).toList(),
                   ),
                 ),
               ],
@@ -455,7 +524,7 @@ class _ProjectCard extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 8.0),
                   child: Text(
                     'Только просмотр',
-                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                    style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant, fontStyle: FontStyle.italic),
                   ),
                 ),
             ],

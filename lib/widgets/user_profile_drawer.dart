@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:easy_localization/easy_localization.dart';
+import 'package:easy_localization/easy_localization.dart'; // Импорт для перевода
 import 'package:flutter_animate/flutter_animate.dart';
+//import 'package:package_info_plus/package_info_plus.dart';
 
 import '../providers/project_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/auth_provider.dart';
 import '../screens/profile/profile_screen.dart';
+import '../screens/calendar/calendar_screen.dart';
 
 class UserProfileDrawer extends StatelessWidget {
   const UserProfileDrawer({super.key});
 
-  // --- Вспомогательный метод для стилизованных иконок с анимацией ---
   Widget _buildDrawerItem({
     required BuildContext context,
     required IconData icon,
@@ -20,65 +20,66 @@ class UserProfileDrawer extends StatelessWidget {
     required VoidCallback onTap,
     Color? color,
     Widget? trailing,
-    required int index, // Для задержки анимации
+    required int index,
   }) {
     final theme = Theme.of(context);
     final isDestructive = color == theme.colorScheme.error;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-      // Оборачиваем в ClipRRect для соблюдения закругленных углов InkWell
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Material(
-          color: isDestructive ? color!.withAlpha(20) : Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            // Эффект нажатия
-            splashColor: isDestructive ? color!.withAlpha(51) : theme.colorScheme.primary.withAlpha(26),
-            highlightColor: isDestructive ? color!.withAlpha(26) : theme.colorScheme.primary.withAlpha(13),
-
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-              child: Row(
-                children: [
-                  Icon(
-                    icon,
-                    color: color ?? theme.colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: theme.textTheme.titleMedium!.copyWith(
-                        fontSize: 15,
-                        color: color ?? theme.colorScheme.onSurface,
-                        fontWeight: FontWeight.w500,
-                      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          splashColor: isDestructive
+              ? color!.withAlpha(40)
+              : theme.colorScheme.primary.withAlpha(20),
+          highlightColor: isDestructive
+              ? color!.withAlpha(20)
+              : theme.colorScheme.primary.withAlpha(10),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  color: color ?? theme.colorScheme.onSurfaceVariant,
+                  size: 24,
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleMedium!.copyWith(
+                      fontSize: 16,
+                      color: color ?? theme.colorScheme.onSurface,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                  if (trailing != null) trailing,
-                ],
-              ),
+                ),
+                if (trailing != null) trailing,
+              ],
             ),
           ),
         ),
       ),
     ).animate()
-        .fadeIn(delay: (100 * index).ms, duration: 300.ms)
-        .slideX(begin: 0.1, end: 0, delay: (100 * index).ms, duration: 300.ms);
+        .fadeIn(delay: (50 * index).ms, duration: 300.ms)
+        .slideX(begin: 0.05, end: 0, delay: (50 * index).ms, duration: 300.ms);
   }
 
-  // Функция для навигации на экран профиля
   void _navigateToProfile(BuildContext context) {
-    Navigator.pop(context); // Закрываем Drawer
+    Navigator.pop(context);
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const ProfileScreen()),
     );
   }
 
-  // --- Персонализированный Header ---
   Widget _buildHeader(BuildContext context) {
     final theme = Theme.of(context);
 
@@ -87,52 +88,75 @@ class UserProfileDrawer extends StatelessWidget {
         final authProv = context.watch<AuthProvider>();
         final isGuest = authProv.isGuest;
 
-        final displayName = isGuest ? 'Гость' : prov.currentUserName;
-        // Берем email через authProv, так как он уже инициализирован
+        // Используем ключи перевода
+        final displayName = isGuest ? 'guest'.tr() : prov.currentUserName;
         final displayEmail = isGuest
-            ? 'Войдите в аккаунт'
-            : authProv.user?.email ?? 'Email не указан';
+            ? 'guest_email'.tr()
+            : authProv.user?.email ?? 'email_not_provided'.tr();
 
         return InkWell(
           onTap: isGuest ? null : () => _navigateToProfile(context),
-          splashColor: theme.colorScheme.onPrimary.withAlpha(51),
-          highlightColor: theme.colorScheme.onPrimary.withAlpha(26),
           child: Container(
-            padding: const EdgeInsets.only(top: 40, left: 16, right: 16, bottom: 20),
-            color: theme.colorScheme.primary,
+            width: double.infinity,
+            padding: const EdgeInsets.only(top: 50, left: 24, right: 24, bottom: 24),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  theme.colorScheme.primary,
+                  theme.colorScheme.primaryContainer,
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Аватар
-                CircleAvatar(
-                  radius: 30,
-                  backgroundColor: theme.colorScheme.onPrimary,
-                  child: Icon(
-                    isGuest ? Icons.person_off : Icons.person,
-                    color: theme.colorScheme.primary,
-                    size: 30,
+                Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(40),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
-                ).animate().scale(duration: 300.ms, curve: Curves.easeOutBack),
+                  child: CircleAvatar(
+                    radius: 36,
+                    backgroundColor: theme.colorScheme.surface,
+                    child: Icon(
+                      isGuest ? Icons.person_off_rounded : Icons.person_rounded,
+                      color: theme.colorScheme.primary,
+                      size: 36,
+                    ),
+                  ),
+                ).animate().scale(duration: 400.ms, curve: Curves.easeOutBack),
 
-                const SizedBox(height: 12),
-                // Имя
+                const SizedBox(height: 16),
+
                 Text(
                   displayName,
                   style: theme.textTheme.headlineSmall!.copyWith(
                     fontWeight: FontWeight.bold,
                     color: theme.colorScheme.onPrimary,
+                    height: 1.2,
                   ),
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                ),
+                ).animate().fadeIn(delay: 100.ms),
+
                 const SizedBox(height: 4),
-                // Email
+
                 Text(
                   displayEmail,
-                  style: theme.textTheme.bodySmall!.copyWith(
-                    color: theme.colorScheme.onPrimary.withAlpha(179),
+                  style: theme.textTheme.bodyMedium!.copyWith(
+                    color: theme.colorScheme.onPrimary.withAlpha(200),
                   ),
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                ),
+                ).animate().fadeIn(delay: 200.ms),
               ],
             ),
           ),
@@ -150,120 +174,197 @@ class UserProfileDrawer extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Drawer(
+      backgroundColor: colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.only(
-          topRight: Radius.circular(20),
-          bottomRight: Radius.circular(20),
+          topRight: Radius.circular(24),
+          bottomRight: Radius.circular(24),
         ),
       ),
       child: Column(
         children: [
-          // 1. Шапка
           _buildHeader(context),
 
-          // 2. Меню
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 8.0),
-              child: ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  // Переключение темы (Index 0)
-                  _buildDrawerItem(
-                    context: context,
-                    icon: themeProv.currentTheme == ThemeMode.dark ? Icons.wb_sunny_outlined : Icons.dark_mode_outlined,
-                    title: themeProv.currentTheme == ThemeMode.dark ? 'Светлая тема' : 'Тёмная тема',
-                    onTap: () => themeProv.toggleTheme(),
-                    index: 0,
-                    trailing: Switch(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              children: [
+                // Секция: Настройки
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+                  child: Text(
+                    "settings".tr(), // Ключ
+                    style: TextStyle(
+                      color: colorScheme.secondary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+
+                // Тема
+                _buildDrawerItem(
+                  context: context,
+                  icon: themeProv.currentTheme == ThemeMode.dark ? Icons.wb_sunny_rounded : Icons.dark_mode_rounded,
+                  // Динамический ключ для темы
+                  title: themeProv.currentTheme == ThemeMode.dark ? 'light_theme'.tr() : 'dark_theme'.tr(),
+                  onTap: () => themeProv.toggleTheme(),
+                  index: 0,
+                  trailing: Transform.scale(
+                    scale: 0.8,
+                    child: Switch(
                       value: themeProv.currentTheme == ThemeMode.dark,
                       onChanged: (_) => themeProv.toggleTheme(),
                       activeColor: colorScheme.primary,
                     ),
                   ),
+                ),
 
-                  // Выбор языка (Index 1)
-                  _buildDrawerItem(
-                    context: context,
-                    icon: Icons.language,
-                    title: 'Выбрать язык',
-                    onTap: () => _showLanguageDialog(context),
-                    index: 1,
-                    trailing: Text(
+                // Язык
+                _buildDrawerItem(
+                  context: context,
+                  icon: Icons.language_rounded,
+                  title: 'language'.tr(), // Ключ
+                  onTap: () => _showLanguageDialog(context),
+                  index: 1,
+                  trailing: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
                       context.locale.languageCode.toUpperCase(),
-                      style: TextStyle(color: colorScheme.primary, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: colorScheme.primary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
+                ),
 
-                  // Секция для авторизованных пользователей (Index 2+)
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 300),
-                    transitionBuilder: (child, animation) {
-                      return FadeTransition(
-                        opacity: animation,
-                        child: SizeTransition(sizeFactor: animation, axisAlignment: -1.0, child: child),
-                      );
-                    },
-                    child: isGuest
-                        ? const SizedBox.shrink(key: ValueKey('guest'))
-                        : Column(
-                      key: const ValueKey('user'),
-                      children: [
-                        // Обновление проектов (Index 2)
-                        _buildDrawerItem(
-                            context: context,
-                            icon: Icons.refresh,
-                            title: 'Обновить проекты',
-                            index: 2,
-                            onTap: () async {
-                              Navigator.pop(context);
-                              await prov.fetchProjects();
-                            }
-                        ),
+                const Divider(indent: 24, endIndent: 24, height: 24),
 
-                        // Отчеты (Index 3)
-                        _buildDrawerItem(
+                // Секция: Управление
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+                  child: Text(
+                    "management".tr(), // Ключ
+                    style: TextStyle(
+                      color: colorScheme.secondary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+
+                // Календарь
+                _buildDrawerItem(
+                  context: context,
+                  icon: Icons.calendar_month_rounded,
+                  title: 'calendar'.tr(), // Ключ
+                  index: 2,
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const CalendarScreen()),
+                    );
+                  },
+                ),
+
+                // Для авторизованных
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  transitionBuilder: (child, animation) {
+                    return FadeTransition(
+                      opacity: animation,
+                      child: SizeTransition(sizeFactor: animation, axisAlignment: -1.0, child: child),
+                    );
+                  },
+                  child: isGuest
+                      ? const SizedBox.shrink(key: ValueKey('guest'))
+                      : Column(
+                    key: const ValueKey('user'),
+                    children: [
+                      // Обновить проекты
+                      _buildDrawerItem(
                           context: context,
-                          icon: Icons.picture_as_pdf,
-                          title: 'Сформировать отчет',
+                          icon: Icons.sync_rounded,
+                          title: 'refresh_projects'.tr(), // Ключ
                           index: 3,
-                          color: colorScheme.secondary,
-                          onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Функция отчетов не реализована')),
-                            );
+                          onTap: () async {
                             Navigator.pop(context);
-                          },
-                        ),
-                      ],
-                    ),
+                            await prov.fetchProjects();
+                          }
+                      ),
+
+                      // Отчеты
+                      _buildDrawerItem(
+                        context: context,
+                        icon: Icons.summarize_rounded,
+                        title: 'reports'.tr(), // Ключ
+                        index: 4,
+                        onTap: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('report_functionality_not_impl'.tr())), // Ключ
+                          );
+                          Navigator.pop(context);
+                        },
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+
+                const Divider(indent: 24, endIndent: 24, height: 24),
+
+                // О приложении
+                _buildDrawerItem(
+                  context: context,
+                  icon: Icons.info_outline_rounded,
+                  title: 'about_app'.tr(), // Ключ
+                  index: 5,
+                  onTap: () => _showAboutDialog(context),
+                ),
+              ],
             ),
           ),
 
-          // Выход / Вход (Index 4)
+          // Вход / Выход
           Padding(
-            padding: const EdgeInsets.only(bottom: 20.0, left: 8.0, right: 8.0),
+            padding: const EdgeInsets.only(bottom: 24.0, left: 12.0, right: 12.0, top: 8.0),
             child: _buildDrawerItem(
               context: context,
-              icon: isGuest ? Icons.login : Icons.logout,
-              title: isGuest ? 'Войти' : 'Выйти',
-              index: isGuest ? 2 : 4,
+              icon: isGuest ? Icons.login_rounded : Icons.logout_rounded,
+              title: isGuest ? 'login'.tr() : 'logout'.tr(), // Ключи
+              index: 6,
               color: isGuest ? colorScheme.primary : colorScheme.error,
               onTap: () async {
                 final authProvider = context.read<AuthProvider>();
                 if (isGuest) {
                   Navigator.pop(context);
                 } else {
-                  await authProvider.signOut();
-                  // ProjectProvider.clear() будет вызван в UI слое или через слушателя,
-                  // но для надежности можно вызвать и тут, если необходимо.
-                  // prov.clear();
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: Text('logout_title'.tr()), // Ключ
+                      content: Text('logout_confirmation'.tr()), // Ключ
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('cancel'.tr())), // Ключ
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: Text('logout'.tr(), style: TextStyle(color: colorScheme.error)),
+                        ),
+                      ],
+                    ),
+                  );
 
-                  if (context.mounted) {
-                    Navigator.pop(context);
+                  if (confirm == true) {
+                    await authProvider.signOut();
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                    }
                   }
                 }
               },
@@ -278,15 +379,60 @@ class UserProfileDrawer extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Выберите язык'),
+        title: Text('choose_language'.tr()), // Ключ
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(title: const Text('Русский'), onTap: () { context.setLocale(const Locale('ru')); Navigator.pop(dialogContext); }),
-            ListTile(title: const Text('English'), onTap: () { context.setLocale(const Locale('en')); Navigator.pop(dialogContext); }),
+            ListTile(
+              leading: const Text('🇷🇺', style: TextStyle(fontSize: 24)),
+              title: const Text('Русский'), // Можно использовать 'language_ru'.tr()
+              onTap: () {
+                context.setLocale(const Locale('ru'));
+                Navigator.pop(dialogContext);
+              },
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            ListTile(
+              leading: const Text('🇺🇸', style: TextStyle(fontSize: 24)),
+              title: const Text('English'), // Можно использовать 'language_en'.tr()
+              onTap: () {
+                context.setLocale(const Locale('en'));
+                Navigator.pop(dialogContext);
+              },
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
           ],
         ),
       ),
+    );
+  }
+
+  void _showAboutDialog(BuildContext context) async {
+    // В реальном приложении раскомментируйте package_info_plus:
+    // PackageInfo packageInfo = await PackageInfo.fromPlatform();
+    // String version = packageInfo.version;
+    const version = "1.0.0";
+
+    if (!context.mounted) return;
+
+    showAboutDialog(
+      context: context,
+      applicationName: 'Taskio',
+      applicationVersion: 'v$version',
+      applicationIcon: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primaryContainer,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(Icons.check_circle_outline, color: Theme.of(context).colorScheme.primary),
+      ),
+      children: [
+        Text('app_description'.tr()), // Ключ
+        const SizedBox(height: 16),
+        Text('copyright'.tr(), style: const TextStyle(fontSize: 12, color: Colors.grey)), // Ключ
+      ],
     );
   }
 }

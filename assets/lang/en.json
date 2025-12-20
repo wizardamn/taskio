@@ -20,5 +20,17 @@
   "light_theme": "Light Theme",
   "generate_report": "Generate Report",
   "report_functionality_not_impl": "Reporting feature will be implemented",
-  "login": "Login"
+  "login": "Login",
+  "settings": "Settings",
+  "language": "Language",
+  "management": "Management",
+  "calendar": "Calendar",
+  "reports": "Reports",
+  "about_app": "About App",
+  "email_not_provided": "Email not provided",
+  "logout_title": "Logout",
+  "logout_confirmation": "Are you sure you want to logout?",
+  "cancel": "Cancel",
+  "app_description": "An application for managing study projects. Plan, execute, and track progress together with your team.",
+  "copyright": "© 2025 Taskio Team"
 }

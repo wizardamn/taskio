@@ -6,13 +6,13 @@ version: 1.0.0+1
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
-  flutter: ">=3.3.0" # Уточнение для flutter_local_notifications
+  flutter: ">=3.3.0"
 
 dependencies:
   flutter:
     sdk: flutter
 
-  flutter_localizations: # Добавлено для локализации Flutter SDK
+  flutter_localizations:
     sdk: flutter
 
   # Backend
@@ -48,6 +48,10 @@ dependencies:
   http: ^1.0.0
   collection: ^1.18.0
 
+  # Web support & Info
+  universal_io: ^2.2.2         # <-- Добавлено для поддержки io.File в Web
+  package_info_plus: ^8.0.0    # <-- Добавлено для получения версии приложения
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -56,7 +60,7 @@ dev_dependencies:
   mocktail: ^1.0.0
 
   integration_test:
-    sdk: flutter # Убрана версия, используем SDK
+    sdk: flutter
 
   shared_preferences: ^2.2.2
 

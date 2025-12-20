@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 // ----------------------------------------------------------------------
-// 1. Модель участника проекта (данные из profiles + роль из project_members)
+// 1. Модель участника проекта
 // ----------------------------------------------------------------------
 class ProjectParticipant {
   final String id;
@@ -17,7 +17,6 @@ class ProjectParticipant {
 
   factory ProjectParticipant.fromJson(Map<String, dynamic> json) {
     return ProjectParticipant(
-      // Поддержка разных вариантов naming в зависимости от того, как мы джойним таблицы
       id: json['member_id'] as String? ?? json['id'] as String,
       fullName: json['full_name'] as String? ?? 'Неизвестный участник',
       role: json['role'] as String?,
@@ -111,14 +110,17 @@ class ProjectModel {
   final int status;
   final double? grade;
 
-  // Список ID участников (из колонки projects.participants)
   final List<String> participantIds;
-
-  // Подробные данные участников (подгружаются отдельно через project_members JOIN profiles)
   final List<ProjectParticipant> participantsData;
-
   final List<Attachment> attachments;
   final DateTime createdAt;
+
+  // --- ПОЛЯ СТАТИСТИКИ (Read-only из View) ---
+  final int totalTasks;
+  final int completedTasks;
+
+  // --- НОВОЕ ПОЛЕ: ЦВЕТ ---
+  final String color; // Храним как строку '0xFF...'
 
   ProjectModel({
     required this.id,
@@ -132,6 +134,9 @@ class ProjectModel {
     this.participantsData = const [],
     this.attachments = const [],
     required this.createdAt,
+    this.totalTasks = 0,
+    this.completedTasks = 0,
+    this.color = '0xFF2196F3', // Дефолтный синий
   });
 
   ProjectStatus get statusEnum {
@@ -139,6 +144,21 @@ class ProjectModel {
       return ProjectStatus.planned;
     }
     return ProjectStatus.values[status];
+  }
+
+  // Геттер прогресса (0.0 ... 1.0)
+  double get progress {
+    if (totalTasks == 0) return 0.0;
+    return completedTasks / totalTasks;
+  }
+
+  // Удобный геттер для получения объекта Color
+  Color get colorObj {
+    try {
+      return Color(int.parse(color));
+    } catch (_) {
+      return const Color(0xFF2196F3); // Fallback
+    }
   }
 
   String getLocalizedStatus() => statusEnum.text;
@@ -158,6 +178,9 @@ class ProjectModel {
     List<ProjectParticipant>? participantsData,
     List<Attachment>? attachments,
     DateTime? createdAt,
+    int? totalTasks,
+    int? completedTasks,
+    String? color, // <--
   }) {
     return ProjectModel(
       id: id ?? this.id,
@@ -171,14 +194,16 @@ class ProjectModel {
       participantsData: participantsData ?? this.participantsData,
       attachments: attachments ?? this.attachments,
       createdAt: createdAt ?? this.createdAt,
+      totalTasks: totalTasks ?? this.totalTasks,
+      completedTasks: completedTasks ?? this.completedTasks,
+      color: color ?? this.color, // <--
     );
   }
 
   // ------------------------------------------------
-  // FROM JSON (Парсинг строки из таблицы projects)
+  // FROM JSON
   // ------------------------------------------------
   factory ProjectModel.fromJson(Map<String, dynamic> json) {
-
     List<String> parseParticipantIds(dynamic value) {
       if (value is List) {
         return value.map((e) => e.toString()).toList();
@@ -206,10 +231,13 @@ class ProjectModel {
       status: json['status'] as int? ?? ProjectStatus.planned.index,
       grade: (json['grade'] as num?)?.toDouble(),
       participantIds: parseParticipantIds(json['participants']),
-      // ИСПРАВЛЕНО: Убрано const, пустой список по дефолту.
-      // Данные заполняются в сервисе отдельным запросом к project_members
       participantsData: [],
       attachments: parseAttachments(json['attachments']),
+      // Парсинг статистики из VIEW
+      totalTasks: json['total_tasks'] as int? ?? 0,
+      completedTasks: json['completed_tasks'] as int? ?? 0,
+      // Парсинг цвета
+      color: json['color'] as String? ?? '0xFF2196F3', // <--
     );
   }
 
@@ -228,11 +256,12 @@ class ProjectModel {
       'participants': participantIds,
       'attachments': attachments.map((a) => a.toJson()).toList(),
       'created_at': createdAt.toUtc().toIso8601String(),
+      'color': color, // <--
     };
   }
 
   // ------------------------------------------------
-  // Фабрика для пустого проекта (для создания нового)
+  // Фабрика для пустого проекта
   // ------------------------------------------------
   static ProjectModel createEmpty({required String ownerId}) {
     return ProjectModel(
@@ -243,11 +272,10 @@ class ProjectModel {
       deadline: DateTime.now().add(const Duration(days: 7)),
       status: ProjectStatus.planned.index,
       participantIds: [ownerId],
-      // ИСПРАВЛЕНО: Убрано const
       participantsData: [],
-      // ИСПРАВЛЕНО: Убрано const
       attachments: [],
       createdAt: DateTime.now(),
+      color: '0xFF2196F3', // <--
     );
   }
 }

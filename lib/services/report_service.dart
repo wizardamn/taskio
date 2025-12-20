@@ -2,12 +2,8 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 import 'package:intl/intl.dart';
-// Теперь, когда ProjectModel.dart содержит ProjectStatus, мы просто его импортируем.
-// Это дает нам доступ и к ProjectModel, и к ProjectStatus.
 import '../models/project_model.dart';
 
-// УДАЛЕНО: Временное определение ProjectStatus.
-// Теперь мы используем ТОЛЬКО enum ProjectStatus, импортированный из project_model.dart.
 
 class ReportService {
   /// Генерация PDF-отчета по списку проектов и вывод на печать/просмотр

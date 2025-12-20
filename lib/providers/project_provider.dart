@@ -1,4 +1,5 @@
-import 'dart:io';
+import 'package:universal_io/io.dart'; // <--- ИСПРАВЛЕНО для Web
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:easy_localization/easy_localization.dart';
 
@@ -136,7 +137,6 @@ class ProjectProvider extends ChangeNotifier {
       );
       await fetchProjects();
 
-      // Ищем созданный проект в обновленном списке
       return _projects.firstWhere(
               (proj) => proj.id == newProject.id,
           orElse: () => newProject
@@ -156,8 +156,6 @@ class ProjectProvider extends ChangeNotifier {
       await _service.update(p);
 
       if (oldProject != null) {
-        // Логика уведомлений при изменении (статус, дедлайн, название)
-        // ... (код сокращен для краткости, логика та же)
         await NotificationService().showSimple('Проект обновлён', 'Изменения сохранены.');
       }
       await fetchProjects();
@@ -180,7 +178,7 @@ class ProjectProvider extends ChangeNotifier {
     }
   }
 
-  // --- Права доступа (на основе ролей в БД) ---
+  // --- Права доступа ---
 
   bool canEditProject(ProjectModel project) {
     if (isGuest || _userId == null) return false;
@@ -192,7 +190,6 @@ class ProjectProvider extends ChangeNotifier {
       orElse: () => ProjectParticipant(id: '', fullName: '', role: 'viewer'),
     );
 
-    // Роли из БД: owner, editor
     return member.id == _userId && (member.role == 'owner' || member.role == 'editor');
   }
 
@@ -221,7 +218,6 @@ class ProjectProvider extends ChangeNotifier {
     if (isGuest || _userId == null) return;
     try {
       await _service.addParticipant(projectId, userId, role);
-      // Уведомление и перезагрузка
       await fetchProjects();
     } catch (e, st) {
       _handleCrudError(e, st, "addParticipant");
@@ -240,16 +236,21 @@ class ProjectProvider extends ChangeNotifier {
 
   // --- Вложения ---
 
-  Future<ProjectModel> uploadAttachment(String projectId, File file) async {
+  Future<ProjectModel> uploadAttachment(String projectId, File file, {Uint8List? fileBytes, String? fileName}) async {
     if (isGuest || _userId == null) throw Exception("operation_denied_guest".tr());
 
     try {
-      final updatedProject = await _service.uploadAttachment(projectId, file);
+      final name = fileName ?? file.path.split('/').last;
 
-      final fileName = file.path.split('/').last;
-      await NotificationService().showSimple('Файл загружен', fileName);
+      final updatedProject = await _service.uploadAttachment(
+          projectId: projectId,
+          fileName: name,
+          file: file,
+          fileBytes: fileBytes
+      );
 
-      // Локальное обновление
+      await NotificationService().showSimple('Файл загружен', name);
+
       final index = _projects.indexWhere((p) => p.id == projectId);
       if (index != -1) {
         _projects[index] = updatedProject;
@@ -269,7 +270,6 @@ class ProjectProvider extends ChangeNotifier {
     try {
       await _service.deleteAttachment(projectId, filePath);
 
-      // Локальное обновление
       final index = _projects.indexWhere((p) => p.id == projectId);
       if (index != -1) {
         final current = _projects[index];
@@ -295,11 +295,11 @@ class ProjectProvider extends ChangeNotifier {
       deadline: DateTime.now().add(const Duration(days: 7)),
       status: ProjectStatus.planned.index,
       grade: null,
-      // ИСПРАВЛЕНО: Убрано const для предотвращения ошибок
       attachments: [],
       participantsData: [],
       participantIds: [_userId!],
       createdAt: DateTime.now(),
+      color: '0xFF2196F3',
     );
   }
 

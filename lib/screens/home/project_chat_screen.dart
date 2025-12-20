@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'package:universal_io/io.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
@@ -38,7 +38,7 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
   void initState() {
     super.initState();
     _messagesStream = _chatService.getMessagesStream(widget.projectId);
-    // Помечаем сообщения как прочитанные при входе
+    // Помечаем сообщения как прочитанные
     _chatService.markAsRead(widget.projectId);
   }
 
@@ -109,6 +109,7 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     final parts = name.trim().split(' ');
     if (parts.isEmpty) return '?';
     if (parts.length == 1) return parts[0][0].toUpperCase();
+    if (parts[0].isEmpty || parts[1].isEmpty) return '?';
     return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
   }
 
@@ -122,6 +123,8 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
   @override
   Widget build(BuildContext context) {
     final currentUserId = SupabaseService.client.auth.currentUser?.id;
+    // Используем цвета из темы
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -149,9 +152,12 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.chat_bubble_outline, size: 48, color: Colors.grey.shade300),
+                        Icon(Icons.chat_bubble_outline, size: 48, color: colorScheme.onSurfaceVariant),
                         const SizedBox(height: 10),
-                        const Text('Сообщений пока нет.\nНачните общение!', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+                        Text('Сообщений пока нет.\nНачните общение!',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: colorScheme.onSurfaceVariant)
+                        ),
                       ],
                     ),
                   );
@@ -190,10 +196,11 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
           if (_isUploading)
             const LinearProgressIndicator(minHeight: 2),
 
+          // Поле ввода
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             decoration: BoxDecoration(
-              color: Theme.of(context).scaffoldBackgroundColor,
+              color: colorScheme.surface, // Цвет фона из темы
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.05),
@@ -208,7 +215,7 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
                   IconButton(
                     onPressed: _isUploading ? null : _pickAndSendFile,
                     icon: const Icon(Icons.attach_file),
-                    color: Colors.grey.shade600,
+                    color: colorScheme.onSurfaceVariant,
                   ),
                   Expanded(
                     child: TextField(
@@ -217,7 +224,8 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
                       decoration: InputDecoration(
                         hintText: 'Написать сообщение...',
                         filled: true,
-                        fillColor: Colors.grey.shade100,
+                        // Адаптивный цвет фона поля ввода
+                        fillColor: colorScheme.surfaceContainerHighest,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
                           borderSide: BorderSide.none,
@@ -232,8 +240,8 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
                     onPressed: _sendMessage,
                     mini: true,
                     elevation: 0,
-                    backgroundColor: Theme.of(context).primaryColor,
-                    child: const Icon(Icons.send, color: Colors.white, size: 18),
+                    backgroundColor: colorScheme.primary,
+                    child: Icon(Icons.send, color: colorScheme.onPrimary, size: 18),
                   ),
                 ],
               ),
@@ -255,6 +263,7 @@ class _DateHeader extends StatelessWidget {
     final today = DateTime(now.year, now.month, now.day);
     final yesterday = today.subtract(const Duration(days: 1));
     final dateToCheck = DateTime(date.year, date.month, date.day);
+    final colorScheme = Theme.of(context).colorScheme;
 
     String text;
     if (dateToCheck == today) {
@@ -269,12 +278,12 @@ class _DateHeader extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 16),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.grey.shade200,
+        color: colorScheme.surfaceContainerHighest, // Адаптивный фон
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
         text,
-        style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+        style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant, fontWeight: FontWeight.w500),
       ),
     );
   }
@@ -303,6 +312,7 @@ class _ChatBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final time = DateFormat('HH:mm').format(message.createdAt);
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -313,10 +323,10 @@ class _ChatBubble extends StatelessWidget {
           if (!isMe) ...[
             CircleAvatar(
               radius: 16,
-              backgroundColor: Colors.blue.shade100,
+              backgroundColor: colorScheme.secondaryContainer,
               child: Text(
                 initials,
-                style: TextStyle(fontSize: 12, color: Colors.blue.shade800, fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 12, color: colorScheme.onSecondaryContainer, fontWeight: FontWeight.bold),
               ),
             ),
             const SizedBox(width: 8),
@@ -333,14 +343,15 @@ class _ChatBubble extends StatelessWidget {
                       padding: const EdgeInsets.only(left: 12, bottom: 2),
                       child: Text(
                         senderName,
-                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 11, color: colorScheme.outline, fontWeight: FontWeight.bold),
                       ),
                     ),
 
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: isMe ? Theme.of(context).primaryColor : Colors.white,
+                      // Цвета зависят от того, кто отправил
+                      color: isMe ? colorScheme.primary : colorScheme.surfaceContainer,
                       borderRadius: BorderRadius.only(
                         topLeft: const Radius.circular(18),
                         topRight: const Radius.circular(18),
@@ -354,25 +365,20 @@ class _ChatBubble extends StatelessWidget {
                           blurRadius: 2,
                         )
                       ],
-                      border: !isMe ? Border.all(color: Colors.grey.shade200) : null,
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Контент сообщения
-                        _buildContent(context),
-
+                        _buildContent(context, isMe),
                         const SizedBox(height: 4),
-
-                        // Время и галочки
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
                               time,
                               style: TextStyle(
-                                color: isMe ? Colors.white.withValues(alpha: 0.7) : Colors.black54,
+                                color: isMe ? colorScheme.onPrimary.withValues(alpha: 0.7) : colorScheme.onSurfaceVariant,
                                 fontSize: 10,
                               ),
                             ),
@@ -381,9 +387,10 @@ class _ChatBubble extends StatelessWidget {
                               Icon(
                                 message.isRead ? Icons.done_all : Icons.check,
                                 size: 14,
+                                // Галочки видны на фоне primary
                                 color: message.isRead
-                                    ? Colors.blue.shade100 // Голубые галочки (если фон синий)
-                                    : Colors.white.withValues(alpha: 0.6),
+                                    ? colorScheme.onPrimary
+                                    : colorScheme.onPrimary.withValues(alpha: 0.6),
                               ),
                             ],
                           ],
@@ -400,7 +407,10 @@ class _ChatBubble extends StatelessWidget {
     );
   }
 
-  Widget _buildContent(BuildContext context) {
+  Widget _buildContent(BuildContext context, bool isMe) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textColor = isMe ? colorScheme.onPrimary : colorScheme.onSurface;
+
     if (message.type == MessageType.image) {
       return GestureDetector(
         onTap: () => _openFile(message.content),
@@ -420,27 +430,27 @@ class _ChatBubble extends StatelessWidget {
                 child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
               );
             },
-            errorBuilder: (_,__,___) => const Icon(Icons.broken_image, color: Colors.white),
+            errorBuilder: (_,__,___) => Icon(Icons.broken_image, color: textColor),
           ),
         ),
       );
     } else if (message.type == MessageType.file) {
-      // Извлекаем имя файла из URL (декодируем URL encoded символы)
       final fileName = Uri.decodeFull(message.content.split('/').last.split('?').first);
       return GestureDetector(
         onTap: () => _openFile(message.content),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.insert_drive_file, color: isMe ? Colors.white : Colors.grey.shade700),
+            Icon(Icons.insert_drive_file, color: textColor),
             const SizedBox(width: 8),
             Flexible(
               child: Text(
                 fileName,
                 style: TextStyle(
-                  color: isMe ? Colors.white : Colors.black87,
+                  color: textColor,
                   fontSize: 14,
                   decoration: TextDecoration.underline,
+                  decorationColor: textColor,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -453,7 +463,7 @@ class _ChatBubble extends StatelessWidget {
       return Text(
         message.content,
         style: TextStyle(
-          color: isMe ? Colors.white : Colors.black87,
+          color: textColor,
           fontSize: 15,
         ),
       );

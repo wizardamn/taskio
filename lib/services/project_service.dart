@@ -1,5 +1,5 @@
-import 'dart:io';
-import 'package:flutter/foundation.dart';
+import 'package:universal_io/io.dart'; // ИСПРАВЛЕНО: Поддержка Web и Mobile
+import 'package:flutter/foundation.dart'; // Для Uint8List
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/project_model.dart';
 import '../services/supabase_service.dart';
@@ -24,9 +24,9 @@ class ProjectService {
     if (userIds.isEmpty) return [];
     final unique = userIds.toSet().toList();
     try {
-      // ИСПРАВЛЕНО: Используем .filter('col', 'in', list) вместо .in_()
+      // Используем .filter('col', 'in', list)
       final res = await client.from('profiles').select('id').filter('id', 'in', unique);
-      // ИСПРАВЛЕНО: Убрано (res as List), так как res уже является списком
+      // res уже является списком
       return res.map<String>((e) => e['id'] as String).toList();
     } catch (e) {
       _handleError(e, 'Ошибка фильтрации ID пользователей');
@@ -65,7 +65,7 @@ class ProjectService {
   }
 
   // ------------------------------------------------
-  // 2. ЗАГРУЗКА ДАННЫХ
+  // 2. ЗАГРУЗКА ДАННЫХ (Чтение из VIEW)
   // ------------------------------------------------
 
   /// Загружает проекты пользователя (где он владелец или участник)
@@ -87,7 +87,6 @@ class ProjectService {
 
       // Собираем уникальные ID проектов
       final Set<String> allIds = {};
-      // memberData и ownerData уже списки, as List не требуется
       for (var item in memberData) {
         allIds.add(item['project_id'] as String);
       }
@@ -97,10 +96,9 @@ class ProjectService {
 
       if (allIds.isEmpty) return [];
 
-      // 3. Загружаем полные данные проектов с участниками
-      // ИСПРАВЛЕНО: Используем .filter('id', 'in', list)
+      // 3. Загружаем полные данные проектов с участниками из VIEW
       final response = await client
-          .from('projects')
+          .from('projects_view')
           .select('*, project_members(*, profiles:member_id(id, full_name))')
           .filter('id', 'in', allIds.toList())
           .order('created_at', ascending: false);
@@ -149,7 +147,7 @@ class ProjectService {
   Future<ProjectModel?> getById(String id) async {
     try {
       final data = await client
-          .from('projects')
+          .from('projects_view')
           .select('*, project_members(*, profiles:member_id(id, full_name))')
           .eq('id', id)
           .maybeSingle();
@@ -183,34 +181,28 @@ class ProjectService {
   }
 
   // ------------------------------------------------
-  // 3. CRUD ОПЕРАЦИИ
+  // 3. CRUD ОПЕРАЦИИ (Запись в TABLE)
   // ------------------------------------------------
 
   Future<ProjectModel> add(ProjectModel project) async {
     await _ensureCurrentUserProfile();
 
     final ownerId = project.ownerId;
-    // Собираем всех участников, включая владельца
     final rawMemberIds = {...project.participantIds, ownerId}.toList();
-    // Фильтруем, чтобы добавлять только существующих пользователей
     final validMemberIds = await _filterValidUserIds(rawMemberIds);
 
-    // Подготовка JSON для таблицы projects (удаляем лишние поля)
     final projectJson = project.toJson();
-    projectJson.remove('participants'); // Убираем, если база генерит или не использует это поле напрямую
+    projectJson.remove('participants');
 
     try {
-      // Вставка проекта
       final res = await client.from('projects').insert(projectJson).select().single();
       final savedProject = ProjectModel.fromJson(res);
 
-      // Вставка связей в project_members
       for (final memberId in validMemberIds) {
         final role = memberId == ownerId ? 'owner' : 'editor';
         await _upsertMember(savedProject.id, memberId, role);
       }
 
-      // Уведомление
       await NotificationService().showSimple(
         'Проект создан',
         'Проект "${savedProject.title}" успешно создан.',
@@ -232,18 +224,14 @@ class ProjectService {
     try {
       final oldProject = await getById(project.id);
 
-      // Обновление основной таблицы
       await client.from('projects').update(projectJson).eq('id', project.id);
 
-      // Синхронизация участников
       final currentIds = await getParticipantIds(project.id);
       final desiredRawIds = {...project.participantIds, project.ownerId}.toList();
       final validDesiredIds = await _filterValidUserIds(desiredRawIds);
 
-      // Удаляем тех, кого нет в новом списке (кроме владельца)
       final toRemove = currentIds.where((id) => !validDesiredIds.contains(id) && id != project.ownerId).toList();
       if (toRemove.isNotEmpty) {
-        // ИСПРАВЛЕНО: Используем .filter('col', 'in', list)
         await client
             .from('project_members')
             .delete()
@@ -251,13 +239,11 @@ class ProjectService {
             .eq('project_id', project.id);
       }
 
-      // Добавляем/Обновляем текущих
       for (final memberId in validDesiredIds) {
         final role = memberId == project.ownerId ? 'owner' : 'editor';
         await _upsertMember(project.id, memberId, role);
       }
 
-      // Уведомления об изменениях
       if (oldProject != null) {
         _sendUpdateNotification(oldProject, project);
       }
@@ -277,13 +263,11 @@ class ProjectService {
     }
 
     try {
-      // Удаляем файлы из Storage
       if (project != null && project.attachments.isNotEmpty) {
         final paths = project.attachments.map((a) => a.filePath).toList();
         await client.storage.from(bucketName).remove(paths);
       }
 
-      // Удаляем записи из БД (Cascade должен сработать, но удаляем вручную для надежности)
       await client.from('project_members').delete().eq('project_id', id);
       await client.from('projects').delete().eq('id', id);
 
@@ -310,7 +294,6 @@ class ProjectService {
           .select('member_id')
           .eq('project_id', projectId);
 
-      // ИСПРАВЛЕНО: Убрано (data as List)
       return data.map((e) => e['member_id'] as String).toList();
     } catch (e) {
       _handleError(e, 'Ошибка получения ID участников');
@@ -325,7 +308,6 @@ class ProjectService {
           .select('member_id, role, profiles:member_id(id, full_name)')
           .eq('project_id', projectId);
 
-      // ИСПРАВЛЕНО: Убрано (data as List)
       return data.map((row) {
         final profile = row['profiles'] as Map<String, dynamic>?;
         return {
@@ -347,7 +329,6 @@ class ProjectService {
 
       final project = await getById(projectId);
       if (project != null) {
-        // Уведомление
         await NotificationService().showSimple(
           'Участник добавлен',
           'Пользователь добавлен в проект "${project.title}".',
@@ -391,22 +372,37 @@ class ProjectService {
   }
 
   // ------------------------------------------------
-  // 5. ВЛОЖЕНИЯ (Storage + JSONB)
+  // 5. ВЛОЖЕНИЯ (УНИВЕРСАЛЬНЫЙ МЕТОД WEB/MOBILE)
   // ------------------------------------------------
 
-  Future<ProjectModel> uploadAttachment(String projectId, File file) async {
+  Future<ProjectModel> uploadAttachment({
+    required String projectId,
+    required String fileName,
+    File? file,           // Для Mobile
+    Uint8List? fileBytes, // Для Web
+  }) async {
     if (_currentUserId == null) throw Exception('User not authenticated');
 
-    final fileName = file.path.split('/').last;
-    // Уникальный путь
     final filePath = '$projectId/$_currentUserId/${DateTime.now().millisecondsSinceEpoch}_$fileName';
 
     try {
-      await client.storage.from(bucketName).upload(
-        filePath,
-        file,
-        fileOptions: const FileOptions(upsert: false),
-      );
+      if (fileBytes != null) {
+        // Web: Загрузка байтов
+        await client.storage.from(bucketName).uploadBinary(
+          filePath,
+          fileBytes,
+          fileOptions: const FileOptions(upsert: false),
+        );
+      } else if (file != null) {
+        // Mobile: Загрузка файла
+        await client.storage.from(bucketName).upload(
+          filePath,
+          file,
+          fileOptions: const FileOptions(upsert: false),
+        );
+      } else {
+        throw Exception("Файл не предоставлен");
+      }
     } on StorageException catch (e) {
       _handleError(e, 'Ошибка загрузки файла в Storage');
       rethrow;
@@ -423,10 +419,7 @@ class ProjectService {
       uploaderId: _currentUserId!,
     );
 
-    // Добавляем к текущему списку
     final updatedAttachments = [...project.attachments, newAttachment];
-
-    // Обновляем JSONB колонку
     await client.from('projects').update({
       'attachments': updatedAttachments.map((a) => a.toJson()).toList()
     }).eq('id', projectId);
@@ -440,17 +433,13 @@ class ProjectService {
   }
 
   Future<ProjectModel> deleteAttachment(String projectId, String filePath) async {
-    // Удаляем из хранилища
     try {
       await client.storage.from(bucketName).remove([filePath]);
-    } catch (_) {
-      // Игнорируем ошибку, если файла уже нет
-    }
+    } catch (_) {}
 
     final project = await getById(projectId);
     if (project == null) throw Exception('Проект не найден');
 
-    // Фильтруем список
     final updatedAttachments = project.attachments.where((a) => a.filePath != filePath).toList();
 
     await client.from('projects').update({
