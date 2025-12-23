@@ -115,12 +115,10 @@ class ProjectModel {
   final List<Attachment> attachments;
   final DateTime createdAt;
 
-  // --- ПОЛЯ СТАТИСТИКИ (Read-only из View) ---
   final int totalTasks;
   final int completedTasks;
 
-  // --- НОВОЕ ПОЛЕ: ЦВЕТ ---
-  final String color; // Храним как строку '0xFF...'
+  final String color;
 
   ProjectModel({
     required this.id,
@@ -136,7 +134,7 @@ class ProjectModel {
     required this.createdAt,
     this.totalTasks = 0,
     this.completedTasks = 0,
-    this.color = '0xFF2196F3', // Дефолтный синий
+    this.color = '0xFF2196F3',
   });
 
   ProjectStatus get statusEnum {

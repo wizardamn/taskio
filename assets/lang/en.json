@@ -32,5 +32,7 @@
   "logout_confirmation": "Are you sure you want to logout?",
   "cancel": "Cancel",
   "app_description": "An application for managing study projects. Plan, execute, and track progress together with your team.",
-  "copyright": "© 2025 Taskio Team"
+  "copyright": "© 2025 Taskio Team",
+  "new_project": "New Project",
+  "name": "Name"
 }

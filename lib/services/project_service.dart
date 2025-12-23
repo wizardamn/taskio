@@ -1,5 +1,5 @@
 import 'package:universal_io/io.dart'; // ИСПРАВЛЕНО: Поддержка Web и Mobile
-import 'package:flutter/foundation.dart'; // Для Uint8List
+import 'package:flutter/foundation.dart'; // Для Uint8List и kIsWeb, debugPrint
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/project_model.dart';
 import '../services/supabase_service.dart';
@@ -19,22 +19,18 @@ class ProjectService {
   // 1. ВАЛИДАЦИЯ И ПОДГОТОВКА
   // ------------------------------------------------
 
-  /// Проверяет существование профилей и возвращает список валидных ID
   Future<List<String>> _filterValidUserIds(List<String> userIds) async {
     if (userIds.isEmpty) return [];
     final unique = userIds.toSet().toList();
     try {
-      // Используем .filter('col', 'in', list)
       final res = await client.from('profiles').select('id').filter('id', 'in', unique);
-      // res уже является списком
-      return res.map<String>((e) => e['id'] as String).toList();
+      return (res as List).map<String>((e) => e['id'] as String).toList();
     } catch (e) {
       _handleError(e, 'Ошибка фильтрации ID пользователей');
       return [];
     }
   }
 
-  /// Гарантирует создание профиля для текущего юзера, если его нет
   Future<void> _ensureCurrentUserProfile() async {
     if (_currentUserId == null) return;
 
@@ -46,6 +42,7 @@ class ProjectService {
           .maybeSingle();
 
       if (check == null) {
+        debugPrint('[ProjectService] Профиль не найден, создаем новый для $_currentUserId');
         final user = client.auth.currentUser;
         final email = user?.email ?? '';
         final name = user?.userMetadata?['full_name'] ?? email.split('@').first;
@@ -54,10 +51,10 @@ class ProjectService {
           'id': _currentUserId,
           'full_name': name,
           'email': email,
-          'role': 'student', // Дефолтная роль
+          'role': 'student',
           'created_at': DateTime.now().toIso8601String(),
         });
-        debugPrint('[ProjectService] Профиль автоматически создан для $_currentUserId');
+        debugPrint('[ProjectService] Профиль успешно создан');
       }
     } catch (e) {
       _handleError(e, 'Ошибка создания профиля');
@@ -65,27 +62,28 @@ class ProjectService {
   }
 
   // ------------------------------------------------
-  // 2. ЗАГРУЗКА ДАННЫХ (Чтение из VIEW)
+  // 2. ЗАГРУЗКА ДАННЫХ
   // ------------------------------------------------
 
-  /// Загружает проекты пользователя (где он владелец или участник)
   Future<List<ProjectModel>> getAll() async {
-    if (_currentUserId == null) return [];
+    if (_currentUserId == null) {
+      debugPrint('[ProjectService] getAll: Пользователь не авторизован');
+      return [];
+    }
+
+    debugPrint('[ProjectService] Загрузка проектов для пользователя: $_currentUserId');
 
     try {
-      // 1. Находим проекты, где юзер - участник
       final memberData = await client
           .from('project_members')
           .select('project_id')
           .eq('member_id', _currentUserId!);
 
-      // 2. Находим проекты, где юзер - владелец
       final ownerData = await client
           .from('projects')
           .select('id')
           .eq('owner_id', _currentUserId!);
 
-      // Собираем уникальные ID проектов
       final Set<String> allIds = {};
       for (var item in memberData) {
         allIds.add(item['project_id'] as String);
@@ -94,9 +92,11 @@ class ProjectService {
         allIds.add(item['id'] as String);
       }
 
-      if (allIds.isEmpty) return [];
+      if (allIds.isEmpty) {
+        debugPrint('[ProjectService] Проекты не найдены');
+        return [];
+      }
 
-      // 3. Загружаем полные данные проектов с участниками из VIEW
       final response = await client
           .from('projects_view')
           .select('*, project_members(*, profiles:member_id(id, full_name))')
@@ -109,7 +109,6 @@ class ProjectService {
         try {
           final project = ProjectModel.fromJson(raw as Map<String, dynamic>);
 
-          // Парсим участников из join-запроса
           final participantsRaw = (raw['project_members'] as List?) ?? [];
           final participants = participantsRaw.map((row) {
             final memberId = row['member_id'] as String;
@@ -129,13 +128,14 @@ class ProjectService {
             participantIds: participants.map((p) => p.id).toList(),
           ));
 
-          // --- Проверка дедлайна для уведомления ---
           _checkDeadlineNotification(project);
 
         } catch (e) {
           debugPrint('Ошибка парсинга конкретного проекта: $e');
         }
       }
+
+      debugPrint('[ProjectService] Загружено проектов: ${projects.length}');
       return projects;
     } catch (e) {
       _handleError(e, 'Ошибка загрузки списка проектов');
@@ -143,7 +143,6 @@ class ProjectService {
     }
   }
 
-  /// Получение одного проекта
   Future<ProjectModel?> getById(String id) async {
     try {
       final data = await client
@@ -181,10 +180,11 @@ class ProjectService {
   }
 
   // ------------------------------------------------
-  // 3. CRUD ОПЕРАЦИИ (Запись в TABLE)
+  // 3. CRUD ОПЕРАЦИИ
   // ------------------------------------------------
 
   Future<ProjectModel> add(ProjectModel project) async {
+    debugPrint('[ProjectService] Создание нового проекта: ${project.title}');
     await _ensureCurrentUserProfile();
 
     final ownerId = project.ownerId;
@@ -197,6 +197,7 @@ class ProjectService {
     try {
       final res = await client.from('projects').insert(projectJson).select().single();
       final savedProject = ProjectModel.fromJson(res);
+      debugPrint('[ProjectService] Проект успешно создан с ID: ${savedProject.id}');
 
       for (final memberId in validMemberIds) {
         final role = memberId == ownerId ? 'owner' : 'editor';
@@ -217,6 +218,8 @@ class ProjectService {
 
   Future<void> update(ProjectModel project) async {
     if (_currentUserId == null) throw Exception('User not authenticated');
+
+    debugPrint('[ProjectService] Обновление проекта: ${project.id}');
 
     final projectJson = project.toJson();
     projectJson.remove('participants');
@@ -248,6 +251,8 @@ class ProjectService {
         _sendUpdateNotification(oldProject, project);
       }
 
+      debugPrint('[ProjectService] Проект успешно обновлен');
+
     } catch (e) {
       _handleError(e, 'Ошибка обновления проекта');
       rethrow;
@@ -257,6 +262,7 @@ class ProjectService {
   Future<void> delete(String id) async {
     if (_currentUserId == null) throw Exception('User not authenticated');
 
+    debugPrint('[ProjectService] Удаление проекта: $id');
     final project = await getById(id);
     if (project != null && project.ownerId != _currentUserId) {
       throw Exception('Только владелец может удалить проект');
@@ -270,6 +276,8 @@ class ProjectService {
 
       await client.from('project_members').delete().eq('project_id', id);
       await client.from('projects').delete().eq('id', id);
+
+      debugPrint('[ProjectService] Проект успешно удален');
 
       if (project != null) {
         await NotificationService().showSimple(
@@ -294,7 +302,7 @@ class ProjectService {
           .select('member_id')
           .eq('project_id', projectId);
 
-      return data.map((e) => e['member_id'] as String).toList();
+      return (data as List).map<String>((e) => e['member_id'] as String).toList();
     } catch (e) {
       _handleError(e, 'Ошибка получения ID участников');
       return [];
@@ -308,7 +316,7 @@ class ProjectService {
           .select('member_id, role, profiles:member_id(id, full_name)')
           .eq('project_id', projectId);
 
-      return data.map((row) {
+      return (data as List).map((row) {
         final profile = row['profiles'] as Map<String, dynamic>?;
         return {
           'id': row['member_id'] as String,
@@ -372,7 +380,7 @@ class ProjectService {
   }
 
   // ------------------------------------------------
-  // 5. ВЛОЖЕНИЯ (УНИВЕРСАЛЬНЫЙ МЕТОД WEB/MOBILE)
+  // 5. ВЛОЖЕНИЯ (УНИВЕРСАЛЬНЫЙ МЕТОД)
   // ------------------------------------------------
 
   Future<ProjectModel> uploadAttachment({
@@ -383,26 +391,37 @@ class ProjectService {
   }) async {
     if (_currentUserId == null) throw Exception('User not authenticated');
 
-    final filePath = '$projectId/$_currentUserId/${DateTime.now().millisecondsSinceEpoch}_$fileName';
+    debugPrint('[ProjectService] Загрузка файла: $fileName');
+
+    // --- ИСПРАВЛЕНИЕ: Безопасное имя файла для S3/Storage (только ASCII) ---
+    // Получаем расширение файла
+    final extension = fileName.contains('.') ? fileName.split('.').last : 'bin';
+    // Генерируем уникальное имя: timestamp + safe_file.ext
+    // Заменяем все не-ASCII символы на '_' во избежание ошибки InvalidKey
+    final safeName = 'file_${DateTime.now().millisecondsSinceEpoch}.$extension';
+
+    // Путь в хранилище (используем безопасное имя)
+    final storagePath = '$projectId/$_currentUserId/$safeName';
 
     try {
       if (fileBytes != null) {
         // Web: Загрузка байтов
         await client.storage.from(bucketName).uploadBinary(
-          filePath,
+          storagePath,
           fileBytes,
           fileOptions: const FileOptions(upsert: false),
         );
       } else if (file != null) {
         // Mobile: Загрузка файла
         await client.storage.from(bucketName).upload(
-          filePath,
+          storagePath,
           file,
           fileOptions: const FileOptions(upsert: false),
         );
       } else {
-        throw Exception("Файл не предоставлен");
+        throw Exception("Файл не предоставлен для загрузки");
       }
+      debugPrint('[ProjectService] Файл загружен в хранилище по пути: $storagePath');
     } on StorageException catch (e) {
       _handleError(e, 'Ошибка загрузки файла в Storage');
       rethrow;
@@ -411,18 +430,23 @@ class ProjectService {
     final project = await getById(projectId);
     if (project == null) throw Exception('Проект не найден');
 
+    // Сохраняем в БД ОРИГИНАЛЬНОЕ имя файла (для отображения), но БЕЗОПАСНЫЙ путь
     final newAttachment = Attachment(
-      fileName: fileName,
-      filePath: filePath,
+      fileName: fileName, // <-- Оригинальное имя с кириллицей (для UI)
+      filePath: storagePath, // <-- Безопасный путь (для скачивания)
       uploadedAt: DateTime.now(),
-      mimeType: fileName.split('.').last,
+      mimeType: fileName.contains('.') ? fileName.split('.').last : '',
       uploaderId: _currentUserId!,
     );
 
     final updatedAttachments = [...project.attachments, newAttachment];
+
+    debugPrint('[ProjectService] Обновление списка вложений в БД...');
     await client.from('projects').update({
       'attachments': updatedAttachments.map((a) => a.toJson()).toList()
     }).eq('id', projectId);
+
+    debugPrint('[ProjectService] Вложение успешно добавлено');
 
     await NotificationService().showSimple(
       'Файл загружен',
@@ -434,6 +458,7 @@ class ProjectService {
 
   Future<ProjectModel> deleteAttachment(String projectId, String filePath) async {
     try {
+      debugPrint('[ProjectService] Удаление файла из хранилища: $filePath');
       await client.storage.from(bucketName).remove([filePath]);
     } catch (_) {}
 
@@ -459,7 +484,7 @@ class ProjectService {
   // ------------------------------------------------
 
   void _handleError(Object e, String operation) {
-    debugPrint('[ProjectService] $operation: $e');
+    debugPrint('[ProjectService] ОШИБКА ($operation): $e');
     throw Exception('$operation: ${e.toString().split(':')[0].trim()}');
   }
 

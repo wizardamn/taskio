@@ -18,12 +18,15 @@ import 'screens/auth/login_wrapper.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  debugPrint('[App] Application starting...');
 
   // 1. Загружаем переменные окружения
   await dotenv.load(fileName: ".env");
+  debugPrint('[App] Environment variables loaded.');
 
   // 2. Инициализация локализации
   await EasyLocalization.ensureInitialized();
+  debugPrint('[App] Localization initialized.');
 
   // 3. Инициализация Supabase
   final supabaseUrl = dotenv.env['SUPABASE_URL'];
@@ -37,20 +40,21 @@ Future<void> main() async {
     url: supabaseUrl,
     anonKey: supabaseAnonKey,
   );
+  debugPrint('[App] Supabase initialized successfully.');
 
   // 4. Инициализация уведомлений
   await NotificationService().init();
+  debugPrint('[App] NotificationService initialized.');
 
   runApp(
     EasyLocalization(
       supportedLocales: const [Locale('ru'), Locale('en')],
-      path: 'assets/lang', // Убедитесь, что папка существует и добавлена в pubspec.yaml
+      path: 'assets/lang',
       fallbackLocale: const Locale('ru'),
       child: MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => ThemeProvider()),
           ChangeNotifierProvider(create: (_) => AuthProvider()),
-          // Инициализируем ProjectProvider с ProjectService
           ChangeNotifierProvider(
             create: (_) => ProjectProvider(
               ProjectService(),
@@ -73,15 +77,12 @@ class TaskioApp extends StatelessWidget {
     return MaterialApp(
       title: 'Taskio',
       debugShowCheckedModeBanner: false,
-      // Темы из ThemeProvider
       themeMode: themeProv.currentTheme,
       theme: themeProv.lightTheme,
       darkTheme: themeProv.darkTheme,
-      // Локализация
       localizationsDelegates: context.localizationDelegates,
       supportedLocales: context.supportedLocales,
       locale: context.locale,
-      // Начальный экран - Обертка авторизации
       home: const LoginWrapper(),
     );
   }

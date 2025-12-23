@@ -1,5 +1,6 @@
 import 'package:universal_io/io.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
@@ -38,7 +39,6 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
   void initState() {
     super.initState();
     _messagesStream = _chatService.getMessagesStream(widget.projectId);
-    // Помечаем сообщения как прочитанные
     _chatService.markAsRead(widget.projectId);
   }
 
@@ -63,24 +63,43 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
 
   Future<void> _pickAndSendFile() async {
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'mp3'],
+        withData: kIsWeb, // Важно для Web: загружаем байты
       );
 
-      if (result != null && result.files.single.path != null) {
-        setState(() => _isUploading = true);
+      // Проверяем наличие результата и данных (пути для мобилок, байтов для веба)
+      if (result == null || (kIsWeb ? result.files.single.bytes == null : result.files.single.path == null)) {
+        return;
+      }
 
-        final file = File(result.files.single.path!);
-        final extension = result.files.single.extension?.toLowerCase() ?? '';
-        final isImage = ['jpg', 'jpeg', 'png'].contains(extension);
+      setState(() => _isUploading = true);
 
+      final platformFile = result.files.single;
+      final extension = platformFile.extension?.toLowerCase() ?? '';
+      final isImage = ['jpg', 'jpeg', 'png'].contains(extension);
+      final msgType = isImage ? MessageType.image : MessageType.file;
+
+      // Вызываем сервис с соответствующими данными
+      if (kIsWeb) {
+        // Для Web передаем байты и имя
         await _chatService.sendFileMessage(
-            widget.projectId,
-            file,
-            isImage ? MessageType.image : MessageType.file
+          projectId: widget.projectId,
+          fileBytes: platformFile.bytes!,
+          fileName: platformFile.name,
+          type: msgType,
+        );
+      } else {
+        // Для Mobile передаем файл
+        await _chatService.sendFileMessage(
+          projectId: widget.projectId,
+          file: File(platformFile.path!),
+          fileName: platformFile.name,
+          type: msgType,
         );
       }
+
     } catch (e) {
       if (mounted) _showError('Не удалось отправить файл: $e');
     } finally {
@@ -90,7 +109,10 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
 
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red),
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Theme.of(context).colorScheme.error,
+      ),
     );
   }
 
@@ -108,9 +130,11 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
   String _getInitials(String name) {
     final parts = name.trim().split(' ');
     if (parts.isEmpty) return '?';
-    if (parts.length == 1) return parts[0][0].toUpperCase();
-    if (parts[0].isEmpty || parts[1].isEmpty) return '?';
-    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    if (parts.length == 1 && parts[0].isNotEmpty) return parts[0][0].toUpperCase();
+    if (parts[0].isNotEmpty && parts[1].isNotEmpty) {
+      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    }
+    return '?';
   }
 
   bool _shouldShowDateHeader(MessageModel current, MessageModel? older) {
@@ -123,7 +147,6 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
   @override
   Widget build(BuildContext context) {
     final currentUserId = SupabaseService.client.auth.currentUser?.id;
-    // Используем цвета из темы
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -152,7 +175,7 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.chat_bubble_outline, size: 48, color: colorScheme.onSurfaceVariant),
+                        Icon(Icons.chat_bubble_outline, size: 48, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
                         const SizedBox(height: 10),
                         Text('Сообщений пока нет.\nНачните общение!',
                             textAlign: TextAlign.center,
@@ -196,11 +219,10 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
           if (_isUploading)
             const LinearProgressIndicator(minHeight: 2),
 
-          // Поле ввода
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             decoration: BoxDecoration(
-              color: colorScheme.surface, // Цвет фона из темы
+              color: colorScheme.surface,
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.05),
@@ -224,7 +246,6 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
                       decoration: InputDecoration(
                         hintText: 'Написать сообщение...',
                         filled: true,
-                        // Адаптивный цвет фона поля ввода
                         fillColor: colorScheme.surfaceContainerHighest,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
@@ -278,7 +299,7 @@ class _DateHeader extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 16),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest, // Адаптивный фон
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
@@ -323,10 +344,10 @@ class _ChatBubble extends StatelessWidget {
           if (!isMe) ...[
             CircleAvatar(
               radius: 16,
-              backgroundColor: colorScheme.secondaryContainer,
+              backgroundColor: colorScheme.primaryContainer,
               child: Text(
                 initials,
-                style: TextStyle(fontSize: 12, color: colorScheme.onSecondaryContainer, fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 12, color: colorScheme.onPrimaryContainer, fontWeight: FontWeight.bold),
               ),
             ),
             const SizedBox(width: 8),
@@ -334,7 +355,7 @@ class _ChatBubble extends StatelessWidget {
 
           Flexible(
             child: Container(
-              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
               child: Column(
                 crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                 children: [
@@ -343,28 +364,20 @@ class _ChatBubble extends StatelessWidget {
                       padding: const EdgeInsets.only(left: 12, bottom: 2),
                       child: Text(
                         senderName,
-                        style: TextStyle(fontSize: 11, color: colorScheme.outline, fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold),
                       ),
                     ),
 
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      // Цвета зависят от того, кто отправил
-                      color: isMe ? colorScheme.primary : colorScheme.surfaceContainer,
+                      color: isMe ? colorScheme.primary : colorScheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.only(
                         topLeft: const Radius.circular(18),
                         topRight: const Radius.circular(18),
                         bottomLeft: isMe ? const Radius.circular(18) : const Radius.circular(4),
                         bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(18),
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.05),
-                          offset: const Offset(0, 1),
-                          blurRadius: 2,
-                        )
-                      ],
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
@@ -378,7 +391,7 @@ class _ChatBubble extends StatelessWidget {
                             Text(
                               time,
                               style: TextStyle(
-                                color: isMe ? colorScheme.onPrimary.withValues(alpha: 0.7) : colorScheme.onSurfaceVariant,
+                                color: isMe ? colorScheme.onPrimary.withValues(alpha: 0.7) : colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
                                 fontSize: 10,
                               ),
                             ),
@@ -387,10 +400,9 @@ class _ChatBubble extends StatelessWidget {
                               Icon(
                                 message.isRead ? Icons.done_all : Icons.check,
                                 size: 14,
-                                // Галочки видны на фоне primary
                                 color: message.isRead
                                     ? colorScheme.onPrimary
-                                    : colorScheme.onPrimary.withValues(alpha: 0.6),
+                                    : colorScheme.onPrimary.withValues(alpha: 0.5),
                               ),
                             ],
                           ],

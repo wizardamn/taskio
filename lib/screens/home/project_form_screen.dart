@@ -1,26 +1,28 @@
-import 'package:universal_io/io.dart';
+import 'package:universal_io/io.dart'; // Support for both Web and Mobile File
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart'; // For kIsWeb
 import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:collection/collection.dart';
+import 'package:url_launcher/url_launcher.dart'; // Added for web file opening
 
-// --- ИМПОРТЫ ПРОЕКТА ---
+// --- PROJECT IMPORTS ---
 import '../../services/supabase_service.dart';
 import '../../models/project_model.dart';
 import '../../providers/project_provider.dart';
 import '../../services/notification_service.dart';
 
-// --- НОВЫЕ ИМПОРТЫ ---
+// --- NEW IMPORTS ---
 import '../../utils/file_opener_utils.dart';
 import '../../widgets/project_form_widgets.dart';
 import '../../widgets/participant_selection_dialog.dart';
-import '../../widgets/project_tasks_widget.dart'; // Виджет задач
-import 'project_chat_screen.dart'; // Экран чата
+import '../../widgets/project_tasks_widget.dart'; // Task Widget
+import 'project_chat_screen.dart'; // Chat Screen
 
 class ProjectFormScreen extends StatefulWidget {
   final ProjectModel project;
@@ -41,34 +43,34 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   final SupabaseClient _supabase = SupabaseService.client;
   final Uuid _uuid = const Uuid();
 
-  // Состояние формы
+  // Form State
   late String _title;
   late String _description;
   late DateTime _deadline;
   late ProjectStatus _status;
-  late String _color; // Цвет проекта
+  late String _color; // Project Color
   double? _grade;
   List<Attachment> _attachments = [];
 
-  // Участники
+  // Participants
   late List<String> _participants;
   List<Map<String, dynamic>> _users = [];
   bool _isLoadingUsers = true;
 
-  // Файлы
+  // Files
   bool _isUploading = false;
   String? _currentlyOpeningFile;
 
-  // Палитра цветов
+  // Color Palette
   final List<Color> _availableColors = const [
-    Color(0xFF2196F3), // Синий
-    Color(0xFF4CAF50), // Зеленый
-    Color(0xFFF44336), // Красный
-    Color(0xFFFF9800), // Оранжевый
-    Color(0xFF9C27B0), // Фиолетовый
-    Color(0xFFE91E63), // Розовый
-    Color(0xFF795548), // Коричневый
-    Color(0xFF607D8B), // Серо-синий
+    Color(0xFF2196F3), // Blue
+    Color(0xFF4CAF50), // Green
+    Color(0xFFF44336), // Red
+    Color(0xFFFF9800), // Orange
+    Color(0xFF9C27B0), // Purple
+    Color(0xFFE91E63), // Pink
+    Color(0xFF795548), // Brown
+    Color(0xFF607D8B), // Blue Grey
   ];
 
   @override
@@ -79,10 +81,10 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     _deadline = widget.project.deadline;
     _status = widget.project.statusEnum;
     _grade = widget.project.grade;
-    _color = widget.project.color; // Инициализация цвета
+    _color = widget.project.color; // Initialize color
     _attachments = List.from(widget.project.attachments);
 
-    // Инициализация участников
+    // Initialize participants
     final Set<String> participantSet = widget.project.participantIds.toSet();
     final String currentUserId = _supabase.auth.currentUser?.id ?? '';
     final String ownerId = widget.project.ownerId.isNotEmpty
@@ -98,7 +100,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   }
 
   void _openChat() {
-    // Если проект новый и не сохранен, чат недоступен
+    // Chat is unavailable if project is new and not saved
     if (widget.isNew && widget.project.id.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Сначала сохраните проект, чтобы использовать чат.')),
@@ -118,7 +120,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     );
   }
 
-  // --- Загрузка пользователей ---
+  // --- Load Users ---
   Future<void> _loadUsers() async {
     try {
       final currentUserId = _supabase.auth.currentUser?.id;
@@ -152,7 +154,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     }
   }
 
-  // --- Имя пользователя по ID ---
+  // --- Get User Name by ID ---
   String _getUserName(String userId) {
     final user = _users.firstWhereOrNull((u) => u['id'] == userId);
     if (user != null) {
@@ -168,7 +170,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     return 'Неизвестный';
   }
 
-  // --- Логика выбора участников ---
+  // --- Select Participants ---
   Future<void> _selectParticipants() async {
     final currentUser = _supabase.auth.currentUser;
 
@@ -199,7 +201,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     }
   }
 
-  // --- Загрузка вложения ---
+  // --- Pick Attachment ---
   Future<void> _pickAttachment() async {
     if (widget.project.id.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сначала сохраните проект')));
@@ -215,22 +217,35 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'mp3', 'mp4', 'zip', 'rar'],
+      withData: kIsWeb, // Important for Web support
     );
 
-    if (result == null || result.files.single.path == null || !mounted) return;
-
-    final pickedFile = result.files.single;
-    final file = File(pickedFile.path!);
+    // Check for null result or missing data
+    if (result == null || (kIsWeb ? result.files.single.bytes == null : result.files.single.path == null) || !mounted) return;
 
     setState(() => _isUploading = true);
 
     try {
-      final updatedProject = await prov.uploadAttachment(widget.project.id, file);
+      final fileName = result.files.single.name;
+      ProjectModel updatedProject;
 
-      await NotificationService().showSimple(
-        'Файл загружен',
-        'Файл "${pickedFile.name}" добавлен к проекту "${updatedProject.title}".',
-      );
+      if (kIsWeb) {
+        // Web: Pass bytes
+        updatedProject = await prov.uploadAttachment(
+            widget.project.id,
+            File(''), // Dummy file for type safety in method signature if needed, but provider handles bytes
+            fileBytes: result.files.single.bytes,
+            fileName: fileName
+        );
+      } else {
+        // Mobile: Pass file path
+        final file = File(result.files.single.path!);
+        updatedProject = await prov.uploadAttachment(
+            widget.project.id,
+            file,
+            fileName: fileName
+        );
+      }
 
       if (!mounted) return;
 
@@ -245,9 +260,21 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     }
   }
 
-  // --- Открытие вложения ---
+  // --- Open Attachment ---
   Future<void> _handleOpenAttachment(Attachment attachment) async {
     if (_currentlyOpeningFile == attachment.filePath) return;
+
+    // Web handling
+    if (kIsWeb) {
+      final url = _supabase.storage.from(SupabaseService.bucket).getPublicUrl(attachment.filePath);
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      } else {
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось открыть ссылку')));
+      }
+      return;
+    }
 
     setState(() => _currentlyOpeningFile = attachment.filePath);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Открытие: ${attachment.fileName}')));
@@ -265,11 +292,11 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     setState(() => _currentlyOpeningFile = null);
   }
 
-  // --- Удаление вложения ---
+  // --- Delete Attachment ---
   Future<void> _deleteAttachment(Attachment attachment) async {
     final prov = context.read<ProjectProvider>();
 
-    // ПРОВЕРКА: Только Владелец может удалять файлы
+    // CHECK: Only Owner can delete files
     if (widget.project.ownerId != _supabase.auth.currentUser?.id) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Только владелец может удалять файлы.')));
       return;
@@ -294,7 +321,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     }
   }
 
-  // --- Сохранение проекта ---
+  // --- Save Project ---
   Future<void> _saveProject() async {
     final prov = context.read<ProjectProvider>();
 
@@ -324,7 +351,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       participantsData: const [],
       participantIds: _participants.toSet().toList(),
       createdAt: widget.project.createdAt.isBefore(DateTime(2000)) ? DateTime.now() : widget.project.createdAt,
-      color: _color, // Сохраняем цвет
+      color: _color, // Save Color
     );
 
     try {
@@ -359,10 +386,10 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     final prov = context.watch<ProjectProvider>();
     final colorScheme = Theme.of(context).colorScheme;
 
-    // ПРАВА ДОСТУПА
+    // ACCESS RIGHTS
     final currentUserId = _supabase.auth.currentUser?.id;
     final isOwner = widget.project.ownerId == currentUserId;
-    // Редактор может добавлять файлы и задачи, но не менять поля проекта
+    // Editor can add files and tasks, but not change project fields
     final canEditContent = isOwner || prov.canEditProject(widget.project);
 
     if (_isLoadingUsers) {
@@ -375,9 +402,10 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.isNew ? "Новый проект" : "Проект"),
-        backgroundColor: Color(int.parse(_color)), // Цвет AppBar = Цвет Проекта
+        backgroundColor: Color(int.parse(_color)), // AppBar Color matches Project Color
+        foregroundColor: Colors.white, // Ensure text is visible
         actions: [
-          // Чат
+          // Chat (only if project is created)
           if (!widget.isNew)
             IconButton(
               icon: const Icon(Icons.chat),
@@ -385,7 +413,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
               onPressed: _openChat,
             ),
 
-          // Сохранить (Только Владелец)
+          // Save (Only Owner)
           if (isOwner)
             IconButton(
               icon: const Icon(Icons.check),
@@ -401,7 +429,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ВЫБОР ЦВЕТА (Только Владелец)
+              // COLOR SELECTION (Only Owner)
               if (isOwner) ...[
                 Text("Цвет проекта", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: colorScheme.onSurfaceVariant)),
                 const SizedBox(height: 10),
@@ -442,7 +470,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                 const SizedBox(height: 20),
               ],
 
-              // Название
+              // Title
               TextFormField(
                 initialValue: _title,
                 decoration: const InputDecoration(
@@ -452,12 +480,12 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                 ),
                 validator: (v) => v?.isEmpty ?? true ? "Введите название" : null,
                 onSaved: (v) => _title = v!,
-                enabled: isOwner,
+                enabled: isOwner, // Strict permission
               ).animate().fadeIn(duration: 300.ms),
 
               const SizedBox(height: 16),
 
-              // Описание
+              // Description
               TextFormField(
                 initialValue: _description,
                 maxLines: 3,
@@ -472,14 +500,14 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
               const SizedBox(height: 16),
 
-              // Дедлайн и Статус
+              // Deadline & Status
               Row(
                 children: [
                   Expanded(
                     child: DatePickerField(
                       label: 'Дедлайн',
                       initialDate: _deadline,
-                      // Изменяемо только владельцем
+                      // Editable by Owner only
                       onChanged: isOwner ? (d) => setState(() => _deadline = d) : null,
                     ),
                   ),
@@ -493,7 +521,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                         contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
                       ),
                       items: ProjectStatus.values.map((s) => DropdownMenuItem(value: s, child: Text(s.text))).toList(),
-                      // Изменяемо только владельцем
+                      // Editable by Owner only
                       onChanged: isOwner ? (v) => setState(() => _status = v!) : null,
                     ),
                   ),
@@ -502,21 +530,21 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
               const SizedBox(height: 16),
 
-              // --- ЗАДАЧИ ---
+              // --- TASKS ---
               if (!widget.isNew)
                 Column(
                   children: [
                     const Divider(height: 30),
                     ProjectTasksWidget(
                       projectId: widget.project.id,
-                      canEdit: canEditContent, // Редактировать задачи могут все участники
+                      canEdit: canEditContent, // Editable by Owner AND Editors
                     ),
                   ],
                 ),
 
               const SizedBox(height: 16),
 
-              // Оценка
+              // Grade
               if (_status == ProjectStatus.completed)
                 TextFormField(
                   initialValue: _grade?.toInt().toString() ?? '',
@@ -545,7 +573,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
               const Divider(height: 30),
 
-              // Участники
+              // Participants
               ListTile(
                 leading: const Icon(Icons.people),
                 title: const Text("Участники команды"),
@@ -561,7 +589,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
               const Divider(height: 30),
 
-              // Вложения
+              // Attachments
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -575,16 +603,16 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                       onPressed: _pickAttachment,
                     )
                   else
-                    const Text("Только просмотр", style: TextStyle(color: Colors.grey)),
+                    Text("Только просмотр", style: TextStyle(color: colorScheme.outline)),
                 ],
               ).animate().fadeIn(delay: 400.ms),
 
               const SizedBox(height: 10),
 
               if (_attachments.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(16.0),
-                  child: Center(child: Text("Нет вложений", style: TextStyle(color: Colors.grey))),
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Center(child: Text("Нет вложений", style: TextStyle(color: colorScheme.outline))),
                 )
               else
                 Wrap(
@@ -594,8 +622,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                     for (var att in _attachments)
                       AttachmentThumb(
                         attachment: att,
-                        // canEdit здесь - это право на удаление файла (крестик).
-                        // Только владелец может удалять файлы.
+                        // canEdit here controls deletion. Only Owner can delete.
                         canEdit: isOwner,
                         isOpening: _currentlyOpeningFile == att.filePath,
                         onTap: () => _handleOpenAttachment(att),

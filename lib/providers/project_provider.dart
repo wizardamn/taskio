@@ -1,5 +1,4 @@
-import 'package:universal_io/io.dart'; // <--- ИСПРАВЛЕНО для Web
-import 'dart:typed_data';
+import 'package:universal_io/io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:easy_localization/easy_localization.dart';
 
@@ -137,6 +136,7 @@ class ProjectProvider extends ChangeNotifier {
       );
       await fetchProjects();
 
+      // Ищем созданный проект в обновленном списке
       return _projects.firstWhere(
               (proj) => proj.id == newProject.id,
           orElse: () => newProject
@@ -178,7 +178,7 @@ class ProjectProvider extends ChangeNotifier {
     }
   }
 
-  // --- Права доступа ---
+  // --- Права доступа (на основе ролей в БД) ---
 
   bool canEditProject(ProjectModel project) {
     if (isGuest || _userId == null) return false;
@@ -190,6 +190,7 @@ class ProjectProvider extends ChangeNotifier {
       orElse: () => ProjectParticipant(id: '', fullName: '', role: 'viewer'),
     );
 
+    // Роли из БД: owner, editor
     return member.id == _userId && (member.role == 'owner' || member.role == 'editor');
   }
 
@@ -218,6 +219,7 @@ class ProjectProvider extends ChangeNotifier {
     if (isGuest || _userId == null) return;
     try {
       await _service.addParticipant(projectId, userId, role);
+      // Уведомление и перезагрузка
       await fetchProjects();
     } catch (e, st) {
       _handleCrudError(e, st, "addParticipant");
@@ -236,11 +238,13 @@ class ProjectProvider extends ChangeNotifier {
 
   // --- Вложения ---
 
-  Future<ProjectModel> uploadAttachment(String projectId, File file, {Uint8List? fileBytes, String? fileName}) async {
+  // ИСПРАВЛЕНО: Аргумент file теперь nullable, чтобы можно было передавать null в Web
+  Future<ProjectModel> uploadAttachment(String projectId, File? file, {Uint8List? fileBytes, String? fileName}) async {
     if (isGuest || _userId == null) throw Exception("operation_denied_guest".tr());
 
     try {
-      final name = fileName ?? file.path.split('/').last;
+      // Для веба fileName обязателен, для мобильных берем из пути
+      final name = fileName ?? (file != null ? file.path.split('/').last : 'unknown_file');
 
       final updatedProject = await _service.uploadAttachment(
           projectId: projectId,
@@ -251,6 +255,7 @@ class ProjectProvider extends ChangeNotifier {
 
       await NotificationService().showSimple('Файл загружен', name);
 
+      // Локальное обновление
       final index = _projects.indexWhere((p) => p.id == projectId);
       if (index != -1) {
         _projects[index] = updatedProject;
@@ -270,6 +275,7 @@ class ProjectProvider extends ChangeNotifier {
     try {
       await _service.deleteAttachment(projectId, filePath);
 
+      // Локальное обновление
       final index = _projects.indexWhere((p) => p.id == projectId);
       if (index != -1) {
         final current = _projects[index];
@@ -299,7 +305,7 @@ class ProjectProvider extends ChangeNotifier {
       participantsData: [],
       participantIds: [_userId!],
       createdAt: DateTime.now(),
-      color: '0xFF2196F3',
+      color: '0xFF2196F3', // Дефолтный цвет
     );
   }
 

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/task_model.dart';
 import 'supabase_service.dart';
@@ -5,8 +6,8 @@ import 'supabase_service.dart';
 class TaskService {
   final SupabaseClient _client = SupabaseService.client;
 
-  /// Получает поток задач для проекта (Realtime)
   Stream<List<TaskModel>> getTasksStream(String projectId) {
+    debugPrint('[TaskService] Subscribing to tasks for project: $projectId');
     return _client
         .from('project_tasks')
         .stream(primaryKey: ['id'])
@@ -15,25 +16,26 @@ class TaskService {
         .map((data) => data.map((e) => TaskModel.fromJson(e)).toList());
   }
 
-  /// Добавить задачу
   Future<void> addTask(String projectId, String title) async {
+    debugPrint('[TaskService] Adding task: "$title" to project $projectId');
     await _client.from('project_tasks').insert({
       'project_id': projectId,
       'title': title,
       'is_completed': false,
     });
+    debugPrint('[TaskService] Task added.');
   }
 
-  /// Переключить статус (выполнено/нет)
   Future<void> toggleTask(String taskId, bool currentValue) async {
+    debugPrint('[TaskService] Toggling task $taskId to ${!currentValue}');
     await _client
         .from('project_tasks')
         .update({'is_completed': !currentValue})
         .eq('id', taskId);
   }
 
-  /// Удалить задачу
   Future<void> deleteTask(String taskId) async {
+    debugPrint('[TaskService] Deleting task $taskId');
     await _client.from('project_tasks').delete().eq('id', taskId);
   }
 }

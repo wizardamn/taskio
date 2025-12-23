@@ -49,8 +49,8 @@ dependencies:
   collection: ^1.18.0
 
   # Web support & Info
-  universal_io: ^2.2.2         # <-- Добавлено для поддержки io.File в Web
-  package_info_plus: ^8.0.0    # <-- Добавлено для получения версии приложения
+  universal_io: ^2.2.2
+  package_info_plus: ^8.0.0
 
 dev_dependencies:
   flutter_test:

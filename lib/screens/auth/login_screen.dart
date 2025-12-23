@@ -65,9 +65,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       final authProvider = context.read<AuthProvider>();
       await authProvider.signIn(_emailController.text.trim(), _passwordController.text.trim());
 
-      // При успешном входе LoginWrapper сам переключит экран благодаря StreamListener
-      // Никаких Navigator.pop() здесь не нужно.
-
     } on Exception catch (e) {
       if (mounted) {
         _showSnackBar(e.toString().replaceFirst('Exception: ', ''), isError: true);

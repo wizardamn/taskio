@@ -32,7 +32,6 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
       final prov = context.read<ProjectProvider>();
       final authProv = context.read<AuthProvider>();
 
-      // Инициализация данных в зависимости от режима
       if (authProv.isGuest) {
         prov.setGuestUser();
       } else {
@@ -255,7 +254,6 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 80),
       itemCount: projects.length,
-      // Используем itemContext, чтобы избежать скрытия (shadowing) основного context
       itemBuilder: (itemContext, index) {
         final p = projects[index];
         final canEdit = provider.canEditProject(p);
@@ -268,7 +266,6 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
             onEdit: (project) async {
               if (!canEdit) return;
 
-              // Используем context (от State), а не itemContext
               final updated = await Navigator.push(
                 context,
                 MaterialPageRoute(
