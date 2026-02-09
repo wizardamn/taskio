@@ -6,15 +6,15 @@ import '../models/project_model.dart';
 import '../services/project_service.dart';
 import '../services/notification_service.dart';
 
-enum ProjectFilter { all, inProgressOnly }
-enum SortBy { deadlineAsc, deadlineDesc, status }
+enum ProjectFilter { all, inProgressOnly, completedOnly }
+enum SortBy { deadlineAsc, deadlineDesc, status, title }
 
 class ProjectProvider extends ChangeNotifier {
   final ProjectService _service;
 
   bool isGuest = true;
   String? _userId;
-  String _currentUserName = 'Гость';
+  String _currentUserName = '';
 
   bool _isLoading = false;
   String? _errorMessage;
@@ -23,21 +23,41 @@ class ProjectProvider extends ChangeNotifier {
 
   SortBy _sortBy = SortBy.deadlineAsc;
   ProjectFilter _filter = ProjectFilter.all;
+  String _searchQuery = '';
 
   ProjectProvider(this._service);
 
-  // Геттеры
-  String get currentUserName => _currentUserName;
+  // --- Геттеры ---
+
+  // Возвращает либо имя пользователя, либо переведенный ключ "guest"
+  String get currentUserName => isGuest ? 'user_guest'.tr() : _currentUserName;
+
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   SortBy get currentSortBy => _sortBy;
   ProjectFilter get currentFilter => _filter;
+  String get searchQuery => _searchQuery;
 
   List<ProjectModel> get view {
     var result = [..._projects];
+
+    // 1. Поиск
+    if (_searchQuery.isNotEmpty) {
+      final query = _searchQuery.toLowerCase();
+      result = result.where((p) =>
+      p.title.toLowerCase().contains(query) ||
+          p.description.toLowerCase().contains(query)
+      ).toList();
+    }
+
+    // 2. Фильтрация
     if (_filter == ProjectFilter.inProgressOnly) {
       result = result.where((p) => p.statusEnum == ProjectStatus.inProgress).toList();
+    } else if (_filter == ProjectFilter.completedOnly) {
+      result = result.where((p) => p.statusEnum == ProjectStatus.completed).toList();
     }
+
+    // 3. Сортировка
     switch (_sortBy) {
       case SortBy.deadlineAsc:
         result.sort((a, b) => a.deadline.compareTo(b.deadline));
@@ -48,9 +68,14 @@ class ProjectProvider extends ChangeNotifier {
       case SortBy.status:
         result.sort((a, b) => a.statusEnum.index.compareTo(b.statusEnum.index));
         break;
+      case SortBy.title:
+        result.sort((a, b) => a.title.compareTo(b.title));
+        break;
     }
     return result;
   }
+
+  // --- Управление состоянием пользователя ---
 
   Future<void> setUser(String userId, String userName) async {
     _userId = userId;
@@ -63,7 +88,7 @@ class ProjectProvider extends ChangeNotifier {
 
   void setGuestUser() {
     _userId = null;
-    _currentUserName = 'Гость';
+    _currentUserName = '';
     isGuest = true;
     _projects.clear();
     _isLoading = false;
@@ -75,13 +100,16 @@ class ProjectProvider extends ChangeNotifier {
   void clear({bool keepProjects = false}) {
     isGuest = true;
     _userId = null;
-    _currentUserName = 'Гость';
+    _currentUserName = '';
     _service.updateOwner(null);
     _isLoading = false;
     _errorMessage = null;
+    _searchQuery = '';
     if (!keepProjects) _projects.clear();
     notifyListeners();
   }
+
+  // --- Загрузка данных ---
 
   Future<void> fetchProjects() async {
     if (isGuest || _userId == null) {
@@ -100,12 +128,19 @@ class ProjectProvider extends ChangeNotifier {
         ..addAll(loaded);
     } catch (e, st) {
       _projects.clear();
-      _errorMessage = 'Ошибка загрузки: ${e.toString().split(':')[0].trim()}';
+      _errorMessage = 'error_fetch_failed'.tr();
       debugPrint("ProjectProvider Fetch Error: $e\n$st");
     } finally {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  // --- Фильтры и поиск ---
+
+  void search(String query) {
+    _searchQuery = query;
+    notifyListeners();
   }
 
   void setSort(SortBy sortBy) {
@@ -131,16 +166,16 @@ class ProjectProvider extends ChangeNotifier {
     try {
       final newProject = await _service.add(p);
       await NotificationService().showSimple(
-        'Проект создан',
-        'Проект "${newProject.title}" успешно создан.',
+        'notif_project_created_title'.tr(),
+        'notif_project_created_body'.tr(args: [newProject.title]),
       );
-      await fetchProjects();
 
-      // Ищем созданный проект в обновленном списке
-      return _projects.firstWhere(
-              (proj) => proj.id == newProject.id,
-          orElse: () => newProject
-      );
+      // Обновляем список, добавляя новый проект в начало
+      // Мы можем использовать данные от сервиса, чтобы не делать лишний запрос
+      _projects.insert(0, newProject);
+      notifyListeners();
+
+      return newProject;
     } catch (e, st) {
       _handleCrudError(e, st, "addProject");
       return null;
@@ -152,13 +187,21 @@ class ProjectProvider extends ChangeNotifier {
     _errorMessage = null;
 
     try {
-      final oldProject = await _service.getById(p.id);
       await _service.update(p);
+      await NotificationService().showSimple(
+          'notif_project_updated_title'.tr(),
+          'notif_project_updated_body'.tr()
+      );
 
-      if (oldProject != null) {
-        await NotificationService().showSimple('Проект обновлён', 'Изменения сохранены.');
+      // Локальное обновление
+      final index = _projects.indexWhere((proj) => proj.id == p.id);
+      if (index != -1) {
+        _projects[index] = p;
+        notifyListeners();
+      } else {
+        // Если почему-то проекта нет в списке, можно перезагрузить
+        await fetchProjects();
       }
-      await fetchProjects();
     } catch (e, st) {
       _handleCrudError(e, st, "updateProject");
     }
@@ -167,42 +210,23 @@ class ProjectProvider extends ChangeNotifier {
   Future<void> deleteProject(String id) async {
     if (isGuest || _userId == null) return;
     try {
-      final projectToDelete = await _service.getById(id);
+      final projectToDelete = _projects.firstWhere((p) => p.id == id, orElse: () => createEmptyProject());
+
       await _service.delete(id);
-      if (projectToDelete != null) {
-        await NotificationService().showSimple('Проект удалён', 'Проект "${projectToDelete.title}" удалён.');
+
+      if (projectToDelete.id.isNotEmpty) {
+        await NotificationService().showSimple(
+            'notif_project_deleted_title'.tr(),
+            'notif_project_deleted_body'.tr(args: [projectToDelete.title])
+        );
       }
-      await fetchProjects();
+
+      // Локальное удаление
+      _projects.removeWhere((p) => p.id == id);
+      notifyListeners();
     } catch (e, st) {
       _handleCrudError(e, st, "deleteProject");
     }
-  }
-
-  // --- Права доступа (на основе ролей в БД) ---
-
-  bool canEditProject(ProjectModel project) {
-    if (isGuest || _userId == null) return false;
-    if (project.ownerId == _userId) return true;
-    if (project.statusEnum == ProjectStatus.completed) return false;
-
-    final member = project.participantsData.firstWhere(
-          (p) => p.id == _userId,
-      orElse: () => ProjectParticipant(id: '', fullName: '', role: 'viewer'),
-    );
-
-    // Роли из БД: owner, editor
-    return member.id == _userId && (member.role == 'owner' || member.role == 'editor');
-  }
-
-  bool canViewProject(ProjectModel project) {
-    if (isGuest || _userId == null) return false;
-    if (project.ownerId == _userId) return true;
-
-    final member = project.participantsData.firstWhere(
-          (p) => p.id == _userId,
-      orElse: () => ProjectParticipant(id: '', fullName: '', role: ''),
-    );
-    return member.id == _userId;
   }
 
   // --- Участники ---
@@ -219,7 +243,7 @@ class ProjectProvider extends ChangeNotifier {
     if (isGuest || _userId == null) return;
     try {
       await _service.addParticipant(projectId, userId, role);
-      // Уведомление и перезагрузка
+      // Здесь лучше перезагрузить, так как меняется вложенная структура
       await fetchProjects();
     } catch (e, st) {
       _handleCrudError(e, st, "addParticipant");
@@ -236,36 +260,49 @@ class ProjectProvider extends ChangeNotifier {
     }
   }
 
-  // --- Вложения ---
+  // --- Вложения (Массовая загрузка) ---
 
-  // ИСПРАВЛЕНО: Аргумент file теперь nullable, чтобы можно было передавать null в Web
-  Future<ProjectModel> uploadAttachment(String projectId, File? file, {Uint8List? fileBytes, String? fileName}) async {
+  Future<ProjectModel> uploadAttachments({
+    required String projectId,
+    required List<String> fileNames,
+    List<File>? files,
+    List<Uint8List>? filesBytes,
+  }) async {
     if (isGuest || _userId == null) throw Exception("operation_denied_guest".tr());
 
     try {
-      // Для веба fileName обязателен, для мобильных берем из пути
-      final name = fileName ?? (file != null ? file.path.split('/').last : 'unknown_file');
+      _isLoading = true;
+      notifyListeners();
 
-      final updatedProject = await _service.uploadAttachment(
+      // Вызываем сервис для загрузки списка файлов
+      final updatedProject = await _service.uploadAttachments(
           projectId: projectId,
-          fileName: name,
-          file: file,
-          fileBytes: fileBytes
+          fileNames: fileNames,
+          files: files,
+          filesBytes: filesBytes
       );
 
-      await NotificationService().showSimple('Файл загружен', name);
+      // Уведомление об успехе
+      await NotificationService().showSimple(
+          'notif_file_uploaded_title'.tr(),
+          'notif_files_count'.tr(args: [fileNames.length.toString()])
+      );
 
-      // Локальное обновление
+      // Обновляем локальную копию проекта в списке
       final index = _projects.indexWhere((p) => p.id == projectId);
       if (index != -1) {
         _projects[index] = updatedProject;
       } else {
         _projects.add(updatedProject);
       }
+
+      _isLoading = false;
       notifyListeners();
+
       return updatedProject;
     } catch (e, st) {
-      _handleCrudError(e, st, "uploadAttachment");
+      _isLoading = false;
+      _handleCrudError(e, st, "uploadAttachments");
       rethrow;
     }
   }
@@ -275,18 +312,48 @@ class ProjectProvider extends ChangeNotifier {
     try {
       await _service.deleteAttachment(projectId, filePath);
 
-      // Локальное обновление
       final index = _projects.indexWhere((p) => p.id == projectId);
       if (index != -1) {
         final current = _projects[index];
+        // Создаем новый список вложений без удаленного файла
         final newAttachments = current.attachments.where((a) => a.filePath != filePath).toList();
+        // Используем copyWith для обновления модели
         _projects[index] = current.copyWith(attachments: newAttachments);
       }
+
       notifyListeners();
     } catch (e, st) {
       _handleCrudError(e, st, "deleteAttachment");
     }
   }
+
+  // --- Права доступа ---
+
+  bool canEditProject(ProjectModel project) {
+    if (isGuest || _userId == null) return false;
+    if (project.ownerId == _userId) return true;
+    if (project.statusEnum == ProjectStatus.completed) return false;
+
+    final member = project.participantsData.firstWhere(
+          (p) => p.id == _userId,
+      orElse: () => ProjectParticipant(id: '', fullName: '', role: 'viewer'),
+    );
+
+    return member.id == _userId && (member.role == 'owner' || member.role == 'editor');
+  }
+
+  bool canViewProject(ProjectModel project) {
+    if (isGuest || _userId == null) return false;
+    if (project.ownerId == _userId) return true;
+
+    final member = project.participantsData.firstWhere(
+          (p) => p.id == _userId,
+      orElse: () => ProjectParticipant(id: '', fullName: '', role: ''),
+    );
+    return member.id == _userId;
+  }
+
+  // --- Утилиты ---
 
   ProjectModel createEmptyProject() {
     if (isGuest || _userId == null) {
@@ -296,7 +363,7 @@ class ProjectProvider extends ChangeNotifier {
     return ProjectModel(
       id: "",
       ownerId: _userId!,
-      title: "new_project".tr(),
+      title: "new_project_placeholder".tr(),
       description: "",
       deadline: DateTime.now().add(const Duration(days: 7)),
       status: ProjectStatus.planned.index,
@@ -305,13 +372,13 @@ class ProjectProvider extends ChangeNotifier {
       participantsData: [],
       participantIds: [_userId!],
       createdAt: DateTime.now(),
-      color: '0xFF2196F3', // Дефолтный цвет
+      color: '0xFF2196F3',
     );
   }
 
   void _handleCrudError(Object e, StackTrace st, String operation) {
-    _errorMessage = 'Error $operation: ${e.toString().split(':')[0].trim()}';
-    debugPrint("ProjectProvider ERROR: $e");
+    _errorMessage = 'error_operation_failed'.tr();
+    debugPrint("ProjectProvider ERROR in $operation: $e\n$st");
     notifyListeners();
   }
 }

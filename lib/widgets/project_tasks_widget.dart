@@ -20,8 +20,10 @@ class ProjectTasksWidget extends StatefulWidget {
 class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
   final TaskService _taskService = TaskService();
   final TextEditingController _taskController = TextEditingController();
+  final FocusNode _taskFocusNode = FocusNode();
   bool _isAdding = false;
 
+  /// Добавление новой задачи
   void _addTask() async {
     final title = _taskController.text.trim();
     if (title.isEmpty) return;
@@ -30,9 +32,13 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
     try {
       await _taskService.addTask(widget.projectId, title);
       _taskController.clear();
+      // Возвращаем фокус после добавления для быстрого ввода нескольких задач
+      _taskFocusNode.requestFocus();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка при добавлении: $e')),
+        );
       }
     } finally {
       if (mounted) setState(() => _isAdding = false);
@@ -42,43 +48,57 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
   @override
   void dispose() {
     _taskController.dispose();
+    _taskFocusNode.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Заголовок секции
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text("Задачи", style: Theme.of(context).textTheme.titleMedium),
+            Text("Задачи проекта", style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
             if (widget.canEdit)
               Text(
-                "Свайп влево для удаления",
-                style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                "Свайп для удаления",
+                style: TextStyle(fontSize: 10, color: colorScheme.outline),
               ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
 
-        // Поле добавления
+        // Поле ввода для создания задачи
         if (widget.canEdit)
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.only(bottom: 16),
             child: Row(
               children: [
                 Expanded(
                   child: TextField(
                     controller: _taskController,
+                    focusNode: _taskFocusNode,
+                    textCapitalization: TextCapitalization.sentences,
                     decoration: InputDecoration(
-                      hintText: 'Новая задача...',
+                      hintText: 'Что нужно сделать?',
                       isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: colorScheme.outlineVariant),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: colorScheme.outlineVariant),
+                      ),
                       filled: true,
-                      fillColor: Colors.grey.shade50,
+                      fillColor: colorScheme.surfaceContainerHighest.withOpacity(0.3),
                     ),
                     onSubmitted: (_) => _addTask(),
                   ),
@@ -87,30 +107,52 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
                 IconButton.filled(
                   onPressed: _isAdding ? null : _addTask,
                   icon: _isAdding
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Icon(Icons.add),
+                      ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                      : const Icon(Icons.add_rounded),
                   style: IconButton.styleFrom(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    backgroundColor: colorScheme.primary,
+                    foregroundColor: colorScheme.onPrimary,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                 ),
               ],
             ),
           ),
 
-        // Список задач
+        // Стрим со списком задач
         StreamBuilder<List<TaskModel>>(
           stream: _taskService.getTasksStream(widget.projectId),
           builder: (context, snapshot) {
-            if (snapshot.hasError) return Text('Ошибка загрузки задач');
-            if (!snapshot.hasData) return const Center(child: LinearProgressIndicator());
+            if (snapshot.hasError) {
+              return Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Text('Ошибка загрузки задач', style: TextStyle(color: colorScheme.error)),
+              );
+            }
+            if (!snapshot.hasData) {
+              return const Center(child: Padding(
+                padding: EdgeInsets.all(20.0),
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ));
+            }
 
             final tasks = snapshot.data!;
 
             if (tasks.isEmpty) {
               return Center(
                 child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Text("Нет задач", style: TextStyle(color: Colors.grey.shade400)),
+                  padding: const EdgeInsets.symmetric(vertical: 32),
+                  child: Column(
+                    children: [
+                      Icon(Icons.assignment_outlined, size: 40, color: colorScheme.outlineVariant),
+                      const SizedBox(height: 8),
+                      Text("Список задач пуст", style: TextStyle(color: colorScheme.outline)),
+                    ],
+                  ),
                 ),
               );
             }
@@ -119,23 +161,33 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: tasks.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 4),
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
                 final task = tasks[index];
-                return widget.canEdit
-                    ? Dismissible(
+
+                if (!widget.canEdit) {
+                  return _buildTaskTile(task, colorScheme);
+                }
+
+                return Dismissible(
                   key: Key(task.id),
                   direction: DismissDirection.endToStart,
+                  confirmDismiss: (direction) async {
+                    // Можно добавить диалог подтверждения, если задача важная
+                    return true;
+                  },
                   background: Container(
                     alignment: Alignment.centerRight,
                     padding: const EdgeInsets.only(right: 20),
-                    color: Colors.red.shade100,
-                    child: Icon(Icons.delete, color: Colors.red.shade700),
+                    decoration: BoxDecoration(
+                      color: colorScheme.errorContainer,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(Icons.delete_sweep_outlined, color: colorScheme.onErrorContainer),
                   ),
                   onDismissed: (_) => _taskService.deleteTask(task.id),
-                  child: _buildTaskTile(task),
-                )
-                    : _buildTaskTile(task);
+                  child: _buildTaskTile(task, colorScheme),
+                );
               },
             );
           },
@@ -144,12 +196,19 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
     );
   }
 
-  Widget _buildTaskTile(TaskModel task) {
+  /// Визуальный элемент задачи
+  Widget _buildTaskTile(TaskModel task, ColorScheme colorScheme) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade200),
+        color: task.isCompleted
+            ? colorScheme.surfaceContainerLow
+            : colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: task.isCompleted
+              ? colorScheme.outlineVariant.withOpacity(0.5)
+              : colorScheme.outlineVariant,
+        ),
       ),
       child: CheckboxListTile(
         value: task.isCompleted,
@@ -159,15 +218,20 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
         title: Text(
           task.title,
           style: TextStyle(
+            fontSize: 14,
             decoration: task.isCompleted ? TextDecoration.lineThrough : null,
-            color: task.isCompleted ? Colors.grey : Colors.black87,
+            color: task.isCompleted ? colorScheme.outline : colorScheme.onSurface,
+            fontWeight: task.isCompleted ? FontWeight.normal : FontWeight.w500,
           ),
         ),
         controlAffinity: ListTileControlAffinity.leading,
         dense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-        activeColor: Theme.of(context).primaryColor,
+        visualDensity: VisualDensity.compact,
+        contentPadding: const EdgeInsets.only(left: 4, right: 8),
+        activeColor: colorScheme.primary,
+        checkColor: colorScheme.onPrimary,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
-    ).animate().fadeIn().slideX(begin: -0.05, end: 0);
+    ).animate().fadeIn(duration: 200.ms).slideX(begin: 0.02, end: 0);
   }
 }
