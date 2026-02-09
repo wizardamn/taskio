@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../../models/project_model.dart';
-import '../project_form_widgets.dart';
 
 class AttachmentsSection extends StatelessWidget {
   final List<Attachment> attachments;
@@ -29,9 +28,8 @@ class AttachmentsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min, // Важно для корректного отображения внутри списков
+      mainAxisSize: MainAxisSize.min,
       children: [
-        // Заголовок секции
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -81,21 +79,14 @@ class AttachmentsSection extends StatelessWidget {
         ).animate().fadeIn(delay: 100.ms),
 
         const SizedBox(height: 12),
-
-        // Контентная область с использованием AnimatedSwitcher для надежного переключения состояний
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 300),
-          child: _buildContent(context),
-        ),
+        _buildContent(context),
       ],
     );
   }
 
   Widget _buildContent(BuildContext context) {
-    // Если файлов нет и загрузка не идет - показываем "Пусто"
     if (attachments.isEmpty && !isUploading) {
       return Container(
-        key: const ValueKey('empty_state'),
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 32.0),
         decoration: BoxDecoration(
@@ -119,21 +110,19 @@ class AttachmentsSection extends StatelessWidget {
             ),
           ],
         ),
-      );
+      ).animate().fadeIn(duration: 300.ms);
     }
 
-    // Если есть файлы или идет загрузка - отрисовываем сетку
     return SizedBox(
-      key: const ValueKey('grid_state'),
       width: double.infinity,
       child: Wrap(
         spacing: 12,
         runSpacing: 12,
         alignment: WrapAlignment.start,
         children: [
-          // Список уже загруженных файлов
           ...attachments.map((att) => AttachmentThumb(
-            key: ValueKey('att_${att.filePath}'), // Уникальный ключ для каждого элемента
+            // Исправлено: удалено обращение к .id, используем filePath и fileName
+            key: ValueKey('att_${att.filePath}_${att.fileName}'),
             attachment: att,
             canEdit: canEditContent && isOwner,
             isOpening: currentlyOpeningFile == att.filePath,
@@ -141,7 +130,6 @@ class AttachmentsSection extends StatelessWidget {
             onDelete: () => onDelete(att),
           ).animate().scale(duration: 200.ms, curve: Curves.easeOut).fadeIn()),
 
-          // Индикатор загрузки нового файла (внутри сетки)
           if (isUploading)
             Container(
               width: 80,
@@ -149,7 +137,9 @@ class AttachmentsSection extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2)),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
+                ),
               ),
               child: const Center(
                 child: SizedBox(
@@ -160,7 +150,81 @@ class AttachmentsSection extends StatelessWidget {
               ),
             )
                 .animate(onPlay: (c) => c.repeat())
-                .shimmer(duration: 1500.ms, color: Colors.white30),
+                .shimmer(duration: 1500.ms, color: Colors.white.withValues(alpha: 0.3)),
+        ],
+      ),
+    );
+  }
+}
+
+// Заглушка или импортируемый виджет (убедитесь, что он определен в проекте)
+class AttachmentThumb extends StatelessWidget {
+  final Attachment attachment;
+  final bool canEdit;
+  final bool isOpening;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  const AttachmentThumb({
+    super.key,
+    required this.attachment,
+    required this.canEdit,
+    required this.isOpening,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Реализация миниатюры
+    return InkWell(
+      onTap: isOpening ? null : onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Stack(
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (isOpening)
+                  const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                else
+                  const Icon(Icons.insert_drive_file_outlined),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(
+                    attachment.fileName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 10),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (canEdit && !isOpening)
+            Positioned(
+              right: 0,
+              top: 0,
+              child: GestureDetector(
+                onTap: onDelete,
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.error,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, size: 12, color: Colors.white),
+                ),
+              ),
+            ),
         ],
       ),
     );

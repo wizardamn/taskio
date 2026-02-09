@@ -48,9 +48,11 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   Future<void> _addProject() async {
     final prov = context.read<ProjectProvider>();
     final authProv = context.read<AuthProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
 
     if (authProv.isGuest || prov.isGuest) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         const SnackBar(content: Text('Гости не могут создавать проекты.')),
       );
       return;
@@ -63,8 +65,8 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
 
     try {
       final newProject = prov.createEmptyProject();
-      final created = await Navigator.push(
-        context,
+
+      final created = await navigator.push(
         MaterialPageRoute(
           builder: (_) => ProjectFormScreen(project: newProject, isNew: true),
         ),
@@ -72,12 +74,12 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
 
       if (created == true && mounted) {
         await prov.fetchProjects();
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.showSnackBar(
           const SnackBar(content: Text('Проект успешно создан')),
         );
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
       );
     }
@@ -85,8 +87,10 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
 
   Future<void> _confirmDelete(ProjectProvider prov, ProjectModel project) async {
     final authProv = context.read<AuthProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+
     if (project.ownerId != authProv.userId) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         const SnackBar(content: Text('Только владелец может удалить проект.')),
       );
       return;
@@ -110,7 +114,9 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
 
     if (confirmed == true && mounted) {
       await prov.deleteProject(project.id);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Проект успешно удален')));
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Проект успешно удален')),
+      );
     }
   }
 
@@ -120,7 +126,6 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
     final authProv = context.watch<AuthProvider>();
     final projects = prov.view;
     final isActuallyGuest = authProv.isGuest || prov.isGuest;
-    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -129,9 +134,11 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
           if (!isActuallyGuest)
             IconButton(
               icon: const Icon(Icons.notifications),
-              onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Нет новых уведомлений')),
-              ),
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Нет новых уведомлений')),
+                );
+              },
             ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.filter_list_alt),
@@ -157,20 +164,25 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
             : ListView.builder(
           padding: const EdgeInsets.only(bottom: 80),
           itemCount: projects.length,
-          itemBuilder: (context, index) {
+          itemBuilder: (itemContext, index) {
             final p = projects[index];
             return ProjectCard(
               project: p,
               canEdit: prov.canEditProject(p),
               isOwner: p.ownerId == authProv.userId,
               onEdit: (project) async {
-                final updated = await Navigator.push(
-                  context,
+                final messenger = ScaffoldMessenger.of(context);
+                final navigator = Navigator.of(context);
+
+                final updated = await navigator.push(
                   MaterialPageRoute(builder: (_) => ProjectFormScreen(project: project, isNew: false)),
                 );
+
                 if (updated == true && mounted) {
                   await prov.fetchProjects();
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Обновлено')));
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Обновлено')),
+                  );
                 }
               },
               onDelete: (project) => _confirmDelete(prov, project),
