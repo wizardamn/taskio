@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:table_calendar/table_calendar.dart';
-import 'package:intl/intl.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 import '../../providers/project_provider.dart';
 import '../../models/project_model.dart';
+import '../../utils/app_logger.dart';
+import '../../utils/snackbar_manager.dart';
 
 class CalendarScreen extends StatefulWidget {
   const CalendarScreen({super.key});
@@ -17,117 +19,200 @@ class _CalendarScreenState extends State<CalendarScreen> {
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
 
+  late Map<DateTime, List<ProjectModel>> _cachedEvents;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final projects = context.read<ProjectProvider>().view;
+    _cachedEvents = _groupProjectsByDate(projects);
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Получаем провайдер и все проекты
-    final ProjectProvider projectProvider = context.watch<ProjectProvider>();
+    final provider = context.watch<ProjectProvider>();
+    final projects = provider.view;
 
-    // Группируем проекты по дате дедлайна
-    final Map<DateTime, List<ProjectModel>> events = _groupProjectsByDate(projectProvider.view);
+    _cachedEvents = _groupProjectsByDate(projects);
+
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Календарь проектов')),
+      appBar: AppBar(
+        title: Text('navigation.calendar'.tr()),
+      ),
       body: Column(
         children: [
           TableCalendar(
-            locale: 'ru_RU', // Убедитесь, что инициализация локали в main.dart поддерживает это
+            locale: context.locale.toString(),
             firstDay: DateTime.utc(2023, 1, 1),
             lastDay: DateTime.utc(2030, 12, 31),
             focusedDay: _focusedDay,
-            selectedDayPredicate: (day) => isSameDay(day, _selectedDay),
+            selectedDayPredicate: (day) =>
+                isSameDay(day, _selectedDay),
             onDaySelected: (selected, focused) {
               setState(() {
                 _selectedDay = selected;
                 _focusedDay = focused;
               });
             },
-            // Загрузчик событий: возвращает список проектов для данного дня
-            eventLoader: (day) => events[DateUtils.dateOnly(day)] ?? [],
-            calendarStyle: const CalendarStyle(
-              todayDecoration: BoxDecoration(
-                color: Colors.blueAccent,
-                shape: BoxShape.circle,
-              ),
-              selectedDecoration: BoxDecoration(
-                color: Colors.green,
-                shape: BoxShape.circle,
-              ),
-              markerDecoration: BoxDecoration(
-                color: Colors.deepOrange,
-                shape: BoxShape.circle,
-              ),
-            ),
+            eventLoader: (day) =>
+            _cachedEvents[DateUtils.dateOnly(day)] ?? [],
             headerStyle: const HeaderStyle(
               formatButtonVisible: false,
               titleCentered: true,
             ),
+            calendarStyle: CalendarStyle(
+              todayDecoration: BoxDecoration(
+                color: colorScheme.primary,
+                shape: BoxShape.circle,
+              ),
+              selectedDecoration: BoxDecoration(
+                color: colorScheme.secondary,
+                shape: BoxShape.circle,
+              ),
+            ),
           ),
-          const SizedBox(height: 8),
+
+          const SizedBox(height: 12),
+
           Expanded(
             child: _selectedDay == null
-                ? const Center(child: Text('Выберите дату для просмотра проектов'))
-                : _buildEventList(events[DateUtils.dateOnly(_selectedDay!)] ?? []),
+                ? _buildEmptyState('calendar.select_date'.tr())
+                : _buildEventList(
+              _cachedEvents[
+              DateUtils.dateOnly(_selectedDay!)] ??
+                  [],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Map<DateTime, List<ProjectModel>> _groupProjectsByDate(List<ProjectModel> projects) {
+  // =========================================================
+  // GROUP BY DATE
+  // =========================================================
+
+  Map<DateTime, List<ProjectModel>> _groupProjectsByDate(
+      List<ProjectModel> projects) {
     final Map<DateTime, List<ProjectModel>> data = {};
+
     for (final project in projects) {
-      // Используем DateUtils.dateOnly, чтобы игнорировать время
-      final DateTime date = DateUtils.dateOnly(project.deadline);
+      final date = DateUtils.dateOnly(project.deadline);
       data.putIfAbsent(date, () => []);
       data[date]!.add(project);
     }
+
     return data;
   }
 
+  // =========================================================
+  // EMPTY STATE
+  // =========================================================
+
+  Widget _buildEmptyState(String text) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.event_busy, size: 48),
+          const SizedBox(height: 12),
+          Text(
+            text,
+            style: const TextStyle(fontSize: 16),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =========================================================
+  // EVENT LIST
+  // =========================================================
+
   Widget _buildEventList(List<ProjectModel> projects) {
     if (projects.isEmpty) {
-      return const Center(child: Text('На этот день нет проектов'));
+      return _buildEmptyState('calendar.no_projects'.tr());
     }
 
     return ListView.separated(
+      padding: const EdgeInsets.all(12),
       itemCount: projects.length,
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (context, index) {
-        final ProjectModel p = projects[index];
-        return ListTile(
-          leading: Icon(Icons.assignment, color: p.statusEnum.color), // Используем цвет статуса
-          title: Text(p.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-          subtitle: Text(
-            'Дедлайн: ${DateFormat('dd.MM.yyyy HH:mm').format(p.deadline)}\nСтатус: ${p.statusEnum.text}',
+        final p = projects[index];
+
+        return Card(
+          child: ListTile(
+            leading: Icon(
+              Icons.assignment,
+              color: p.statusEnum.color,
+            ),
+            title: Text(
+              p.title,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            subtitle: Text(
+              '${'projects.deadline'.tr()}: '
+                  '${DateFormat.yMd(context.locale.toString()).add_Hm().format(p.deadline)}\n'
+                  '${'projects.status'.tr()}: '
+                  '${p.statusEnum.localizedText(context)}',
+            ),
+            onTap: () => _showProjectDetails(context, p),
           ),
-          onTap: () => _showProjectDetails(context, p),
         );
       },
     );
   }
 
-  void _showProjectDetails(BuildContext context, ProjectModel project) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(project.title),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Описание: ${project.description.isEmpty ? "Нет" : project.description}'),
-            const SizedBox(height: 8),
-            Text('Статус: ${project.statusEnum.text}'),
-            Text('Дедлайн: ${DateFormat('dd.MM.yyyy HH:mm').format(project.deadline)}'),
+  // =========================================================
+  // DETAILS
+  // =========================================================
+
+  void _showProjectDetails(
+      BuildContext context,
+      ProjectModel project) {
+    try {
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text(project.title),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${'projects.description'.tr()}: '
+                    '${project.description.isEmpty
+                    ? 'common.not_specified'.tr()
+                    : project.description}',
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${'projects.status'.tr()}: '
+                    '${project.statusEnum.localizedText(context)}',
+              ),
+              Text(
+                '${'projects.deadline'.tr()}: '
+                    '${DateFormat.yMd(context.locale.toString()).add_Hm().format(project.deadline)}',
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('common.ok'.tr()),
+            ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Закрыть'),
-          ),
-        ],
-      ),
-    );
+      );
+    } catch (e, st) {
+      AppLogger.error('Calendar dialog error', e);
+      AppLogger.error('StackTrace', st);
+      SnackbarManager.showError('errors.unknown'.tr());
+    }
   }
 }

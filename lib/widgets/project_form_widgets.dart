@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:easy_localization/easy_localization.dart';
+
 import '../models/project_model.dart';
 import '../services/supabase_service.dart';
 
-// --- Компонент выбора даты ---
+
+// ==========================================================
+// DATE PICKER FIELD
+// ==========================================================
+
 class DatePickerField extends StatelessWidget {
   final DateTime initialDate;
   final ValueChanged<DateTime>? onChanged;
@@ -18,38 +24,59 @@ class DatePickerField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final locale = context.locale.toString();
+
+    final formattedDate =
+    DateFormat.yMMMd(locale)
+        .format(initialDate);
+
     return InkWell(
-      onTap: onChanged != null
-          ? () async {
-        final initialDateTime =
-        DateTime(initialDate.year, initialDate.month, initialDate.day);
-        final picked = await showDatePicker(
+      borderRadius:
+      BorderRadius.circular(12),
+      onTap: onChanged == null
+          ? null
+          : () async {
+        final picked =
+        await showDatePicker(
           context: context,
-          initialDate: initialDateTime,
-          firstDate: DateTime(2020),
-          lastDate: DateTime(2100),
+          initialDate:
+          initialDate,
+          firstDate:
+          DateTime(2000),
+          lastDate:
+          DateTime(2100),
+          locale:
+          context.locale,
         );
+
         if (picked != null) {
           onChanged!(picked);
         }
-      }
-          : null,
+      },
       child: InputDecorator(
         decoration: InputDecoration(
           labelText: label,
-          border: const OutlineInputBorder(),
-          prefixIcon: const Icon(Icons.calendar_month),
+          prefixIcon:
+          const Icon(Icons.calendar_month),
+          border:
+          const OutlineInputBorder(),
         ),
         child: Text(
-          DateFormat('dd.MM.yyyy').format(initialDate),
-          style: const TextStyle(fontSize: 16),
+          formattedDate,
+          style: Theme.of(context)
+              .textTheme
+              .bodyLarge,
         ),
       ),
     );
   }
 }
 
-// --- Компонент превью вложения ---
+
+// ==========================================================
+// ATTACHMENT PREVIEW
+// ==========================================================
+
 class AttachmentThumb extends StatelessWidget {
   final Attachment attachment;
   final VoidCallback? onDelete;
@@ -66,81 +93,146 @@ class AttachmentThumb extends StatelessWidget {
     required this.canEdit,
   });
 
-  bool _isImage(String fileName) {
-    final ext = fileName.split('.').last.toLowerCase();
-    return ['jpg', 'jpeg', 'png', 'gif', 'webp'].contains(ext);
+  bool _isImage(String name) {
+    final ext =
+    name.split('.').last.toLowerCase();
+    return const [
+      'jpg',
+      'jpeg',
+      'png',
+      'gif',
+      'webp'
+    ].contains(ext);
   }
 
   @override
   Widget build(BuildContext context) {
-    final isImage = _isImage(attachment.fileName);
     const size = 100.0;
 
-    // Используем цвета текущей темы для адаптации под темный/светлый режим
-    final colorScheme = Theme.of(context).colorScheme;
+    final colorScheme =
+        Theme.of(context).colorScheme;
 
-    final String fullPublicUrl = SupabaseService.client.storage
+    final isImage =
+    _isImage(attachment.fileName);
+
+    final publicUrl =
+    SupabaseService.client.storage
         .from(SupabaseService.bucket)
-        .getPublicUrl(attachment.filePath);
+        .getPublicUrl(
+        attachment.filePath);
 
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        GestureDetector(
-          onTap: isOpening ? null : onTap,
-          child: Container(
-            width: size,
-            height: size,
-            decoration: BoxDecoration(
-              // Адаптивные цвета фона и рамки
-              color: isOpening ? colorScheme.primaryContainer : colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                  color: isOpening ? colorScheme.primary : colorScheme.outlineVariant,
-                  width: isOpening ? 2.5 : 1),
+        AnimatedContainer(
+          duration:
+          const Duration(milliseconds: 200),
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: isOpening
+                ? colorScheme
+                .primaryContainer
+                : colorScheme
+                .surfaceContainerHighest,
+            borderRadius:
+            BorderRadius.circular(16),
+            border: Border.all(
+              color: isOpening
+                  ? colorScheme.primary
+                  : colorScheme
+                  .outlineVariant,
+              width:
+              isOpening ? 2 : 1,
             ),
-            child: isOpening
-                ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                      width: 25,
-                      height: 25,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: colorScheme.primary)),
-                  const SizedBox(height: 8),
-                  Text('...',
-                      style: TextStyle(fontSize: 10, color: colorScheme.primary))
-                ],
-              ),
-            )
-                : ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: isImage
-                  ? Image.network(
-                fullPublicUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _buildFileIcon(context),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius:
+              BorderRadius.circular(16),
+              onTap:
+              isOpening ? null : onTap,
+              child: isOpening
+                  ? Center(
+                child:
+                CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color:
+                  colorScheme.primary,
+                ),
               )
-                  : _buildFileIcon(context),
+                  : ClipRRect(
+                borderRadius:
+                BorderRadius.circular(
+                    16),
+                child: isImage
+                    ? Image.network(
+                  publicUrl,
+                  fit:
+                  BoxFit.cover,
+                  loadingBuilder:
+                      (context,
+                      child,
+                      progress) {
+                    if (progress ==
+                        null) {
+                      return child;
+                    }
+                    return Center(
+                      child:
+                      CircularProgressIndicator(
+                        strokeWidth:
+                        2,
+                        value: progress
+                            .expectedTotalBytes !=
+                            null
+                            ? progress
+                            .cumulativeBytesLoaded /
+                            progress
+                                .expectedTotalBytes!
+                            : null,
+                      ),
+                    );
+                  },
+                  errorBuilder:
+                      (_, __,
+                      ___) =>
+                      _buildFileIcon(
+                          context),
+                )
+                    : _buildFileIcon(
+                    context),
+              ),
             ),
           ),
         ),
 
-        // Кнопка удаления (крестик)
-        if (onDelete != null && !isOpening && canEdit)
+        // DELETE BUTTON
+        if (canEdit &&
+            onDelete != null &&
+            !isOpening)
           Positioned(
-            top: -8,
-            right: -8,
+            top: -6,
+            right: -6,
             child: GestureDetector(
               onTap: onDelete,
               child: Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: colorScheme.error,
-                  shape: BoxShape.circle,
+                padding:
+                const EdgeInsets.all(5),
+                decoration:
+                BoxDecoration(
+                  color:
+                  colorScheme.error,
+                  shape:
+                  BoxShape.circle,
                 ),
-                child: Icon(Icons.close, color: colorScheme.onError, size: 16),
+                child: Icon(
+                  Icons.close,
+                  size: 14,
+                  color: colorScheme
+                      .onError,
+                ),
               ),
             ),
           ),
@@ -148,24 +240,40 @@ class AttachmentThumb extends StatelessWidget {
     );
   }
 
-  Widget _buildFileIcon(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(Icons.insert_drive_file, color: colorScheme.outline, size: 32),
-        const SizedBox(height: 4),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Text(
-            attachment.fileName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 10, color: colorScheme.onSurface),
-            textAlign: TextAlign.center,
-          ),
+  Widget _buildFileIcon(
+      BuildContext context) {
+    final colorScheme =
+        Theme.of(context).colorScheme;
+
+    return Center(
+      child: Padding(
+        padding:
+        const EdgeInsets.all(6),
+        child: Column(
+          mainAxisAlignment:
+          MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.insert_drive_file,
+              size: 32,
+              color:
+              colorScheme.outline,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              attachment.fileName,
+              maxLines: 1,
+              overflow:
+              TextOverflow.ellipsis,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall,
+              textAlign:
+              TextAlign.center,
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }

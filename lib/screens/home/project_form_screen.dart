@@ -1,30 +1,24 @@
-import 'package:universal_io/io.dart';
-import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
-import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:collection/collection.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:easy_localization/easy_localization.dart';
+import 'package:provider/provider.dart';
 
 import '../../services/supabase_service.dart';
 import '../../models/project_model.dart';
 import '../../providers/project_provider.dart';
-import '../../services/notification_service.dart';
 
-import '../../utils/file_opener_utils.dart';
-import '../../widgets/project_form_widgets.dart';
-import '../../widgets/participant_selection_dialog.dart';
-import '../../widgets/project_tasks_widget.dart';
-import 'project_chat_screen.dart';
+import '../../utils/snackbar_manager.dart';
+import '../../utils/error_mapper.dart';
 
 import '../../widgets/project_form/color_picker_section.dart';
 import '../../widgets/project_form/participants_section.dart';
 import '../../widgets/project_form/attachments_section.dart';
+import '../../widgets/participant_selection_dialog.dart';
+import '../../widgets/project_tasks_widget.dart';
 
 class ProjectFormScreen extends StatefulWidget {
   final ProjectModel project;
@@ -42,252 +36,241 @@ class ProjectFormScreen extends StatefulWidget {
 
 class _ProjectFormScreenState extends State<ProjectFormScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _uuid = const Uuid();
   final SupabaseClient _supabase = SupabaseService.client;
-  final Uuid _uuid = const Uuid();
 
   late String _title;
   late String _description;
   late DateTime _deadline;
   late ProjectStatus _status;
   late String _color;
-  double? _grade;
 
-  // Локальный список вложений. Он отображает то, что есть в проекте сейчас.
+  List<String> _participants = [];
   List<Attachment> _attachments = [];
 
-  late List<String> _participants;
   List<Map<String, dynamic>> _users = [];
   bool _isLoadingUsers = true;
   bool _isUploading = false;
-  String? _currentlyOpeningFile;
 
   @override
   void initState() {
     super.initState();
+    _initFields();
+    _loadUsers();
+  }
+
+  void _initFields() {
     _title = widget.project.title;
     _description = widget.project.description;
     _deadline = widget.project.deadline;
     _status = widget.project.statusEnum;
-    _grade = widget.project.grade;
     _color = widget.project.color;
-
-    // ВАЖНО: Инициализируем список вложений данными из проекта при открытии
     _attachments = List.from(widget.project.attachments);
 
-    final String currentUserId = _supabase.auth.currentUser?.id ?? '';
-    final String ownerId = widget.project.ownerId.isNotEmpty
+    final currentUserId = _supabase.auth.currentUser?.id ?? '';
+
+    final ownerId = widget.project.ownerId.isNotEmpty
         ? widget.project.ownerId
         : currentUserId;
 
     _participants = widget.project.participantIds.toSet().toList();
-    if (ownerId.isNotEmpty && !_participants.contains(ownerId)) {
+
+    if (!_participants.contains(ownerId) && ownerId.isNotEmpty) {
       _participants.add(ownerId);
     }
-
-    _loadUsers();
   }
 
-  // --- Загрузка пользователей ---
+  // =========================================================
+  // LOAD USERS
+  // =========================================================
+
   Future<void> _loadUsers() async {
     try {
-      final currentUserId = _supabase.auth.currentUser?.id;
-      if (currentUserId == null) {
-        if (mounted) setState(() { _users = []; _isLoadingUsers = false; });
-        return;
-      }
-      final res = await _supabase.from('profiles').select('id, full_name').neq('id', currentUserId);
-      if (mounted) setState(() { _users = List<Map<String, dynamic>>.from(res); _isLoadingUsers = false; });
-    } catch (e) {
-      if (mounted) setState(() { _users = []; _isLoadingUsers = false; });
+      final res = await _supabase
+          .from('profiles')
+          .select('id, full_name');
+
+      if (!mounted) return;
+
+      setState(() {
+        _users = List<Map<String, dynamic>>.from(res);
+        _isLoadingUsers = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _users = [];
+        _isLoadingUsers = false;
+      });
     }
   }
 
-  String _getUserName(String userId) {
-    final user = _users.firstWhereOrNull((u) => u['id'] == userId);
-    if (user != null) return user['full_name'] as String? ?? 'Без имени';
+  // =========================================================
+  // PARTICIPANTS
+  // =========================================================
 
-    final participantData = widget.project.participantsData.firstWhereOrNull((pd) => pd.id == userId);
-    if (participantData != null) return participantData.fullName;
-
-    return userId == _supabase.auth.currentUser?.id ? 'Я (Владелец)' : 'Неизвестный';
-  }
-
-  void _openChat() {
-    if (widget.isNew && widget.project.id.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сначала сохраните проект.')));
-      return;
-    }
-    Navigator.push(context, MaterialPageRoute(builder: (_) => ProjectChatScreen(
-      projectId: widget.project.id,
-      projectTitle: _title,
-      participants: widget.project.participantsData,
-    )));
-  }
-
-  Future<void> _selectParticipants() async {
-    final currentUser = _supabase.auth.currentUser;
-    if (widget.project.ownerId != currentUser?.id) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Только владелец может менять участников.')));
-      return;
-    }
-
-    final result = await showDialog<List<String>>(
+  Future<void> _editParticipants() async {
+    final selected = await showDialog<List<String>>(
       context: context,
-      builder: (ctx) => ParticipantSelectionDialog(
+      builder: (_) => ParticipantSelectionDialog(
         allUsers: _users,
         currentParticipantIds: _participants,
-        ownerId: widget.project.ownerId.isNotEmpty ? widget.project.ownerId : currentUser?.id ?? '',
+        ownerId: widget.project.ownerId,
       ),
     );
-    if (result != null && mounted) {
-      setState(() => _participants = result);
+
+    if (selected != null) {
+      setState(() => _participants = selected);
     }
   }
 
-  // --- ЗАГРУЗКА ВЛОЖЕНИЙ ---
+  List<String> _getParticipantNames() {
+    return _users
+        .where((u) => _participants.contains(u['id']))
+        .map((u) => (u['full_name'] ?? 'Unknown').toString())
+        .toList();
+  }
+
+  // =========================================================
+  // ATTACHMENTS
+  // =========================================================
+
   Future<void> _pickAttachment() async {
-    final prov = context.read<ProjectProvider>();
-
-    // Проверка: проект должен быть создан
-    if (widget.project.id.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сначала сохраните проект (введите название и нажмите галочку).')));
+    if (widget.isNew) {
+      SnackbarManager.showWarning(
+          'projects.save_before_attachments'.tr());
       return;
     }
 
-    if (!prov.canEditProject(widget.project)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Нет прав на добавление файлов.')));
-      return;
-    }
+    final provider = context.read<ProjectProvider>();
 
-    // Множественный выбор файлов
     final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'mp3', 'mp4', 'zip', 'rar'],
       allowMultiple: true,
       withData: true,
     );
 
-    if (result == null || result.files.isEmpty || !mounted) return;
-
-    setState(() => _isUploading = true);
+    if (result == null) return;
 
     try {
-      final List<String> names = result.files.map((f) => f.name).toList();
-      final List<File>? files = kIsWeb ? null : result.files.map((f) => File(f.path!)).toList();
-      final List<Uint8List>? bytes = result.files.map((f) => f.bytes!).toList();
+      setState(() => _isUploading = true);
 
-      // Загружаем через провайдер (он обновляет БД)
-      final updatedProject = await prov.uploadAttachments(
-          projectId: widget.project.id,
-          fileNames: names,
-          files: files,
-          filesBytes: bytes
+      final names = result.files.map((f) => f.name).toList();
+      final files = kIsWeb
+          ? null
+          : result.files.map((f) => File(f.path!)).toList();
+      final bytes = result.files.map((f) => f.bytes!).toList();
+
+      final updatedProject = await provider.uploadAttachments(
+        projectId: widget.project.id,
+        fileNames: names,
+        files: files,
+        filesBytes: bytes,
       );
 
-      if (mounted) {
-        setState(() {
-          // Обновляем локальный список, чтобы файлы появились на экране сразу
-          _attachments = List.from(updatedProject.attachments);
-          _isUploading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Файлы успешно загружены')));
-      }
-    } catch(e) {
-      if (mounted) {
-        setState(() => _isUploading = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка загрузки: $e')));
-      }
+      setState(() {
+        _attachments = List.from(updatedProject.attachments);
+      });
+
+      SnackbarManager.showSuccess('attachments.file_added'.tr());
+    } catch (e) {
+      SnackbarManager.showError(ErrorMapper.map(e).tr());
+    } finally {
+      setState(() => _isUploading = false);
     }
   }
 
-  // --- ОТКРЫТИЕ ФАЙЛА ---
-  Future<void> _handleOpenAttachment(Attachment attachment) async {
-    if (kIsWeb) {
-      final url = _supabase.storage.from(SupabaseService.bucket).getPublicUrl(attachment.filePath);
-      await launchUrl(Uri.parse(url));
-      return;
-    }
-    if (_currentlyOpeningFile == attachment.filePath) return;
-
-    setState(() => _currentlyOpeningFile = attachment.filePath);
-    await FileOpenerUtils.downloadAndOpen(attachment.filePath, attachment.fileName);
-    if (mounted) setState(() => _currentlyOpeningFile = null);
-  }
-
-  // --- УДАЛЕНИЕ ФАЙЛА ---
   Future<void> _deleteAttachment(Attachment att) async {
-    final prov = context.read<ProjectProvider>();
-    if (widget.project.ownerId != _supabase.auth.currentUser?.id) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Только владелец может удалять файлы.')));
-      return;
-    }
+    final provider = context.read<ProjectProvider>();
 
     try {
-      await prov.deleteAttachment(widget.project.id, att.filePath);
-      if (mounted) {
-        setState(() {
-          // Удаляем локально для мгновенного обновления
-          _attachments.removeWhere((a) => a.filePath == att.filePath);
-          _attachments = List.from(_attachments);
-        });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Вложение удалено')));
-      }
+      await provider.deleteAttachment(widget.project.id, att.filePath);
+
+      setState(() {
+        _attachments.removeWhere((a) => a.filePath == att.filePath);
+      });
+
+      SnackbarManager.showSuccess('attachments.delete_success'.tr());
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+      SnackbarManager.showError(ErrorMapper.map(e).tr());
     }
   }
+
+  // =========================================================
+  // SAVE
+  // =========================================================
 
   Future<void> _saveProject() async {
     if (!_formKey.currentState!.validate()) return;
+
     _formKey.currentState!.save();
 
-    final prov = context.read<ProjectProvider>();
+    final provider = context.read<ProjectProvider>();
     final currentUserId = _supabase.auth.currentUser?.id;
+
     if (currentUserId == null) return;
 
     final project = ProjectModel(
-      id: widget.project.id.isNotEmpty ? widget.project.id : _uuid.v4(),
+      id: widget.project.id.isNotEmpty
+          ? widget.project.id
+          : _uuid.v4(),
+      ownerId: widget.project.ownerId.isNotEmpty
+          ? widget.project.ownerId
+          : currentUserId,
       title: _title,
       description: _description,
-      ownerId: widget.project.ownerId.isNotEmpty ? widget.project.ownerId : currentUserId,
       deadline: _deadline,
       status: _status.index,
-      grade: _grade,
-      attachments: _attachments, // Сохраняем текущий список вложений
+      attachments: _attachments,
+      participantIds: _participants,
       participantsData: const [],
-      participantIds: _participants.toSet().toList(),
       createdAt: widget.project.createdAt,
       color: _color,
     );
 
     try {
       if (widget.isNew) {
-        await prov.addProject(project);
+        await provider.addProject(project);
       } else {
-        await prov.updateProject(project);
+        await provider.updateProject(project);
       }
-      if (mounted) Navigator.pop(context, true);
+
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+      SnackbarManager.showError(ErrorMapper.map(e).tr());
     }
   }
 
+  // =========================================================
+  // BUILD
+  // =========================================================
+
   @override
   Widget build(BuildContext context) {
-    final prov = context.watch<ProjectProvider>();
-    final isOwner = widget.project.ownerId == _supabase.auth.currentUser?.id;
-    final canEditContent = isOwner || prov.canEditProject(widget.project);
+    if (_isLoadingUsers) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
-    if (_isLoadingUsers) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    final currentUserId = _supabase.auth.currentUser?.id;
+
+    final isOwner =
+        widget.project.ownerId == currentUserId || widget.isNew;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.isNew ? "Новый проект" : "Проект"),
-        backgroundColor: Color(int.parse(_color)),
+        title: Text(widget.isNew
+            ? 'projects.new_project'.tr()
+            : 'projects.project'.tr()),
+        backgroundColor: Color(int.tryParse(_color) ?? 0xFF2196F3),
         foregroundColor: Colors.white,
         actions: [
-          if (!widget.isNew) IconButton(icon: const Icon(Icons.chat), onPressed: _openChat),
-          if (isOwner) IconButton(icon: const Icon(Icons.check), onPressed: _saveProject),
+          IconButton(
+            icon: const Icon(Icons.check),
+            onPressed: _saveProject,
+          ),
         ],
       ),
       body: SingleChildScrollView(
@@ -295,86 +278,114 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
         child: Form(
           key: _formKey,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (isOwner)
                 ColorPickerSection(
-                    selectedColor: _color,
-                    onColorChanged: (c) => setState(() => _color = c)
+                  selectedColor: _color,
+                  onColorChanged: (c) =>
+                      setState(() => _color = c),
                 ),
+
+              const SizedBox(height: 16),
 
               TextFormField(
                 initialValue: _title,
-                decoration: const InputDecoration(labelText: "Название", prefixIcon: Icon(Icons.title), border: OutlineInputBorder()),
-                enabled: isOwner,
-                validator: (v) => v?.isEmpty ?? true ? "Введите название" : null,
+                decoration: InputDecoration(
+                  labelText: 'projects.name'.tr(),
+                  border: const OutlineInputBorder(),
+                ),
+                validator: (v) =>
+                v == null || v.isEmpty
+                    ? 'validation.enter_project_name'.tr()
+                    : null,
                 onSaved: (v) => _title = v!,
-              ).animate().fadeIn(),
+              ),
 
               const SizedBox(height: 16),
 
               TextFormField(
                 initialValue: _description,
                 maxLines: 3,
-                decoration: const InputDecoration(labelText: "Описание", prefixIcon: Icon(Icons.description), border: OutlineInputBorder()),
-                enabled: isOwner,
-                onSaved: (v) => _description = v ?? '',
-              ).animate().fadeIn(delay: 100.ms),
-
-              const SizedBox(height: 16),
-
-              Row(
-                children: [
-                  Expanded(child: DatePickerField(
-                    label: 'Дедлайн',
-                    initialDate: _deadline,
-                    onChanged: isOwner ? (d) => setState(() => _deadline = d!) : null,
-                  )),
-                  const SizedBox(width: 16),
-                  Expanded(child: DropdownButtonFormField<ProjectStatus>(
-                    value: _status,
-                    items: ProjectStatus.values.map((s) => DropdownMenuItem(value: s, child: Text(s.text))).toList(),
-                    onChanged: isOwner ? (v) => setState(() => _status = v!) : null,
-                    decoration: const InputDecoration(labelText: "Статус", border: OutlineInputBorder()),
-                  )),
-                ],
-              ).animate().fadeIn(delay: 200.ms),
-
-              if (!widget.isNew) ...[
-                const Divider(height: 40),
-                ProjectTasksWidget(projectId: widget.project.id, canEdit: canEditContent),
-              ],
-
-              const SizedBox(height: 16),
-              if (_status == ProjectStatus.completed)
-                TextFormField(
-                  initialValue: _grade?.toInt().toString() ?? '',
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: "Оценка", prefixIcon: Icon(Icons.grade), border: OutlineInputBorder()),
-                  enabled: isOwner,
-                  onSaved: (v) => _grade = double.tryParse(v ?? ''),
+                decoration: InputDecoration(
+                  labelText: 'projects.description'.tr(),
+                  border: const OutlineInputBorder(),
                 ),
-
-              const Divider(height: 40),
-              ParticipantsSection(
-                participantNames: _participants.toSet().map((id) => _getUserName(id)).toList(),
-                isOwner: isOwner,
-                onEdit: _selectParticipants,
+                onSaved: (v) => _description = v ?? '',
               ),
 
-              const Divider(height: 40),
+              const SizedBox(height: 16),
+
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('projects.deadline'.tr()),
+                subtitle: Text(
+                  DateFormat.yMd(context.locale.toString())
+                      .format(_deadline),
+                ),
+                trailing: const Icon(Icons.calendar_today),
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _deadline,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2035),
+                  );
+
+                  if (picked != null) {
+                    setState(() => _deadline = picked);
+                  }
+                },
+              ),
+
+              const SizedBox(height: 16),
+
+              DropdownButtonFormField<ProjectStatus>(
+                value: _status,
+                decoration: InputDecoration(
+                  labelText: 'projects.status'.tr(),
+                  border: const OutlineInputBorder(),
+                ),
+                items: ProjectStatus.values.map((status) {
+                  return DropdownMenuItem(
+                    value: status,
+                    child: Text(status.localizedText(context)),
+                  );
+                }).toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    setState(() => _status = val);
+                  }
+                },
+              ),
+
+              const SizedBox(height: 24),
+
+              ParticipantsSection(
+                participantNames: _getParticipantNames(),
+                isOwner: isOwner,
+                onEdit: _editParticipants,
+              ),
+
+              const SizedBox(height: 24),
+
               AttachmentsSection(
-                attachments: _attachments, // Передаем обновляемый список
+                attachments: _attachments,
                 isUploading: _isUploading,
-                currentlyOpeningFile: _currentlyOpeningFile,
-                canEditContent: canEditContent,
+                currentlyOpeningFile: null,
+                canEditContent: isOwner,
                 isOwner: isOwner,
                 onPick: _pickAttachment,
-                onOpen: _handleOpenAttachment,
+                onOpen: (_) {},
                 onDelete: _deleteAttachment,
               ),
 
-              const SizedBox(height: 40),
+              const SizedBox(height: 24),
+
+              if (!widget.isNew)
+                ProjectTasksWidget(
+                  projectId: widget.project.id,
+                  canEdit: isOwner,
+                ),
             ],
           ),
         ),

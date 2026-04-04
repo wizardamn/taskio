@@ -1,11 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 import '../../providers/auth_provider.dart';
-import '../../models/project_model.dart';
 import '../../providers/project_provider.dart';
+import '../../models/project_model.dart';
+
+import '../../utils/snackbar_manager.dart';
+import '../../utils/app_logger.dart';
+import '../../utils/error_mapper.dart';
+
 import 'project_form_screen.dart';
+import 'project_chat_screen.dart';
+
 import '../../widgets/user_profile_drawer.dart';
 import '../../widgets/project_card.dart';
 
@@ -17,81 +25,96 @@ class ProjectListScreen extends StatefulWidget {
 }
 
 class _ProjectListScreenState extends State<ProjectListScreen> {
-  double _fabScale = 1.0;
 
   @override
   void initState() {
     super.initState();
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      final prov = context.read<ProjectProvider>();
+
       final authProv = context.read<AuthProvider>();
 
-      if (authProv.isGuest) {
-        prov.setGuestUser();
-      } else {
-        await prov.fetchProjects();
+      if (!authProv.isGuest) {
+        await context.read<ProjectProvider>().fetchProjects();
       }
     });
   }
 
-  void _onSortFilter(String value, ProjectProvider prov) {
-    switch (value) {
-      case 'dAsc': prov.setSort(SortBy.deadlineAsc); break;
-      case 'dDesc': prov.setSort(SortBy.deadlineDesc); break;
-      case 'status': prov.setSort(SortBy.status); break;
-      case 'all': prov.setFilter(ProjectFilter.all); break;
-      case 'inProgress': prov.setFilter(ProjectFilter.inProgressOnly); break;
-    }
+  // =========================================================
+  // OPEN CHAT
+  // =========================================================
+
+  void _openChat(ProjectModel project) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProjectChatScreen(
+          projectId: project.id,
+          projectTitle: project.title,
+          participants: project.participantsData,
+        ),
+      ),
+    );
   }
 
-  Future<void> _addProject() async {
-    final prov = context.read<ProjectProvider>();
-    final authProv = context.read<AuthProvider>();
-    final messenger = ScaffoldMessenger.of(context);
-    final navigator = Navigator.of(context);
+  // =========================================================
+  // ADD PROJECT
+  // =========================================================
 
-    if (authProv.isGuest || prov.isGuest) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Гости не могут создавать проекты.')),
+  Future<void> _addProject() async {
+    final authProv = context.read<AuthProvider>();
+
+    if (authProv.isGuest) {
+      SnackbarManager.showWarning(
+        'projects.guest_cannot_create'.tr(),
       );
       return;
     }
 
-    setState(() => _fabScale = 0.9);
-    await Future.delayed(const Duration(milliseconds: 100));
-    if (!mounted) return;
-    setState(() => _fabScale = 1.0);
+    final prov = context.read<ProjectProvider>();
 
     try {
       final newProject = prov.createEmptyProject();
 
-      final created = await navigator.push(
+      final created = await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => ProjectFormScreen(project: newProject, isNew: true),
+          builder: (_) => ProjectFormScreen(
+            project: newProject,
+            isNew: true,
+          ),
         ),
       );
 
       if (created == true && mounted) {
         await prov.fetchProjects();
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Проект успешно создан')),
+
+        SnackbarManager.showSuccess(
+          'projects.created_success'.tr(),
         );
       }
-    } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+    } catch (e, st) {
+      AppLogger.error('Add project error', e);
+      AppLogger.error('StackTrace', st);
+
+      SnackbarManager.showError(
+        ErrorMapper.map(e).tr(),
       );
     }
   }
 
-  Future<void> _confirmDelete(ProjectProvider prov, ProjectModel project) async {
+  // =========================================================
+  // DELETE PROJECT
+  // =========================================================
+
+  Future<void> _confirmDelete(
+      ProjectProvider prov,
+      ProjectModel project,
+      ) async {
     final authProv = context.read<AuthProvider>();
-    final messenger = ScaffoldMessenger.of(context);
 
     if (project.ownerId != authProv.userId) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Только владелец может удалить проект.')),
+      SnackbarManager.showWarning(
+        'projects.operation_denied_guest'.tr(),
       );
       return;
     }
@@ -99,106 +122,126 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Удаление проекта'),
-        content: const Text('Вы уверены, что хотите удалить этот проект?'),
+        title: Text('projects.delete_confirm'.tr()),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('common.cancel'.tr()),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
-            child: const Text('Удалить'),
+            child: Text('common.delete'.tr()),
           ),
         ],
       ),
     );
 
     if (confirmed == true && mounted) {
-      await prov.deleteProject(project.id);
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Проект успешно удален')),
-      );
+      try {
+        await prov.deleteProject(project.id);
+
+        SnackbarManager.showSuccess(
+          'projects.deleted_success'.tr(),
+        );
+      } catch (e) {
+        SnackbarManager.showError(
+          ErrorMapper.map(e).tr(),
+        );
+      }
     }
   }
+
+  // =========================================================
+  // BUILD
+  // =========================================================
 
   @override
   Widget build(BuildContext context) {
     final prov = context.watch<ProjectProvider>();
     final authProv = context.watch<AuthProvider>();
+
     final projects = prov.view;
-    final isActuallyGuest = authProv.isGuest || prov.isGuest;
+    final isGuest = authProv.isGuest;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Мои проекты'),
-        actions: [
-          if (!isActuallyGuest)
-            IconButton(
-              icon: const Icon(Icons.notifications),
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Нет новых уведомлений')),
-                );
-              },
-            ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.filter_list_alt),
-            onSelected: (val) => _onSortFilter(val, prov),
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: 'dAsc', child: Text('Cначала новые')),
-              const PopupMenuItem(value: 'dDesc', child: Text('Сначала старые')),
-              const PopupMenuItem(value: 'status', child: Text('По статусу')),
-              const PopupMenuDivider(),
-              const PopupMenuItem(value: 'all', child: Text('Все проекты')),
-              const PopupMenuItem(value: 'inProgress', child: Text('В работе')),
-            ],
-          ),
-        ],
+        title: Text('navigation.my_projects'.tr()),
       ),
       drawer: const UserProfileDrawer(),
+
       body: prov.isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+        child: CircularProgressIndicator(),
+      )
           : RefreshIndicator(
-        onRefresh: prov.fetchProjects,
+        onRefresh: () async {
+          if (!isGuest) {
+            await prov.fetchProjects();
+          }
+        },
         child: projects.isEmpty
-            ? Center(child: Text(isActuallyGuest ? "Войдите, чтобы увидеть проекты" : "Нет проектов"))
+            ? Center(
+          child: Text(
+            isGuest
+                ? 'projects.login_to_view'.tr()
+                : 'projects.no_projects'.tr(),
+          ),
+        )
             : ListView.builder(
           padding: const EdgeInsets.only(bottom: 80),
           itemCount: projects.length,
-          itemBuilder: (itemContext, index) {
-            final p = projects[index];
-            return ProjectCard(
-              project: p,
-              canEdit: prov.canEditProject(p),
-              isOwner: p.ownerId == authProv.userId,
-              onEdit: (project) async {
-                final messenger = ScaffoldMessenger.of(context);
-                final navigator = Navigator.of(context);
+          itemBuilder: (context, index) {
+            final project = projects[index];
 
-                final updated = await navigator.push(
-                  MaterialPageRoute(builder: (_) => ProjectFormScreen(project: project, isNew: false)),
+            return ProjectCard(
+              project: project,
+
+              canEdit: prov.canEditProject(project),
+              isOwner: project.ownerId == authProv.userId,
+
+              /// EDIT
+              onEdit: (project) async {
+                final updated =
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ProjectFormScreen(
+                      project: project,
+                      isNew: false,
+                    ),
+                  ),
                 );
 
                 if (updated == true && mounted) {
                   await prov.fetchProjects();
-                  messenger.showSnackBar(
-                    const SnackBar(content: Text('Обновлено')),
+
+                  SnackbarManager.showSuccess(
+                    'common.updated'.tr(),
                   );
                 }
               },
-              onDelete: (project) => _confirmDelete(prov, project),
-            ).animate().fadeIn(duration: 300.ms, delay: (50 * index).ms).slideX(begin: 0.1, end: 0);
+
+              /// DELETE
+              onDelete: (project) =>
+                  _confirmDelete(prov, project),
+
+              /// 🔥 CHAT
+              onChat: () => _openChat(project),
+            )
+                .animate()
+                .fadeIn(
+              duration: 250.ms,
+              delay: (40 * index).ms,
+            )
+                .slideX(begin: 0.1);
           },
         ),
       ),
-      floatingActionButton: isActuallyGuest
+
+      floatingActionButton: isGuest
           ? null
-          : AnimatedScale(
-        scale: _fabScale,
-        duration: const Duration(milliseconds: 100),
-        child: FloatingActionButton(
-          onPressed: _addProject,
-          child: const Icon(Icons.add),
-        ),
+          : FloatingActionButton(
+        onPressed: _addProject,
+        child: const Icon(Icons.add),
       ),
     );
   }

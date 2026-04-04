@@ -1,0 +1,68 @@
+import 'package:flutter/material.dart';
+import 'package:easy_localization/easy_localization.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../utils/app_logger.dart';
+
+class LocalizationHelper {
+  // =========================================================
+  // CHANGE LANGUAGE (USER ACTION)
+  // =========================================================
+
+  static Future<void> changeLanguage(
+      BuildContext context,
+      String languageCode,
+      ) async {
+    try {
+      final newLocale = Locale(languageCode);
+
+      if (context.locale == newLocale) return;
+
+      AppLogger.info('Changing language to $languageCode');
+
+      await context.setLocale(newLocale);
+
+      final user = Supabase.instance.client.auth.currentUser;
+
+      if (user != null) {
+        try {
+          await Supabase.instance.client
+              .from('profiles')
+              .update({'language': languageCode})
+              .eq('id', user.id);
+        } catch (e, st) {
+          AppLogger.error(
+              'Failed to save language to profile', e, st);
+        }
+      }
+    } catch (e, st) {
+      AppLogger.error('changeLanguage error', e, st);
+    }
+  }
+
+  // =========================================================
+  // APPLY SAVED LANGUAGE (ON LOGIN)
+  // =========================================================
+
+  static Future<void> applySavedLanguage(
+      BuildContext context,
+      String? languageCode,
+      ) async {
+    if (languageCode == null || languageCode.isEmpty) {
+      return;
+    }
+
+    final savedLocale = Locale(languageCode);
+
+    if (context.locale == savedLocale) {
+      return;
+    }
+
+    try {
+      AppLogger.info('Applying saved language: $languageCode');
+      await context.setLocale(savedLocale);
+    } catch (e, st) {
+      AppLogger.error('applySavedLanguage error', e, st);
+    }
+  }
+}

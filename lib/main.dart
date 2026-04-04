@@ -3,58 +3,80 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
-// Провайдеры
+/// Providers
 import 'providers/auth_provider.dart';
 import 'providers/project_provider.dart';
 import 'providers/theme_provider.dart';
 
-// Сервисы
+/// Services
 import 'services/project_service.dart';
 import 'services/notification_service.dart';
 
-// Экраны
+/// Core
+import 'utils/snackbar_manager.dart';
+import 'utils/app_logger.dart';
+import 'utils/loading_overlay.dart';
+
+/// Screens
 import 'screens/auth/login_wrapper.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  debugPrint('[App] Application starting...');
+  AppLogger.info('Application starting...');
 
-  // 1. Загружаем переменные окружения
-  await dotenv.load(fileName: ".env");
-  debugPrint('[App] Environment variables loaded.');
+  try {
+    await dotenv.load(fileName: ".env");
 
-  // 2. Инициализация локализации
-  await EasyLocalization.ensureInitialized();
-  debugPrint('[App] Localization initialized.');
+    await EasyLocalization.ensureInitialized();
+    await initializeDateFormatting();
 
-  // 3. Инициализация Supabase
-  final supabaseUrl = dotenv.env['SUPABASE_URL'];
-  final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
+    /// SUPABASE
+    final supabaseUrl = dotenv.env['SUPABASE_URL'];
+    final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
 
-  if (supabaseUrl == null || supabaseAnonKey == null) {
-    throw Exception('SUPABASE_URL или SUPABASE_ANON_KEY отсутствуют в .env!');
+    if (supabaseUrl == null || supabaseAnonKey == null) {
+      throw Exception(
+        'SUPABASE_URL or SUPABASE_ANON_KEY missing in .env',
+      );
+    }
+
+    await Supabase.initialize(
+      url: supabaseUrl,
+      anonKey: supabaseAnonKey,
+    );
+
+    /// NOTIFICATIONS
+    await NotificationService().init();
+
+    AppLogger.info('Initialization completed successfully.');
+
+  } catch (e, s) {
+    AppLogger.error('App initialization failed', e, s);
   }
-
-  await Supabase.initialize(
-    url: supabaseUrl,
-    anonKey: supabaseAnonKey,
-  );
-  debugPrint('[App] Supabase initialized successfully.');
-
-  // 4. Инициализация уведомлений
-  await NotificationService().init();
-  debugPrint('[App] NotificationService initialized.');
 
   runApp(
     EasyLocalization(
-      supportedLocales: const [Locale('ru'), Locale('en')],
+      supportedLocales: const [
+        Locale('ru'),
+        Locale('en'),
+      ],
       path: 'assets/lang',
       fallbackLocale: const Locale('ru'),
+      saveLocale: true,
+      useOnlyLangCode: true,
       child: MultiProvider(
         providers: [
-          ChangeNotifierProvider(create: (_) => ThemeProvider()),
-          ChangeNotifierProvider(create: (_) => AuthProvider()),
+
+          ChangeNotifierProvider(
+            create: (_) => ThemeProvider(),
+          ),
+
+          ChangeNotifierProvider(
+            create: (_) => AuthProvider(),
+          ),
+
           ChangeNotifierProvider(
             create: (_) => ProjectProvider(
               ProjectService(),
@@ -77,12 +99,27 @@ class TaskioApp extends StatelessWidget {
     return MaterialApp(
       title: 'Taskio',
       debugShowCheckedModeBanner: false,
-      themeMode: themeProv.currentTheme,
+
+      /// 🔥 Snackbar
+      scaffoldMessengerKey: SnackbarManager.messengerKey,
+
+      /// 🔥 Themes
       theme: themeProv.lightTheme,
       darkTheme: themeProv.darkTheme,
+      themeMode: themeProv.currentTheme,
+
+      /// 🔥 Localization
       localizationsDelegates: context.localizationDelegates,
       supportedLocales: context.supportedLocales,
       locale: context.locale,
+
+      /// 🔥 Global overlay
+      builder: (context, child) {
+        return LoadingOverlay(
+          child: child ?? const SizedBox(),
+        );
+      },
+
       home: const LoginWrapper(),
     );
   }

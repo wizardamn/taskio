@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 class ParticipantSelectionDialog extends StatefulWidget {
   final List<Map<String, dynamic>> allUsers;
@@ -13,95 +14,165 @@ class ParticipantSelectionDialog extends StatefulWidget {
   });
 
   @override
-  State<ParticipantSelectionDialog> createState() => _ParticipantSelectionDialogState();
+  State<ParticipantSelectionDialog> createState() =>
+      _ParticipantSelectionDialogState();
 }
 
-class _ParticipantSelectionDialogState extends State<ParticipantSelectionDialog> {
+class _ParticipantSelectionDialogState
+    extends State<ParticipantSelectionDialog> {
   late Set<String> _tempSelected;
 
   @override
   void initState() {
     super.initState();
-    _tempSelected = widget.currentParticipantIds.toSet();
+    _tempSelected =
+        widget.currentParticipantIds.toSet();
+
+    // Владелец всегда выбран
+    if (widget.ownerId.isNotEmpty) {
+      _tempSelected.add(widget.ownerId);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Формируем список для отображения (Владелец + остальные)
-    final List<Map<String, dynamic>> usersForSelection = [
-      // Плейсхолдер владельца, если его нет в списке
-      if (widget.ownerId.isNotEmpty)
-        widget.allUsers.firstWhereOrNull((u) => u['id'] == widget.ownerId) ??
-            {'id': widget.ownerId, 'full_name': 'Я (Владелец)'},
-      // Остальные пользователи
-      ...widget.allUsers.where((u) => u['id'] != widget.ownerId),
-    ].toSet().toList();
+    final colorScheme =
+        Theme.of(context).colorScheme;
+
+    final usersForSelection =
+    _buildUsersList();
 
     return AlertDialog(
-      title: const Text("Выбор участников"),
+      title: Text(
+        'project.select_participants'.tr(),
+      ),
       content: SizedBox(
-        width: 300,
+        width: 350,
         height: 400,
-        child: ListView(
-          children: usersForSelection.map((u) {
-            final String id = u['id'] as String;
-            final isOwner = widget.ownerId == id;
-            final String displayName = (u['full_name'] as String?) ?? id;
+        child: ListView.builder(
+          itemCount: usersForSelection.length,
+          itemBuilder: (_, index) {
+            final user =
+            usersForSelection[index];
 
-            // Владелец всегда выбран
-            if (isOwner && !_tempSelected.contains(id)) {
-              _tempSelected.add(id);
-            }
+            final id =
+            user['id'] as String;
+
+            final isOwner =
+                id == widget.ownerId;
+
+            final displayName =
+                (user['full_name']
+                as String?) ??
+                    id;
 
             return CheckboxListTile(
-              title: Text(displayName),
-              value: _tempSelected.contains(id),
+              value:
+              _tempSelected.contains(id),
               onChanged: isOwner
                   ? null
-                  : (v) {
+                  : (value) {
                 setState(() {
-                  if (v == true) {
+                  if (value == true) {
                     _tempSelected.add(id);
                   } else {
-                    _tempSelected.remove(id);
+                    _tempSelected
+                        .remove(id);
                   }
                 });
               },
+              title: Text(displayName),
               subtitle: isOwner
-                  ? Text("Владелец",
-                  style: TextStyle(
-                      color: Theme.of(context).primaryColor,
-                      fontWeight: FontWeight.bold))
+                  ? Text(
+                'project.owner'.tr(),
+                style: TextStyle(
+                  color:
+                  colorScheme.primary,
+                  fontWeight:
+                  FontWeight.bold,
+                ),
+              )
                   : null,
+              controlAffinity:
+              ListTileControlAffinity
+                  .leading,
             );
-          }).toList(),
+          },
         ),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text("Отмена"),
+          onPressed: () =>
+              Navigator.pop(context),
+          child:
+          Text('common.cancel'.tr()),
         ),
         ElevatedButton(
           onPressed: () {
-            // Возвращаем список выбранных ID
-            Navigator.pop(context, _tempSelected.toList());
+            Navigator.pop(
+              context,
+              _tempSelected.toList(),
+            );
           },
-          child: const Text("Готово"),
+          child: Text('common.done'.tr()),
         ),
       ],
     );
   }
-}
 
-// Приватное расширение, работает только в этом файле
-extension _ListExtensions<T> on List<T> {
-  T? firstWhereOrNull(bool Function(T element) test) {
-    for (var element in this) {
-      if (test(element)) {
-        return element;
+  // =========================================================
+  // HELPERS
+  // =========================================================
+
+  List<Map<String, dynamic>>
+  _buildUsersList() {
+    final Map<String, Map<String, dynamic>>
+    uniqueUsers = {};
+
+    for (final user in widget.allUsers) {
+      final id = user['id'] as String?;
+      if (id != null) {
+        uniqueUsers[id] = user;
       }
     }
-    return null;
+
+    // Если владельца нет в списке — добавим
+    if (widget.ownerId.isNotEmpty &&
+        !uniqueUsers
+            .containsKey(widget.ownerId)) {
+      uniqueUsers[widget.ownerId] = {
+        'id': widget.ownerId,
+        'full_name':
+        'project.me_owner'.tr(),
+      };
+    }
+
+    final list =
+    uniqueUsers.values.toList();
+
+    // Сортируем: владелец сверху, потом по имени
+    list.sort((a, b) {
+      if (a['id'] ==
+          widget.ownerId) {
+        return -1;
+      }
+      if (b['id'] ==
+          widget.ownerId) {
+        return 1;
+      }
+
+      final nameA =
+      (a['full_name'] ?? '')
+          .toString()
+          .toLowerCase();
+      final nameB =
+      (b['full_name'] ?? '')
+          .toString()
+          .toLowerCase();
+
+      return nameA.compareTo(nameB);
+    });
+
+    return list;
   }
 }

@@ -1,133 +1,214 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+import 'package:flutter/foundation.dart';
+
+import '../utils/app_logger.dart';
 
 class NotificationService {
-  static final NotificationService _instance = NotificationService._internal();
-  factory NotificationService() => _instance;
+  static final NotificationService _instance =
   NotificationService._internal();
 
-  final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
+  factory NotificationService() => _instance;
+
+  NotificationService._internal();
+
+  final FlutterLocalNotificationsPlugin _plugin =
+  FlutterLocalNotificationsPlugin();
+
+  bool _initialized = false;
+
+  // =========================================================
+  // INIT
+  // =========================================================
 
   Future<void> init() async {
-    // Инициализация таймзон для плановых уведомлений
-    tz.initializeTimeZones();
+    if (_initialized) return;
 
-    // Настройка для Android
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+    try {
+      AppLogger.info('Initializing NotificationService');
 
-    // Настройка для iOS
-    final iosInit = DarwinInitializationSettings(
-      // Разрешения запрашиваются здесь
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-    );
+      tz.initializeTimeZones();
 
-    final initializationSettings = InitializationSettings(
-      android: androidInit,
-      iOS: iosInit,
-    );
+      const androidInit =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
 
-    // Инициализация плагина.
-    // onDidReceiveNotificationResponse необходим для обработки нажатий на уведомления.
-    await _plugin.initialize(
-      initializationSettings,
-      // Placeholder для обработки нажатия на уведомление (необходимо для инициализации)
-      onDidReceiveNotificationResponse: (NotificationResponse response) async {
-        // Здесь можно обработать ответ: например, перейти на нужный экран
-        if (response.payload != null) {
-          // Выполнить навигацию или другие действия
-        }
-      },
-    );
+      final iosInit = DarwinInitializationSettings(
+        requestAlertPermission: true,
+        requestBadgePermission: true,
+        requestSoundPermission: true,
+      );
+
+      final settings = InitializationSettings(
+        android: androidInit,
+        iOS: iosInit,
+      );
+
+      await _plugin.initialize(
+        settings,
+        onDidReceiveNotificationResponse:
+            (response) async {
+          AppLogger.info(
+              'Notification clicked: ${response.payload}');
+        },
+      );
+
+      // 🔥 Android 13+ permission (НОВЫЙ МЕТОД)
+      if (!kIsWeb) {
+        final androidPlugin =
+        _plugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+
+        await androidPlugin
+            ?.requestNotificationsPermission();
+      }
+
+      _initialized = true;
+
+      AppLogger.info('NotificationService initialized');
+    } catch (e, st) {
+      AppLogger.error('Notification init error', e);
+      AppLogger.error('StackTrace', st);
+    }
   }
 
-  /// Простое уведомление
-  Future<void> showSimple(String title, String body) async {
-    const androidDetails = AndroidNotificationDetails(
-      'main_channel',
-      'Основной канал',
-      channelDescription: 'Уведомления приложения',
-      importance: Importance.max,
-      priority: Priority.high,
-      playSound: true,
-    );
+  // =========================================================
+  // SIMPLE NOTIFICATION
+  // =========================================================
 
-    const iosDetails = DarwinNotificationDetails();
+  Future<void> showSimple(
+      String title,
+      String body, {
+        String? payload,
+      }) async {
+    try {
+      const androidDetails = AndroidNotificationDetails(
+        'main_channel',
+        'Main notifications',
+        channelDescription:
+        'General app notifications',
+        importance: Importance.max,
+        priority: Priority.high,
+        playSound: true,
+      );
 
-    const notificationDetails = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
+      const iosDetails =
+      DarwinNotificationDetails();
 
-    await _plugin.show(
-      0,
-      title,
-      body,
-      notificationDetails,
-    );
+      const details = NotificationDetails(
+        android: androidDetails,
+        iOS: iosDetails,
+      );
+
+      await _plugin.show(
+        DateTime.now()
+            .millisecondsSinceEpoch
+            .remainder(100000),
+        title,
+        body,
+        details,
+        payload: payload,
+      );
+
+      AppLogger.info('Simple notification shown');
+    } catch (e, st) {
+      AppLogger.error('showSimple error', e);
+      AppLogger.error('StackTrace', st);
+    }
   }
 
-  /// Плановое уведомление (например, напоминание о дедлайне)
+  // =========================================================
+  // SCHEDULE NOTIFICATION
+  // =========================================================
+
   Future<void> scheduleNotification({
     required int id,
     required String title,
     required String body,
     required DateTime scheduledTime,
-    // Смещение напоминания перед scheduledTime (по умолчанию — 0)
-    Duration reminderOffset = Duration.zero,
+    Duration reminderOffset =
+        Duration.zero,
+    String? payload,
   }) async {
-    const androidDetails = AndroidNotificationDetails(
-      'scheduled_channel',
-      'Плановые уведомления',
-      channelDescription: 'Напоминания о задачах и проектах',
-      importance: Importance.max,
-      priority: Priority.high,
-      playSound: true,
-    );
+    try {
+      const androidDetails =
+      AndroidNotificationDetails(
+        'scheduled_channel',
+        'Scheduled notifications',
+        channelDescription:
+        'Deadline reminders',
+        importance: Importance.max,
+        priority: Priority.high,
+        playSound: true,
+      );
 
-    const iosDetails = DarwinNotificationDetails();
+      const iosDetails =
+      DarwinNotificationDetails();
 
-    const notificationDetails = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
+      const details = NotificationDetails(
+        android: androidDetails,
+        iOS: iosDetails,
+      );
 
-    // 1. ВЫЧИСЛЕНИЕ ВРЕМЕНИ:
-    // Отнимаем offset (смещение) от scheduledTime (дедлайна)
-    final actualScheduleTime = scheduledTime.subtract(reminderOffset);
+      final actualTime =
+      scheduledTime.subtract(reminderOffset);
 
-    // 2. Установка местного часового пояса (tz.local) для планового уведомления
-    final tzTime = tz.TZDateTime.from(actualScheduleTime, tz.local);
+      final tzTime = tz.TZDateTime.from(
+          actualTime, tz.local);
 
-    // 3. Проверка: не планируем, если время уже прошло
-    if (tzTime.isBefore(tz.TZDateTime.now(tz.local))) {
-      return;
+      if (tzTime.isBefore(
+          tz.TZDateTime.now(tz.local))) {
+        AppLogger.warning(
+            'Notification time already passed');
+        return;
+      }
+
+      await _plugin.zonedSchedule(
+        id,
+        title,
+        body,
+        tzTime,
+        details,
+        androidScheduleMode:
+        AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+        UILocalNotificationDateInterpretation
+            .absoluteTime,
+        payload: payload,
+      );
+
+      AppLogger.info('Notification scheduled');
+    } catch (e, st) {
+      AppLogger.error(
+          'scheduleNotification error', e);
+      AppLogger.error('StackTrace', st);
     }
-
-    await _plugin.zonedSchedule(
-      id,
-      title,
-      body,
-      tzTime,
-      notificationDetails,
-      // ✅ Исправлено: замена androidAllowWhileIdle на androidScheduleMode
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-      UILocalNotificationDateInterpretation.absoluteTime,
-      // payload может быть добавлен для передачи данных при нажатии
-      // payload: 'project_id_$id',
-    );
   }
 
-  /// Удалить конкретное уведомление
+  // =========================================================
+  // CANCEL
+  // =========================================================
+
   Future<void> cancel(int id) async {
-    await _plugin.cancel(id);
+    try {
+      await _plugin.cancel(id);
+      AppLogger.info(
+          'Notification cancelled: $id');
+    } catch (e, st) {
+      AppLogger.error(
+          'cancel notification error', e);
+      AppLogger.error('StackTrace', st);
+    }
   }
 
-  /// Удалить все уведомления
   Future<void> cancelAll() async {
-    await _plugin.cancelAll();
+    try {
+      await _plugin.cancelAll();
+      AppLogger.info(
+          'All notifications cancelled');
+    } catch (e, st) {
+      AppLogger.error('cancelAll error', e);
+      AppLogger.error('StackTrace', st);
+    }
   }
 }

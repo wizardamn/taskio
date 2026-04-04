@@ -1,54 +1,67 @@
 import 'package:universal_io/io.dart';
-import 'package:flutter/foundation.dart'; // Для kIsWeb
-import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
+
 import '../services/supabase_service.dart';
+import '../utils/app_logger.dart';
+import '../utils/error_mapper.dart';
 
 class FileOpenerUtils {
-  /// Скачивает файл из Supabase Storage и открывает его локально.
-  /// Возвращает сообщение об ошибке или null, если все прошло успешно.
-  static Future<String?> downloadAndOpen(String filePath, String fileName) async {
-    // На Web файловая система недоступна таким образом.
-    // Логика открытия ссылок для Web должна обрабатываться на уровне UI.
+  /// Скачивает файл из Supabase Storage и открывает его.
+  /// Возвращает null при успехе или текст ошибки.
+  static Future<String?> downloadAndOpen(
+      String filePath,
+      String fileName,
+      ) async {
     if (kIsWeb) {
-      return 'Открытие файлов в этом режиме не поддерживается. Используйте веб-просмотр.';
+      return 'errors.file_web_not_supported';
     }
 
     try {
-      final String fullPublicUrl = SupabaseService.client.storage
-          .from(SupabaseService.bucket)
-          .getPublicUrl(filePath);
+      AppLogger.info('Downloading file: $filePath');
 
-      // 1. Скачиваем файл
-      final response = await http.get(Uri.parse(fullPublicUrl));
-      if (response.statusCode != 200) {
-        return 'Не удалось загрузить файл. Код: ${response.statusCode}';
+      // 🔥 Используем download вместо publicUrl (работает и для private bucket)
+      final bytes = await SupabaseService.client.storage
+          .from(SupabaseService.bucket)
+          .download(filePath);
+
+      if (bytes.isEmpty) {
+        return 'errors.file_not_found';
       }
 
-      // 2. Получаем временный каталог
-      // ВАЖНО: Этот вызов упадет на Web, поэтому он должен быть строго после проверки kIsWeb
       final dir = await getTemporaryDirectory();
 
-      // 3. Создаем локальный файл
-      // Очищаем имя файла от недопустимых символов для безопасности ОС
-      final safeFileName = fileName.replaceAll(RegExp(r'[^\w\s\.\-]'), '_');
+      final safeFileName =
+      fileName.replaceAll(RegExp(r'[^\w\s\.\-]'), '_');
+
       final localPath = '${dir.path}/$safeFileName';
+
       final file = File(localPath);
 
-      // 4. Записываем данные
-      await file.writeAsBytes(response.bodyBytes);
+      await file.writeAsBytes(bytes);
 
-      // 5. Открываем с помощью установленного приложения
+      AppLogger.info('File saved: $localPath');
+
       final result = await OpenFile.open(localPath);
 
       if (result.type != ResultType.done) {
-        return 'Ошибка открытия: ${result.message}';
+        AppLogger.warning(
+            'OpenFile error: ${result.message}');
+        return result.message;
       }
 
-      return null; // Успех
-    } catch (e) {
-      return 'Ошибка обработки файла: ${e.toString().replaceFirst('Exception: ', '')}';
+      AppLogger.info('File opened successfully');
+
+      return null;
+    } catch (e, st) {
+      AppLogger.error(
+        'File download/open error',
+        e,
+        st,
+      );
+
+      return ErrorMapper.map(e);
     }
   }
 }

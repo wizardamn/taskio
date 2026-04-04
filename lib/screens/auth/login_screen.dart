@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import '../../screens/auth/register_screen.dart';
+import 'package:easy_localization/easy_localization.dart';
+
 import '../../providers/auth_provider.dart';
-import '../../providers/project_provider.dart';
+import '../../utils/snackbar_manager.dart';
+import '../../utils/loading_overlay.dart';
+import '../../utils/app_logger.dart';
+import '../../utils/error_mapper.dart';
+import '../../utils/localization_helper.dart';
+
+import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -12,23 +19,26 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
+class _LoginScreenState extends State<LoginScreen>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
-  bool _isLoading = false;
   bool _isPasswordVisible = false;
+  bool _isSubmitting = false;
 
-  late AnimationController _animationController;
+  late final AnimationController _animationController;
 
   @override
   void initState() {
     super.initState();
+
     _animationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 700),
+      duration: const Duration(milliseconds: 600),
     );
+
     _animationController.forward();
   }
 
@@ -40,178 +50,242 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     super.dispose();
   }
 
-  void _showSnackBar(String message, {bool isError = true}) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isError
-            ? Theme.of(context).colorScheme.error
-            : Colors.green.shade600,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 4),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: const EdgeInsets.all(15),
-      ),
-    );
-  }
+  // =========================================================
+  // LOGIN
+  // =========================================================
 
   Future<void> _login() async {
-    if (_isLoading || !_formKey.currentState!.validate()) return;
-
-    setState(() => _isLoading = true);
-
-    try {
-      final authProvider = context.read<AuthProvider>();
-      await authProvider.signIn(_emailController.text.trim(), _passwordController.text.trim());
-
-    } on Exception catch (e) {
-      if (mounted) {
-        _showSnackBar(e.toString().replaceFirst('Exception: ', ''), isError: true);
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  // --- Вход как гость ---
-  Future<void> _signInAsGuest() async {
-    if (_isLoading) return;
-
-    setState(() => _isLoading = true);
+    if (!_formKey.currentState!.validate()) return;
+    if (_isSubmitting) return;
 
     try {
+      setState(() => _isSubmitting = true);
+      LoadingOverlay.show();
+
       final authProvider = context.read<AuthProvider>();
-      final projectProvider = context.read<ProjectProvider>();
 
-      // 1. Устанавливаем флаг гостя в AuthProvider
-      await authProvider.signInAsGuest();
-
-      // 2. Инициализируем ProjectProvider для гостя (очищаем старые данные)
-      projectProvider.setGuestUser();
+      await authProvider.signIn(
+        _emailController.text.trim(),
+        _passwordController.text.trim(),
+      );
 
       if (!mounted) return;
-      _showSnackBar('Вход как гость', isError: false);
 
-      // LoginWrapper (который слушает AuthProvider) сам перерисует экран
+      SnackbarManager.showSuccess(
+          'auth.login_success'.tr());
 
-    } on Exception catch (e) {
+    } catch (e, st) {
+      AppLogger.error('Login error', e);
+      AppLogger.error('StackTrace', st);
+
+      SnackbarManager.showError(
+          ErrorMapper.map(e).tr());
+    } finally {
+      LoadingOverlay.hide();
       if (mounted) {
-        _showSnackBar(e.toString().replaceFirst('Exception: ', ''), isError: true);
-        setState(() => _isLoading = false);
+        setState(() => _isSubmitting = false);
       }
     }
   }
 
-  void _navigateToRegister() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const RegisterScreen(),
-      ),
-    );
+  // =========================================================
+  // GUEST LOGIN
+  // =========================================================
+
+  Future<void> _signInAsGuest() async {
+    if (_isSubmitting) return;
+
+    try {
+      setState(() => _isSubmitting = true);
+      LoadingOverlay.show();
+
+      final authProvider = context.read<AuthProvider>();
+
+      await authProvider.signInAsGuest();
+
+      if (!mounted) return;
+
+      SnackbarManager.showSuccess(
+          'auth.guest_login_success'.tr());
+
+    } catch (e) {
+      SnackbarManager.showError(
+          ErrorMapper.map(e).tr());
+    } finally {
+      LoadingOverlay.hide();
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
   }
 
-  Widget _buildAnimatedContent(Widget child, double delay) {
-    return child.animate(controller: _animationController)
-        .fade(duration: 500.ms, delay: (delay).ms)
-        .slide(begin: const Offset(0, 0.3), duration: 500.ms, delay: (delay).ms);
+  // =========================================================
+  // LANGUAGE
+  // =========================================================
+
+  Future<void> _changeLanguage(Locale locale) async {
+    try {
+      LoadingOverlay.show();
+
+      await LocalizationHelper.changeLanguage(
+          context, locale.languageCode);
+
+      if (!mounted) return;
+
+      SnackbarManager.showSuccess(
+          'profile.language_changed'.tr());
+
+    } finally {
+      LoadingOverlay.hide();
+    }
   }
+
+  Widget _animated(Widget child, double delay) {
+    return child
+        .animate(controller: _animationController)
+        .fade(duration: 400.ms, delay: delay.ms)
+        .slide(begin: const Offset(0, 0.2),
+        duration: 400.ms,
+        delay: delay.ms);
+  }
+
+  // =========================================================
+  // BUILD
+  // =========================================================
 
   @override
   Widget build(BuildContext context) {
-    const emailRegex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}$';
+    const emailRegex =
+        r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Вход')),
+      appBar: AppBar(
+        title: Text('auth.login'.tr()),
+        actions: [
+          PopupMenuButton<Locale>(
+            icon: const Icon(Icons.language),
+            onSelected: _changeLanguage,
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: Locale('ru'),
+                child: Text('🇷🇺 Русский'),
+              ),
+              PopupMenuItem(
+                value: Locale('en'),
+                child: Text('🇬🇧 English'),
+              ),
+            ],
+          ),
+        ],
+      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Form(
             key: _formKey,
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildAnimatedContent(
+                _animated(
                   TextFormField(
                     controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(
-                      labelText: 'Email',
-                      hintText: 'Введите ваш Email',
-                      prefixIcon: Icon(Icons.email_outlined),
+                    decoration: InputDecoration(
+                      labelText: 'auth.email_label'.tr(),
+                      hintText: 'auth.email_hint'.tr(),
+                      prefixIcon:
+                      const Icon(Icons.email_outlined),
                     ),
                     validator: (v) {
-                      if (v == null || v.isEmpty) return 'Пожалуйста, введите email';
-                      if (!RegExp(emailRegex).hasMatch(v)) return 'Неверный формат email';
+                      if (v == null || v.isEmpty) {
+                        return 'validation.empty_email'.tr();
+                      }
+                      if (!RegExp(emailRegex).hasMatch(v)) {
+                        return 'validation.invalid_email'.tr();
+                      }
                       return null;
                     },
                   ),
                   0,
                 ),
                 const SizedBox(height: 16),
-
-                _buildAnimatedContent(
+                _animated(
                   TextFormField(
                     controller: _passwordController,
+                    obscureText: !_isPasswordVisible,
                     decoration: InputDecoration(
-                      labelText: 'Пароль',
-                      hintText: 'Введите пароль',
-                      prefixIcon: const Icon(Icons.lock_outline),
+                      labelText:
+                      'auth.password_label'.tr(),
+                      hintText:
+                      'auth.password_hint'.tr(),
+                      prefixIcon:
+                      const Icon(Icons.lock_outline),
                       suffixIcon: IconButton(
-                        icon: Icon(_isPasswordVisible
-                            ? Icons.visibility
-                            : Icons.visibility_off),
+                        icon: Icon(
+                          _isPasswordVisible
+                              ? Icons.visibility
+                              : Icons.visibility_off,
+                        ),
                         onPressed: () {
-                          setState(() => _isPasswordVisible = !_isPasswordVisible);
+                          setState(() {
+                            _isPasswordVisible =
+                            !_isPasswordVisible;
+                          });
                         },
                       ),
                     ),
-                    obscureText: !_isPasswordVisible,
                     validator: (v) {
-                      if (v == null || v.isEmpty) return 'Пожалуйста, введите пароль';
-                      if (v.length < 6) return 'Пароль должен быть не менее 6 символов';
+                      if (v == null || v.isEmpty) {
+                        return 'validation.empty_password'
+                            .tr();
+                      }
+                      if (v.length < 6) {
+                        return 'validation.short_password'
+                            .tr();
+                      }
                       return null;
                     },
                   ),
                   100,
                 ),
                 const SizedBox(height: 30),
-
-                _buildAnimatedContent(
-                  _isLoading
-                      ? const CircularProgressIndicator()
-                      : ElevatedButton(
-                      onPressed: _login,
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 50),
-                      ),
-                      child: const Text('Войти')),
+                _animated(
+                  ElevatedButton(
+                    onPressed:
+                    _isSubmitting ? null : _login,
+                    child: Text('auth.sign_in'.tr()),
+                  ),
                   200,
                 ),
-
                 const SizedBox(height: 20),
-
-                _buildAnimatedContent(
+                _animated(
                   OutlinedButton(
-                    onPressed: _signInAsGuest,
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 50),
-                    ),
-                    child: const Text('Войти как гость'),
+                    onPressed: _isSubmitting
+                        ? null
+                        : _signInAsGuest,
+                    child:
+                    Text('auth.sign_in_guest'.tr()),
                   ),
                   250,
                 ),
                 const SizedBox(height: 20),
-
-                _buildAnimatedContent(
+                _animated(
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisAlignment:
+                    MainAxisAlignment.center,
                     children: [
-                      const Text('Нет аккаунта?'),
+                      Text('auth.no_account'.tr()),
                       TextButton(
-                        onPressed: _navigateToRegister,
-                        child: const Text(
-                          'Зарегистрироваться',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                const RegisterScreen()),
+                          );
+                        },
+                        child: Text(
+                          'auth.sign_up'.tr(),
+                          style: const TextStyle(
+                              fontWeight:
+                              FontWeight.bold),
                         ),
                       ),
                     ],

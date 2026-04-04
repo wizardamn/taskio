@@ -6,41 +6,109 @@ class ProfileModel {
   final String role;
   final DateTime createdAt;
   final String email;
+  final String? language; // 🔥 новое поле
 
-  ProfileModel({
+  const ProfileModel({
     required this.id,
     required this.fullName,
     required this.role,
     required this.createdAt,
     required this.email,
+    this.language,
   });
 
-  /// Фабричный конструктор для создания модели из данных 'profiles'.
-  /// Требует объект User для получения email.
-  factory ProfileModel.fromJson(Map<String, dynamic> json, User user) {
-    // Получаем роль из БД. Если нет в БД, берем из метаданных Auth, иначе дефолт 'student'.
-    final String profileRole = json['role'] as String? ?? user.userMetadata?['role'] as String? ?? 'student';
+  // =========================================================
+  // FROM JSON
+  // =========================================================
+
+  factory ProfileModel.fromJson(
+      Map<String, dynamic> json,
+      User user,
+      ) {
+    final roleFromDb =
+    json['role'] as String?;
+
+    final metadata =
+        user.userMetadata ?? {};
 
     return ProfileModel(
       id: json['id'].toString(),
-      // Берем имя из БД -> fallback на метаданные -> fallback на email
-      fullName: json['full_name'] as String? ?? user.userMetadata?['full_name'] as String? ?? user.email?.split('@').first ?? 'Неизвестно',
-      role: profileRole,
-      createdAt: json['created_at'] != null
-          ? DateTime.parse(json['created_at'])
-          : DateTime.now(),
-      // Email берется из объекта User (так как его нет в таблице public.profiles)
-      email: user.email ?? 'email-not-found@example.com',
+
+      fullName:
+      json['full_name'] as String? ??
+          metadata['full_name'] as String? ??
+          user.email?.split('@').first ??
+          'Unknown',
+
+      role:
+      roleFromDb ??
+          metadata['role'] as String? ??
+          'student',
+
+      createdAt: _parseDate(
+        json['created_at'],
+      ),
+
+      email:
+      user.email ??
+          'email-not-found@example.com',
+
+      language:
+      json['language'] as String?,
     );
   }
 
-  /// Преобразование модели обратно в JSON
+  // =========================================================
+  // TO JSON
+  // =========================================================
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,
       'full_name': fullName,
       'role': role,
-      'created_at': createdAt.toIso8601String(),
+      'created_at':
+      createdAt.toIso8601String(),
+      'language': language,
     };
+  }
+
+  // =========================================================
+  // COPY WITH
+  // =========================================================
+
+  ProfileModel copyWith({
+    String? fullName,
+    String? role,
+    String? email,
+    String? language,
+  }) {
+    return ProfileModel(
+      id: id,
+      fullName: fullName ?? this.fullName,
+      role: role ?? this.role,
+      createdAt: createdAt,
+      email: email ?? this.email,
+      language: language ?? this.language,
+    );
+  }
+
+  // =========================================================
+  // SAFE DATE PARSER
+  // =========================================================
+
+  static DateTime _parseDate(
+      dynamic value) {
+    if (value == null) {
+      return DateTime.now();
+    }
+
+    if (value is DateTime) {
+      return value;
+    }
+
+    return DateTime.tryParse(
+        value.toString()) ??
+        DateTime.now();
   }
 }

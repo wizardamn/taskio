@@ -1,15 +1,16 @@
-import 'package:universal_io/io.dart';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 
 import '../../models/message_model.dart';
 import '../../models/project_model.dart';
 import '../../services/chat_service.dart';
 import '../../services/supabase_service.dart';
+import '../../utils/snackbar_manager.dart';
 
 class ProjectChatScreen extends StatefulWidget {
   final String projectId;
@@ -28,18 +29,27 @@ class ProjectChatScreen extends StatefulWidget {
 }
 
 class _ProjectChatScreenState extends State<ProjectChatScreen> {
+
   final ChatService _chatService = ChatService();
+
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
   late Stream<List<MessageModel>> _messagesStream;
+
   bool _isUploading = false;
+  MessageModel? _replyMessage;
 
   @override
   void initState() {
     super.initState();
-    _messagesStream = _chatService.getMessagesStream(widget.projectId);
-    _chatService.markAsRead(widget.projectId);
+
+    _messagesStream =
+        _chatService.subscribeMessages(widget.projectId);
+
+    _chatService.markProjectMessagesAsRead(widget.projectId);
+
+    _chatService.startPresenceHeartbeat();
   }
 
   @override
@@ -49,166 +59,259 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     super.dispose();
   }
 
-  void _sendMessage() async {
+  // SEND MESSAGE
+
+  Future<void> _sendMessage() async {
+
     final text = _controller.text.trim();
+
     if (text.isEmpty) return;
 
     _controller.clear();
+
     try {
-      await _chatService.sendMessage(widget.projectId, text);
-    } catch (e) {
-      if (mounted) _showError('Ошибка отправки: $e');
+
+      await _chatService.sendMessage(
+        widget.projectId,
+        text,
+        replyTo: _replyMessage?.id,
+      );
+
+      setState(() => _replyMessage = null);
+
+      _scrollToBottom();
+
+    } catch (_) {
+      SnackbarManager.showError('chat.send_error'.tr());
     }
   }
 
+  // FILE UPLOAD
+
   Future<void> _pickAndSendFile() async {
+
     try {
+
       final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'mp3'],
-        withData: kIsWeb, // Важно для Web: загружаем байты
+        type: FileType.any,
+        withData: kIsWeb,
       );
 
-      // Проверяем наличие результата и данных (пути для мобилок, байтов для веба)
-      if (result == null || (kIsWeb ? result.files.single.bytes == null : result.files.single.path == null)) {
-        return;
-      }
+      if (result == null) return;
+
+      final file = result.files.single;
+
+      if (kIsWeb && file.bytes == null) return;
+      if (!kIsWeb && file.path == null) return;
 
       setState(() => _isUploading = true);
 
-      final platformFile = result.files.single;
-      final extension = platformFile.extension?.toLowerCase() ?? '';
-      final isImage = ['jpg', 'jpeg', 'png'].contains(extension);
-      final msgType = isImage ? MessageType.image : MessageType.file;
+      final ext = file.extension?.toLowerCase() ?? '';
 
-      // Вызываем сервис с соответствующими данными
+      final isImage =
+      ['jpg','jpeg','png','webp'].contains(ext);
+
+      final type =
+      isImage ? MessageType.image : MessageType.file;
+
       if (kIsWeb) {
-        // Для Web передаем байты и имя
+
         await _chatService.sendFileMessage(
           projectId: widget.projectId,
-          fileBytes: platformFile.bytes!,
-          fileName: platformFile.name,
-          type: msgType,
+          fileBytes: file.bytes!,
+          fileName: file.name,
+          type: type,
         );
+
       } else {
-        // Для Mobile передаем файл
+
         await _chatService.sendFileMessage(
           projectId: widget.projectId,
-          file: File(platformFile.path!),
-          fileName: platformFile.name,
-          type: msgType,
+          file: File(file.path!),
+          fileName: file.name,
+          type: type,
         );
       }
 
-    } catch (e) {
-      if (mounted) _showError('Не удалось отправить файл: $e');
+      _scrollToBottom();
+
+    } catch (_) {
+
+      SnackbarManager.showError(
+          'chat.file_send_error'.tr());
+
     } finally {
-      if (mounted) setState(() => _isUploading = false);
+
+      if (mounted) {
+        setState(() => _isUploading = false);
+      }
     }
   }
 
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Theme.of(context).colorScheme.error,
-      ),
+  void _scrollToBottom() {
+
+    Future.delayed(
+      const Duration(milliseconds: 100),
+          () {
+
+        if (!_scrollController.hasClients) return;
+
+        _scrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      },
     );
   }
+
+  // USER NAME
 
   String _findName(String userId) {
-    final currentUser = SupabaseService.client.auth.currentUser;
-    if (userId == currentUser?.id) return 'Вы';
 
-    final participant = widget.participants.firstWhere(
-          (p) => p.id == userId,
-      orElse: () => ProjectParticipant(id: '', fullName: 'Неизвестный'),
-    );
-    return participant.fullName;
-  }
+    final currentUser =
+        SupabaseService.client.auth.currentUser;
 
-  String _getInitials(String name) {
-    final parts = name.trim().split(' ');
-    if (parts.isEmpty) return '?';
-    if (parts.length == 1 && parts[0].isNotEmpty) return parts[0][0].toUpperCase();
-    if (parts[0].isNotEmpty && parts[1].isNotEmpty) {
-      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    if (userId == currentUser?.id) {
+      return 'chat.you'.tr();
     }
-    return '?';
-  }
 
-  bool _shouldShowDateHeader(MessageModel current, MessageModel? older) {
-    if (older == null) return true;
-    final cDate = current.createdAt;
-    final oDate = older.createdAt;
-    return cDate.year != oDate.year || cDate.month != oDate.month || cDate.day != oDate.day;
+    final participant =
+    widget.participants.firstWhere(
+          (p) => p.id == userId,
+      orElse: () => ProjectParticipant(
+        id: '',
+        fullName: 'Unknown',
+      ),
+    );
+
+    return participant.fullName;
   }
 
   @override
   Widget build(BuildContext context) {
-    final currentUserId = SupabaseService.client.auth.currentUser?.id;
-    final colorScheme = Theme.of(context).colorScheme;
+
+    final currentUserId =
+        SupabaseService.client.auth.currentUser?.id;
 
     return Scaffold(
+
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Чат команды', style: TextStyle(fontSize: 16)),
-            Text(widget.projectTitle, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal)),
+
+            Text(widget.projectTitle),
+
+            StreamBuilder<List<String>>(
+
+              stream: _chatService.getOnlineUsers(),
+
+              builder: (context, snapshot) {
+
+                final online = snapshot.data ?? [];
+
+                final onlineCount = widget.participants
+                    .where((p) => online.contains(p.id))
+                    .length;
+
+                return Text(
+                  "$onlineCount online",
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.white70,
+                  ),
+                );
+              },
+            )
           ],
         ),
       ),
+
       body: Column(
         children: [
+
           Expanded(
             child: StreamBuilder<List<MessageModel>>(
+
               stream: _messagesStream,
+
               builder: (context, snapshot) {
-                if (snapshot.hasError) return Center(child: Text('Ошибка: ${snapshot.error}'));
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+
+                if (!snapshot.hasData) {
+                  return const Center(
+                      child: CircularProgressIndicator());
+                }
 
                 final messages = snapshot.data!;
 
-                if (messages.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.chat_bubble_outline, size: 48, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
-                        const SizedBox(height: 10),
-                        Text('Сообщений пока нет.\nНачните общение!',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: colorScheme.onSurfaceVariant)
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
                 return ListView.builder(
+
                   controller: _scrollController,
                   reverse: true,
                   itemCount: messages.length,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  itemBuilder: (context, index) {
-                    final msg = messages[index];
-                    final olderMsg = (index + 1 < messages.length) ? messages[index + 1] : null;
-                    final isMe = msg.senderId == currentUserId;
-                    final senderName = _findName(msg.senderId);
-                    final initials = _getInitials(senderName);
-                    final showDate = _shouldShowDateHeader(msg, olderMsg);
 
-                    return Column(
-                      children: [
-                        if (showDate) _DateHeader(date: msg.createdAt),
-                        _ChatBubble(
-                          message: msg,
-                          isMe: isMe,
-                          senderName: senderName,
-                          initials: initials,
-                        ).animate().fade().slideY(begin: 0.1, end: 0),
-                      ],
+                  itemBuilder: (context, index) {
+
+                    final msg = messages[index];
+
+                    final isMe =
+                        msg.senderId == currentUserId;
+
+                    final sender =
+                    _findName(msg.senderId);
+
+                    return Dismissible(
+
+                      key: Key(msg.id),
+
+                      direction: isMe
+                          ? DismissDirection.endToStart
+                          : DismissDirection.startToEnd,
+
+                      background: Container(
+                        color: Colors.green,
+                        padding: const EdgeInsets.only(left: 20),
+                        alignment: Alignment.centerLeft,
+                        child: const Icon(Icons.reply,color: Colors.white),
+                      ),
+
+                      secondaryBackground: Container(
+                        color: Colors.red,
+                        padding: const EdgeInsets.only(right: 20),
+                        alignment: Alignment.centerRight,
+                        child: const Icon(Icons.delete,color: Colors.white),
+                      ),
+
+                      confirmDismiss: (direction) async {
+
+                        if(direction == DismissDirection.startToEnd){
+
+                          setState(() {
+                            _replyMessage = msg;
+                          });
+
+                          return false;
+                        }
+
+                        if(direction == DismissDirection.endToStart){
+
+                          await _chatService.deleteMessage(msg.id);
+
+                          return true;
+                        }
+
+                        return false;
+                      },
+
+                      child: _ChatBubble(
+                        message: msg,
+                        isMe: isMe,
+                        senderName: sender,
+                      )
+                          .animate()
+                          .fade()
+                          .slideY(begin: 0.1,end: 0),
                     );
                   },
                 );
@@ -216,57 +319,82 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
             ),
           ),
 
-          if (_isUploading)
-            const LinearProgressIndicator(minHeight: 2),
+          if (_replyMessage != null)
+            _ReplyPreview(
+              message: _replyMessage!,
+              onCancel: () {
+                setState(() {
+                  _replyMessage = null;
+                });
+              },
+            ),
 
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            decoration: BoxDecoration(
-              color: colorScheme.surface,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  offset: const Offset(0, -2),
-                  blurRadius: 5,
-                )
-              ],
-            ),
-            child: SafeArea(
-              child: Row(
-                children: [
-                  IconButton(
-                    onPressed: _isUploading ? null : _pickAndSendFile,
-                    icon: const Icon(Icons.attach_file),
-                    color: colorScheme.onSurfaceVariant,
+          StreamBuilder<List<String>>(
+
+            stream: _chatService.getTypingUsers(widget.projectId),
+
+            builder: (context, snapshot) {
+
+              final typing = snapshot.data ?? [];
+
+              if (typing.isEmpty) return const SizedBox();
+
+              return Padding(
+                padding: const EdgeInsets.only(left: 16, bottom: 4),
+                child: Text(
+                  "Someone is typing...",
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade600,
                   ),
-                  Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      textCapitalization: TextCapitalization.sentences,
-                      decoration: InputDecoration(
-                        hintText: 'Написать сообщение...',
-                        filled: true,
-                        fillColor: colorScheme.surfaceContainerHighest,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                      ),
-                      onSubmitted: (_) => _sendMessage(),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  FloatingActionButton(
-                    onPressed: _sendMessage,
-                    mini: true,
-                    elevation: 0,
-                    backgroundColor: colorScheme.primary,
-                    child: Icon(Icons.send, color: colorScheme.onPrimary, size: 18),
-                  ),
-                ],
+                ),
+              );
+            },
+          ),
+
+          if (_isUploading)
+            const LinearProgressIndicator(),
+
+          _buildInput(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInput() {
+
+    return Padding(
+      padding: const EdgeInsets.all(8),
+
+      child: Row(
+
+        children: [
+
+          IconButton(
+            icon: const Icon(Icons.attach_file),
+            onPressed:
+            _isUploading ? null : _pickAndSendFile,
+          ),
+
+          Expanded(
+            child: TextField(
+              controller: _controller,
+              onChanged: (_) {
+                _chatService.setTyping(widget.projectId, true);
+              },
+              decoration: InputDecoration(
+                hintText: 'chat.hint'.tr(),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
               ),
+              onSubmitted: (_) => _sendMessage(),
             ),
+          ),
+
+          IconButton(
+            icon: const Icon(Icons.send),
+            onPressed: _sendMessage,
           ),
         ],
       ),
@@ -274,142 +402,171 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
   }
 }
 
-class _DateHeader extends StatelessWidget {
-  final DateTime date;
-  const _DateHeader({required this.date});
+class _ReplyPreview extends StatelessWidget {
+
+  final MessageModel message;
+  final VoidCallback onCancel;
+
+  const _ReplyPreview({
+    required this.message,
+    required this.onCancel,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final yesterday = today.subtract(const Duration(days: 1));
-    final dateToCheck = DateTime(date.year, date.month, date.day);
-    final colorScheme = Theme.of(context).colorScheme;
-
-    String text;
-    if (dateToCheck == today) {
-      text = 'Сегодня';
-    } else if (dateToCheck == yesterday) {
-      text = 'Вчера';
-    } else {
-      text = DateFormat('d MMMM', 'ru').format(date);
-    }
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 16),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant, fontWeight: FontWeight.w500),
+
+      padding: const EdgeInsets.all(8),
+
+      color: Colors.grey.shade200,
+
+      child: Row(
+
+        children: [
+
+          const Icon(Icons.reply),
+
+          const SizedBox(width: 8),
+
+          Expanded(
+            child: Text(
+              message.content,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: onCancel,
+          )
+        ],
       ),
     );
   }
 }
 
 class _ChatBubble extends StatelessWidget {
+
   final MessageModel message;
   final bool isMe;
   final String senderName;
-  final String initials;
 
   const _ChatBubble({
     required this.message,
     required this.isMe,
     required this.senderName,
-    required this.initials,
   });
 
   Future<void> _openFile(String url) async {
+
     final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
+
+    if(await canLaunchUrl(uri)){
+      await launchUrl(uri,
+          mode: LaunchMode.externalApplication);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final time = DateFormat('HH:mm').format(message.createdAt);
-    final colorScheme = Theme.of(context).colorScheme;
+
+    final color =
+    isMe ? Colors.blue : Colors.grey.shade200;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(vertical: 4),
+
       child: Row(
-        mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
+
+        mainAxisAlignment:
+        isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+
         children: [
-          if (!isMe) ...[
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: colorScheme.primaryContainer,
-              child: Text(
-                initials,
-                style: TextStyle(fontSize: 12, color: colorScheme.onPrimaryContainer, fontWeight: FontWeight.bold),
-              ),
-            ),
-            const SizedBox(width: 8),
-          ],
 
           Flexible(
             child: Container(
-              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+
+              padding: const EdgeInsets.all(10),
+
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(12),
+              ),
+
               child: Column(
-                crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+
                 children: [
+
                   if (!isMe)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 12, bottom: 2),
-                      child: Text(
-                        senderName,
-                        style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold),
+                    Text(
+                      senderName,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
 
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: isMe ? colorScheme.primary : colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(18),
-                        topRight: const Radius.circular(18),
-                        bottomLeft: isMe ? const Radius.circular(18) : const Radius.circular(4),
-                        bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(18),
+                  const SizedBox(height: 4),
+
+                  if(message.isDeleted)
+
+                    const Text(
+                      "Message deleted",
+                      style: TextStyle(
+                        fontStyle: FontStyle.italic,
+                        color: Colors.grey,
                       ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _buildContent(context, isMe),
-                        const SizedBox(height: 4),
-                        Row(
+                    )
+
+                  else if(message.type == MessageType.image)
+
+                    GestureDetector(
+                      onTap: ()=>_openFile(message.content),
+                      child: Image.network(
+                        message.content,
+                        height:150,
+                        fit: BoxFit.cover,
+                      ),
+                    )
+
+                  else if(message.type == MessageType.file)
+
+                      GestureDetector(
+                        onTap: ()=>_openFile(message.content),
+                        child: Row(
                           mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              time,
-                              style: TextStyle(
-                                color: isMe ? colorScheme.onPrimary.withValues(alpha: 0.7) : colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                                fontSize: 10,
-                              ),
-                            ),
-                            if (isMe) ...[
-                              const SizedBox(width: 4),
-                              Icon(
-                                message.isRead ? Icons.done_all : Icons.check,
-                                size: 14,
-                                color: message.isRead
-                                    ? colorScheme.onPrimary
-                                    : colorScheme.onPrimary.withValues(alpha: 0.5),
-                              ),
-                            ],
+                          children: const [
+                            Icon(Icons.insert_drive_file),
+                            SizedBox(width:6),
+                            Text("Open file")
                           ],
                         ),
-                      ],
+                      )
+
+                    else
+
+                      Text(message.content),
+
+                  if (message.isEdited)
+                    const Text(
+                      "(edited)",
+                      style: TextStyle(fontSize: 10),
                     ),
-                  ),
+
+                  if(isMe)
+                    Icon(
+                      message.isRead
+                          ? Icons.done_all
+                          : Icons.done,
+                      size: 14,
+                      color: message.isRead
+                          ? Colors.lightBlue
+                          : Colors.grey,
+                    ),
                 ],
               ),
             ),
@@ -417,68 +574,5 @@ class _ChatBubble extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  Widget _buildContent(BuildContext context, bool isMe) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final textColor = isMe ? colorScheme.onPrimary : colorScheme.onSurface;
-
-    if (message.type == MessageType.image) {
-      return GestureDetector(
-        onTap: () => _openFile(message.content),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Image.network(
-            message.content,
-            fit: BoxFit.cover,
-            height: 150,
-            width: 200,
-            loadingBuilder: (context, child, loadingProgress) {
-              if (loadingProgress == null) return child;
-              return Container(
-                height: 150,
-                width: 200,
-                color: Colors.black12,
-                child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              );
-            },
-            errorBuilder: (_,__,___) => Icon(Icons.broken_image, color: textColor),
-          ),
-        ),
-      );
-    } else if (message.type == MessageType.file) {
-      final fileName = Uri.decodeFull(message.content.split('/').last.split('?').first);
-      return GestureDetector(
-        onTap: () => _openFile(message.content),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.insert_drive_file, color: textColor),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                fileName,
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 14,
-                  decoration: TextDecoration.underline,
-                  decorationColor: textColor,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      );
-    } else {
-      return Text(
-        message.content,
-        style: TextStyle(
-          color: textColor,
-          fontSize: 15,
-        ),
-      );
-    }
   }
 }

@@ -1,91 +1,220 @@
 {
-  "my_projects": "Мои проекты",
-  "no_notifications": "Нет новых уведомлений",
-  "sort_deadline_asc": "По дедлайну ↑",
-  "sort_deadline_desc": "По дедлайну ↓",
-  "sort_status": "По статусу",
-  "filter_all": "Все статусы",
-  "filter_in_progress": "Только \"В работе\"",
-  "create_project": "Создать проект",
-  "refresh_projects": "Обновить проекты",
-  "logout": "Выйти",
-  "choose_language": "Выберите язык",
-  "profile": "Профиль",
-  "not_implemented": "Редактирование профиля пока не реализовано.",
-  "ok": "ОК",
-  "guest": "Гость",
-  "user_guest": "Гость",
-  "guest_email": "Войдите, чтобы увидеть детали",
-  "edit_profile_hint": "Нажмите, чтобы изменить профиль",
-  "dark_theme": "Темная тема",
-  "light_theme": "Светлая тема",
-  "generate_report": "Сформировать отчет",
-  "report_functionality_not_impl": "Функция отчетов будет реализована",
-  "login": "Войти",
-  "settings": "Настройки",
-  "language": "Язык",
-  "management": "Управление",
-  "calendar": "Календарь",
-  "reports": "Отчеты",
-  "about_app": "О приложении",
-  "email_not_provided": "Email не указан",
-  "logout_title": "Выход",
-  "logout_confirmation": "Вы уверены, что хотите выйти из аккаунта?",
-  "cancel": "Отмена",
-  "app_description": "Приложение для управления учебными проектами. Планируйте, выполняйте и отслеживайте прогресс вместе с командой.",
-  "copyright": "© 2025 Taskio Team",
-  "new_project": "Новый проект",
-  "new_project_placeholder": "Новый проект",
-  "name": "Имя",
-  "login_welcome": "С возвращением",
-  "login_subtitle": "Войдите, чтобы продолжить работу с проектами",
-  "register_title": "Создать аккаунт",
-  "register_subtitle": "Присоединяйтесь к сообществу и начните совместную работу",
-  "email_label": "Email",
-  "password_label": "Пароль",
-  "confirm_password_label": "Подтвердите пароль",
-  "no_account": "Нет аккаунта?",
-  "have_account": "Уже есть аккаунт?",
-  "sign_up": "Регистрация",
-  "sign_in": "Войти",
-  "forgot_password": "Забыли пароль?",
-  "error_empty_field": "Это поле не может быть пустым",
-  "error_invalid_email": "Введите корректный email",
-  "error_short_password": "Пароль должен быть не менее 6 символов",
-  "error_password_match": "Пароли не совпадают",
-  "project_name": "Название проекта",
-  "project_description": "Описание",
-  "deadline": "Срок выполнения",
-  "select_date": "Выберите дату",
-  "status_todo": "К выполнению",
-  "status_in_progress": "В работе",
-  "status_done": "Готово",
-  "save": "Сохранить",
-  "edit": "Редактировать",
-  "delete": "Удалить",
-  "delete_confirm": "Вы уверены, что хотите удалить этот проект?",
-  "tasks": "Задачи",
-  "add_task": "Добавить задачу",
-  "task_hint": "Новая задача...",
-  "chat_hint": "Введите сообщение...",
-  "chat_title": "Чат проекта",
-  "members": "Участники",
-  "add_member": "Добавить участника",
-  "role_admin": "Админ",
-  "role_editor": "Редактор",
-  "role_viewer": "Зритель",
-  "error_loading": "Ошибка загрузки данных",
-  "no_tasks": "Задач пока нет",
-  "swipe_to_delete": "Смахните влево для удаления",
-  "error_fetch_failed": "Не удалось загрузить проекты",
-  "error_operation_failed": "Ошибка при выполнении операции",
-  "guest_cannot_create_project": "Гости не могут создавать проекты",
-  "notif_project_created_title": "Проект создан",
-  "notif_project_created_body": "Проект \"{}\" успешно создан",
-  "notif_project_updated_title": "Обновлено",
-  "notif_project_updated_body": "Изменения сохранены",
-  "notif_project_deleted_title": "Удалено",
-  "notif_project_deleted_body": "Проект \"{}\" удален",
-  "notif_file_uploaded_title": "Файл загружен",
-  "operation_denied_guest": "Доступ запрещен для гостей"
+  "common": {
+    "ok": "ОК",
+    "cancel": "Отмена",
+    "save": "Сохранить",
+    "edit": "Редактировать",
+    "delete": "Удалить",
+    "open": "Открыть",
+    "add": "Добавить",
+    "done": "Готово",
+    "updated": "Обновлено",
+    "loading": "Загрузка...",
+    "error_loading": "Ошибка загрузки данных",
+    "error_operation_failed": "Ошибка при выполнении операции"
+  },
+
+  "app": {
+    "about": "О приложении",
+    "description": "Приложение для управления учебными проектами. Планируйте, выполняйте и отслеживайте прогресс вместе с командой.",
+    "copyright": "© 2026 Taskio"
+  },
+
+  "navigation": {
+    "my_projects": "Мои проекты",
+    "calendar": "Календарь",
+    "reports": "Отчёты",
+    "settings": "Настройки",
+    "management": "Управление",
+    "profile": "Профиль"
+  },
+
+  "auth": {
+    "login": "Вход",
+    "login_success": "Успешный вход",
+    "login_welcome": "С возвращением",
+    "login_subtitle": "Войдите, чтобы продолжить работу",
+    "register_title": "Регистрация",
+    "register_subtitle": "Создайте аккаунт для совместной работы",
+    "email_label": "Email",
+    "email_hint": "Введите email",
+    "password_label": "Пароль",
+    "password_hint": "Введите пароль",
+    "confirm_password_label": "Подтвердите пароль",
+    "full_name": "Имя",
+    "select_role": "Выберите роль",
+    "no_account": "Нет аккаунта?",
+    "have_account": "Уже есть аккаунт?",
+    "sign_up": "Зарегистрироваться",
+    "sign_in": "Войти",
+    "sign_in_guest": "Войти как гость",
+    "guest_login_success": "Вы вошли как гость",
+    "register_success": "Регистрация прошла успешно",
+    "forgot_password": "Забыли пароль?",
+    "logout": "Выйти",
+    "logout_title": "Выход",
+    "logout_confirmation": "Вы уверены, что хотите выйти?",
+    "logout_success": "Вы успешно вышли",
+    "email_not_provided": "Email не указан",
+    "guest_login": "Вы вошли как гость"
+  },
+
+  "validation": {
+    "empty_field": "Поле не может быть пустым",
+    "invalid_email": "Введите корректный email",
+    "short_password": "Минимум 6 символов",
+    "password_match": "Пароли не совпадают",
+    "empty_email": "Введите email",
+    "empty_password": "Введите пароль",
+    "empty_name": "Введите имя",
+    "enter_project_name": "Введите название проекта"
+  },
+
+  "roles": {
+    "student": "Студент",
+    "teacher": "Учитель",
+    "leader": "Тимлид"
+  },
+
+  "projects": {
+    "create": "Создать проект",
+    "new_project": "Новый проект",
+    "project": "Проект",
+    "name": "Название",
+    "name_hint": "Например: Реферат по истории",
+    "description": "Описание",
+    "deadline": "Срок",
+    "status": "Статус",
+    "grade": "Оценка",
+    "color": "Цвет проекта",
+    "no_projects": "Нет проектов",
+    "login_to_view": "Войдите, чтобы увидеть проекты",
+    "refresh": "Обновить",
+    "delete_confirm": "Удалить этот проект?",
+    "created_success": "Проект создан",
+    "updated_success": "Проект обновлён",
+    "deleted_success": "Проект удалён",
+    "save_before_attachments": "Сначала сохраните проект",
+    "guest_cannot_create": "Гости не могут создавать проекты",
+    "operation_denied_guest": "Доступ запрещён для гостей"
+  },
+
+  "project": {
+    "open": "Открыть",
+    "deadline": "Срок",
+    "status": "Статус",
+    "participants": "Участники",
+    "select_participants": "Выберите участников",
+    "owner": "Владелец"
+  },
+
+  "tasks": {
+    "title": "Задачи",
+    "hint": "Новая задача...",
+    "empty": "Список задач пуст",
+    "load_error": "Ошибка загрузки задач",
+    "delete_title": "Удалить задачу?",
+    "delete_confirm": "Вы уверены, что хотите удалить задачу?",
+    "empty_title": "Введите название задачи",
+    "swipe_to_delete": "Свайп для удаления",
+    "no_tasks": "Нет задач"
+  },
+
+  "attachments": {
+    "title": "Вложения",
+    "empty": "Нет вложений",
+    "file_added": "Файл добавлен",
+    "delete_success": "Файл удалён",
+    "upload_error": "Ошибка загрузки",
+    "delete_error": "Ошибка удаления",
+    "no_permission_delete": "Нет прав для удаления"
+  },
+
+  "status": {
+    "planned": "Запланирован",
+    "in_progress": "В работе",
+    "completed": "Завершён",
+    "archived": "Архив"
+  },
+
+  "sorting": {
+    "deadline_asc": "По дедлайну ↑",
+    "deadline_desc": "По дедлайну ↓",
+    "status": "По статусу",
+    "title": "По названию"
+  },
+
+  "filter": {
+    "all": "Все статусы",
+    "in_progress": "Только \"В работе\"",
+    "completed": "Только \"Завершённые\""
+  },
+
+  "notifications": {
+    "no_notifications": "Нет новых уведомлений",
+    "project_created_title": "Проект создан",
+    "project_created_body": "Проект \"{project}\" создан",
+    "project_updated_title": "Проект обновлён",
+    "project_updated_body": "Изменения сохранены",
+    "project_deleted_title": "Проект удалён",
+    "project_deleted_body": "Проект \"{project}\" удалён",
+    "file_uploaded_title": "Файл загружен"
+  },
+
+  "profile": {
+    "choose_language": "Выберите язык",
+    "language_changed": "Язык успешно изменён",
+    "dark_theme": "Тёмная тема",
+    "light_theme": "Светлая тема",
+    "guest": "Гость",
+    "guest_email": "Войдите для доступа к профилю",
+    "load_error": "Ошибка загрузки профиля",
+    "no_changes": "Нет изменений",
+    "updated_success": "Профиль обновлён",
+    "statistics": "Статистика",
+    "total": "Всего",
+    "in_progress": "В работе",
+    "completed": "Завершено",
+    "full_name": "Имя",
+    "role": "Роль",
+    "save_changes": "Сохранить изменения",
+    "tasks_summary": "Статистика задач"
+  },
+
+  "reports": {
+    "generate": "Сформировать отчёт",
+    "not_implemented": "Функция будет реализована позже",
+    "title": "Отчёт по проектам",
+    "generated_at": "Дата формирования",
+    "total_projects": "Всего проектов"
+  },
+
+  "errors": {
+    "fetch_failed": "Не удалось загрузить данные",
+    "invalid_credentials": "Неверный email или пароль",
+    "email_not_confirmed": "Подтвердите email перед входом",
+    "user_exists": "Пользователь уже зарегистрирован",
+    "network": "Проблема с интернетом",
+    "timeout": "Время ожидания истекло",
+    "unknown": "Произошла ошибка",
+    "empty_credentials": "Введите email и пароль"
+  },
+
+  "chat": {
+    "translate": "Перевести",
+    "send_error": "Ошибка отправки",
+    "file_send_error": "Ошибка отправки файла",
+    "title": "Чат",
+    "no_messages": "Сообщений пока нет",
+    "hint": "Ввведите сообщение",
+    "you": "Вы"
+  },
+
+  "members": {
+    "title": "Участники"
+  },
+
+  "language": {
+    "changed": "Язык успешно изменен"
+  }
 }
