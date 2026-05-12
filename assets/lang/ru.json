@@ -1,0 +1,319 @@
+{
+  "common": {
+    "ok": "ОК",
+    "cancel": "Отмена",
+    "save": "Сохранить",
+    "edit": "Редактировать",
+    "delete": "Удалить",
+    "open": "Открыть",
+    "add": "Добавить",
+    "done": "Готово",
+    "updated": "Обновлено",
+    "loading": "Загрузка...",
+    "error_loading": "Ошибка загрузки данных",
+    "error_operation_failed": "Ошибка при выполнении операции",
+    "not_specified": "Не указано",
+    "reset": "Сбросить",
+    "refresh": "Обновить",
+    "share": "Поделиться",
+    "print": "Печать"
+  },
+
+  "snackbar": {
+    "success": "Успех",
+    "error": "Ошибка",
+    "warning": "Предупреждение"
+  },
+
+  "app": {
+    "about": "О приложении",
+    "description": "Приложение для управления учебными проектами. Планируйте, выполняйте и отслеживайте прогресс вместе с командой.",
+    "copyright": "© 2026 Taskio"
+  },
+
+  "navigation": {
+    "my_projects": "Мои проекты",
+    "calendar": "Календарь",
+    "reports": "Отчёты",
+    "settings": "Настройки",
+    "management": "Управление",
+    "profile": "Профиль"
+  },
+
+  "auth": {
+    "login": "Вход",
+    "login_success": "Успешный вход",
+    "login_welcome": "С возвращением",
+    "login_subtitle": "Войдите, чтобы продолжить работу",
+    "register_title": "Регистрация",
+    "register_subtitle": "Создайте аккаунт для совместной работы",
+    "email_label": "Email",
+    "email_hint": "Введите email",
+    "password_label": "Пароль",
+    "password_hint": "Введите пароль",
+    "confirm_password_label": "Подтвердите пароль",
+    "full_name": "Имя",
+    "select_role": "Выберите роль",
+    "no_account": "Нет аккаунта?",
+    "have_account": "Уже есть аккаунт?",
+    "sign_up": "Зарегистрироваться",
+    "sign_in": "Войти",
+    "sign_in_guest": "Войти как гость",
+    "guest_login_success": "Вы вошли как гость",
+    "register_success": "Регистрация прошла успешно",
+    "forgot_password": "Забыли пароль?",
+    "logout": "Выйти",
+    "logout_title": "Выход",
+    "logout_confirmation": "Вы уверены, что хотите выйти?",
+    "logout_success": "Вы успешно вышли",
+    "email_not_provided": "Email не указан",
+    "guest_login": "Вы вошли как гость"
+  },
+
+  "validation": {
+    "empty_field": "Поле не может быть пустым",
+    "invalid_email": "Введите корректный email",
+    "short_password": "Минимум 6 символов",
+    "password_match": "Пароли не совпадают",
+    "empty_email": "Введите email",
+    "empty_password": "Введите пароль",
+    "empty_name": "Введите имя",
+    "enter_project_name": "Введите название проекта"
+  },
+
+  "roles": {
+    "student": "Студент",
+    "teacher": "Учитель",
+    "leader": "Тимлид"
+  },
+
+  "projects": {
+    "create": "Создать проект",
+    "new_project": "Новый проект",
+    "project": "Проект",
+    "name": "Название",
+    "name_hint": "Например: Реферат по истории",
+    "description": "Описание",
+    "deadline": "Срок",
+    "status": "Статус",
+    "grade": "Оценка",
+    "color": "Цвет проекта",
+    "no_projects": "Нет проектов",
+    "login_to_view": "Войдите, чтобы увидеть проекты",
+    "refresh": "Обновить",
+    "delete_confirm": "Удалить этот проект?",
+    "created_success": "Проект создан",
+    "updated_success": "Проект обновлён",
+    "deleted_success": "Проект удалён",
+    "save_before_attachments": "Сначала сохраните проект",
+    "guest_cannot_create": "Гости не могут создавать проекты",
+    "operation_denied_guest": "Доступ запрещён для гостей",
+    "search": "Поиск проектов",
+    "empty": "Нет проектов",
+    "completed": "Завершён"
+  },
+
+  "project": {
+    "open": "Открыть",
+    "deadline": "Срок",
+    "status": "Статус",
+    "participants": "Участники",
+    "select_participants": "Выберите участников",
+    "owner": "Владелец"
+  },
+
+  "tasks": {
+    "title": "Задачи",
+    "hint": "Новая задача...",
+    "empty": "Список задач пуст",
+    "load_error": "Ошибка загрузки задач",
+    "delete_title": "Удалить задачу?",
+    "delete_confirm": "Вы уверены, что хотите удалить задачу?",
+    "empty_title": "Введите название задачи",
+    "swipe_to_delete": "Свайп для удаления",
+    "no_tasks": "Нет задач",
+    "completed": "Проект {title} завершён",
+    "added": "Задача добавлена",
+    "updated": "Обновлено",
+    "deleted": "Задача удалена"
+  },
+
+  "attachments": {
+    "title": "Вложения",
+    "empty": "Нет вложений",
+    "file_added": "Файл добавлен",
+    "delete_success": "Файл удалён",
+    "upload_error": "Ошибка загрузки",
+    "delete_error": "Ошибка удаления",
+    "no_permission_delete": "Нет прав для удаления"
+  },
+
+  "status": {
+    "planned": "Запланирован",
+    "in_progress": "В работе",
+    "completed": "Завершён",
+    "archived": "Архив"
+  },
+
+  "sorting": {
+    "nearest": "Ближайшие",
+    "farthest": "Дальние",
+    "by_title": "По названию",
+    "by_status": "По статусу",
+    "title": "Сортировка"
+  },
+
+  "filter": {
+    "title": "Фильтры",
+    "all": "Все статусы",
+    "in_progress": "Только \"В работе\"",
+    "completed": "Только \"Завершённые\""
+  },
+
+  "search": {
+    "hint": "Поиск..."
+  },
+
+  "deadline_filter": {
+    "today": "Сегодня",
+    "week": "Неделя",
+    "overdue": "Просрочено",
+    "all": "Все"
+  },
+
+  "notifications": {
+    "no_notifications": "Нет новых уведомлений",
+    "project_created_title": "Проект создан",
+    "project_created_body": "Проект \"{project}\" создан",
+    "project_updated_title": "Проект обновлён",
+    "project_updated_body": "Изменения сохранены",
+    "project_deleted_title": "Проект удалён",
+    "project_deleted_body": "Проект \"{project}\" удалён",
+    "file_uploaded_title": "Файл загружен",
+    "deadline_title": "Скоро дедлайн",
+    "deadline_body": "Проект заканчивается:"
+  },
+
+  "profile": {
+    "choose_language": "Выберите язык",
+    "language_changed": "Язык успешно изменён",
+    "dark_theme": "Тёмная тема",
+    "light_theme": "Светлая тема",
+    "guest": "Гость",
+    "guest_email": "Войдите для доступа к профилю",
+    "load_error": "Ошибка загрузки профиля",
+    "no_changes": "Нет изменений",
+    "updated_success": "Профиль обновлён",
+    "statistics": "Статистика",
+    "total": "Всего",
+    "in_progress": "В работе",
+    "completed": "Завершено",
+    "full_name": "Имя",
+    "first_name": "Имя",
+    "last_name": "Фамилия",
+    "username": "Имя пользователя",
+    "bio": "О себе",
+    "role": "Роль",
+    "save_changes": "Сохранить изменения",
+    "tasks_summary": "Статистика задач"
+  },
+
+  "reports": {
+    "generate": "Сформировать отчёт",
+    "not_implemented": "Функция будет реализована позже",
+    "title": "Отчёты",
+    "generated_at": "Дата формирования",
+    "total_projects": "Всего проектов"
+  },
+
+  "report": {
+    "generated": "Отчёт создан",
+    "saved": "Файл сохранён",
+    "title": "Отчёт по проектам",
+    "statistics": "Статистика",
+    "progress": "Прогресс",
+    "participants": "Аналитика по участникам",
+    "projects": "Проекты",
+    "tasks": "Задачи",
+    "tasks_completed": "Завершённые задачи",
+    "conclusion": "Вывод",
+    "total": "Всего",
+    "planned": "План",
+    "in_progress": "В работе",
+    "completed": "Готово",
+    "archived": "Архив",
+    "overdue": "Просрочено",
+    "project_name": "Название",
+    "deadline": "Срок",
+    "status": "Статус",
+    "grade": "Оценка",
+    "total_projects": "Всего проектов",
+    "completed_projects": "Завершено",
+    "overdue_projects": "Просрочено",
+    "total_progress": "Общий прогресс",
+    "no_preview": "Нет предпросмотра"
+  },
+
+  "errors": {
+    "fetch_failed": "Не удалось загрузить данные",
+    "invalid_credentials": "Неверный email или пароль",
+    "email_not_confirmed": "Подтвердите email перед входом",
+    "user_exists": "Пользователь уже зарегистрирован",
+    "network": "Проблема с интернетом",
+    "timeout": "Время ожидания истекло",
+    "unknown": "Произошла ошибка",
+    "empty_credentials": "Введите email и пароль",
+    "invalid_email": "Неверный email",
+    "weak_password": "Слишком слабый пароль",
+    "auth_failed": "Ошибка авторизации",
+    "duplicate": "Данные уже существуют",
+    "foreign_key": "Ошибка связанных данных",
+    "permission_denied": "Недостаточно прав",
+    "database": "Ошибка базы данных",
+    "file_not_found": "Файл не найден",
+    "storage": "Ошибка хранилища",
+    "file_web_not_supported": "Открытие файлов не поддерживается в Web версии",
+    "file_open_failed": "Не удалось открыть файл",
+    "no_permission": "Недостаточно прав",
+    "project_not_found": "Проект не найден",
+    "invalid_files": "Некорректные файлы",
+    "invalid_files_bytes": "Некорректные данные файлов",
+    "not_authenticated": "Пользователь не авторизован"
+  },
+
+  "chat": {
+    "translate": "Перевести",
+    "send_error": "Ошибка отправки",
+    "file_send_error": "Ошибка отправки файла",
+    "title": "Чат",
+    "no_messages": "Сообщений пока нет",
+    "hint": "Введите сообщение",
+    "you": "Вы",
+    "typing": "печатает...",
+    "reply": "Ответить",
+    "deleted": "Сообщение удалено",
+    "today": "Сегодня",
+    "edited": "изменено",
+    "photo": "Фотография",
+    "file": "Файл"
+  },
+
+  "members": {
+    "title": "Участники"
+  },
+
+  "language": {
+    "changed": "Язык успешно изменён"
+  },
+
+  "calendar": {
+    "select_date": "Выберите дату",
+    "no_projects": "Нет проектов"
+  },
+
+  "export": {
+    "title": "Экспорт",
+    "no_preview": "Нет предпросмотра",
+    "generate": "Сгенерировать"
+  }
+}

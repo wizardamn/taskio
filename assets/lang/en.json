@@ -1,0 +1,319 @@
+{
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancel",
+    "save": "Save",
+    "edit": "Edit",
+    "delete": "Delete",
+    "open": "Open",
+    "add": "Add",
+    "done": "Done",
+    "updated": "Updated",
+    "loading": "Loading...",
+    "error_loading": "Error loading data",
+    "error_operation_failed": "Operation failed",
+    "not_specified": "Not specified",
+    "reset": "Reset",
+    "refresh": "Refresh",
+    "share": "Share",
+    "print": "Print"
+  },
+
+  "snackbar": {
+    "success": "Success",
+    "error": "Error",
+    "warning": "Warning"
+  },
+
+  "app": {
+    "about": "About",
+    "description": "Project management app for students. Plan, execute and track progress together.",
+    "copyright": "© 2026 Taskio"
+  },
+
+  "navigation": {
+    "my_projects": "My Projects",
+    "calendar": "Calendar",
+    "reports": "Reports",
+    "settings": "Settings",
+    "management": "Management",
+    "profile": "Profile"
+  },
+
+  "auth": {
+    "login": "Login",
+    "login_success": "Login successful",
+    "login_welcome": "Welcome Back",
+    "login_subtitle": "Log in to continue",
+    "register_title": "Create Account",
+    "register_subtitle": "Join the community and collaborate",
+    "email_label": "Email",
+    "email_hint": "Enter email",
+    "password_label": "Password",
+    "password_hint": "Enter password",
+    "confirm_password_label": "Confirm Password",
+    "full_name": "Full Name",
+    "select_role": "Select role",
+    "no_account": "Don't have an account?",
+    "have_account": "Already have an account?",
+    "sign_up": "Sign Up",
+    "sign_in": "Sign In",
+    "sign_in_guest": "Sign in as Guest",
+    "guest_login_success": "Signed in as guest",
+    "register_success": "Registration successful",
+    "forgot_password": "Forgot password?",
+    "logout": "Logout",
+    "logout_title": "Logout",
+    "logout_confirmation": "Are you sure you want to log out?",
+    "logout_success": "Logged out successfully",
+    "email_not_provided": "Email not provided",
+    "guest_login": "Signed in as guest"
+  },
+
+  "validation": {
+    "empty_field": "This field cannot be empty",
+    "invalid_email": "Enter a valid email",
+    "short_password": "Password must be at least 6 characters",
+    "password_match": "Passwords do not match",
+    "empty_email": "Please enter email",
+    "empty_password": "Please enter password",
+    "empty_name": "Please enter your name",
+    "enter_project_name": "Please enter project name"
+  },
+
+  "roles": {
+    "student": "Student",
+    "teacher": "Teacher",
+    "leader": "Team Lead"
+  },
+
+  "projects": {
+    "create": "Create Project",
+    "new_project": "New Project",
+    "project": "Project",
+    "name": "Project Name",
+    "name_hint": "Example: History Essay",
+    "description": "Description",
+    "deadline": "Deadline",
+    "status": "Status",
+    "grade": "Grade",
+    "color": "Project Color",
+    "no_projects": "No projects",
+    "login_to_view": "Log in to view projects",
+    "refresh": "Refresh",
+    "delete_confirm": "Delete this project?",
+    "created_success": "Project created",
+    "updated_success": "Project updated",
+    "deleted_success": "Project deleted",
+    "save_before_attachments": "Save the project before adding attachments",
+    "guest_cannot_create": "Guests cannot create projects",
+    "operation_denied_guest": "Access denied for guests",
+    "search": "Project Search",
+    "empty": "No projects",
+    "completed": "Completed"
+  },
+
+  "project": {
+    "open": "Open",
+    "deadline": "Deadline",
+    "status": "Status",
+    "participants": "Participants",
+    "select_participants": "Select participants",
+    "owner": "Owner"
+  },
+
+  "tasks": {
+    "title": "Tasks",
+    "hint": "New task...",
+    "empty": "Task list is empty",
+    "load_error": "Failed to load tasks",
+    "delete_title": "Delete task?",
+    "delete_confirm": "Are you sure you want to delete this task?",
+    "empty_title": "Enter task title",
+    "swipe_to_delete": "Swipe to delete",
+    "no_tasks": "No tasks",
+    "completed": "Project {title} completed",
+    "added": "Task added",
+    "updated": "Updated",
+    "deleted": "Task deleted"
+  },
+
+  "attachments": {
+    "title": "Attachments",
+    "empty": "No attachments",
+    "file_added": "File added",
+    "delete_success": "File deleted",
+    "upload_error": "Upload error",
+    "delete_error": "Delete error",
+    "no_permission_delete": "No permission to delete attachments"
+  },
+
+  "status": {
+    "planned": "Planned",
+    "in_progress": "In Progress",
+    "completed": "Completed",
+    "archived": "Archived"
+  },
+
+  "sorting": {
+    "nearest": "Nearest",
+    "farthest": "Farthest",
+    "by_title": "By Title",
+    "by_status": "By Status",
+    "title": "Sorting"
+  },
+
+  "filter": {
+    "title": "Filters",
+    "all": "All Statuses",
+    "in_progress": "Only \"In Progress\"",
+    "completed": "Only \"Completed\""
+  },
+
+  "search": {
+    "hint": "Search..."
+  },
+
+  "deadline_filter": {
+    "today": "Today",
+    "week": "This Week",
+    "overdue": "Overdue",
+    "all": "All"
+  },
+
+  "notifications": {
+    "no_notifications": "No new notifications",
+    "project_created_title": "Project created",
+    "project_created_body": "Project \"{project}\" created",
+    "project_updated_title": "Project updated",
+    "project_updated_body": "Changes saved",
+    "project_deleted_title": "Project deleted",
+    "project_deleted_body": "Project \"{project}\" deleted",
+    "file_uploaded_title": "File uploaded",
+    "deadline_title": "Deadline soon",
+    "deadline_body": "Project is ending:"
+  },
+
+  "profile": {
+    "choose_language": "Choose Language",
+    "language_changed": "Language changed successfully",
+    "dark_theme": "Dark Theme",
+    "light_theme": "Light Theme",
+    "guest": "Guest",
+    "guest_email": "Sign in to access profile",
+    "load_error": "Profile loading error",
+    "no_changes": "No changes",
+    "updated_success": "Profile updated",
+    "statistics": "Statistics",
+    "total": "Total",
+    "in_progress": "In Progress",
+    "completed": "Completed",
+    "full_name": "Full Name",
+    "first_name": "First Name",
+    "last_name": "Last Name",
+    "username": "Username",
+    "bio": "Bio",
+    "role": "Role",
+    "save_changes": "Save Changes",
+    "tasks_summary": "Task Summary"
+  },
+
+  "reports": {
+    "generate": "Generate Report",
+    "not_implemented": "Feature will be implemented later",
+    "title": "Reports",
+    "generated_at": "Generated At",
+    "total_projects": "Total Projects"
+  },
+
+  "report": {
+    "generated": "Report generated",
+    "saved": "File saved",
+    "title": "Project Report",
+    "statistics": "Statistics",
+    "progress": "Progress",
+    "participants": "Participants Analytics",
+    "projects": "Projects",
+    "tasks": "Tasks",
+    "tasks_completed": "Completed Tasks",
+    "conclusion": "Conclusion",
+    "total": "Total",
+    "planned": "Planned",
+    "in_progress": "In Progress",
+    "completed": "Completed",
+    "archived": "Archived",
+    "overdue": "Overdue",
+    "project_name": "Project Name",
+    "deadline": "Deadline",
+    "status": "Status",
+    "grade": "Grade",
+    "total_projects": "Total Projects",
+    "completed_projects": "Completed",
+    "overdue_projects": "Overdue",
+    "total_progress": "Overall Progress",
+    "no_preview": "No Preview"
+  },
+
+  "errors": {
+    "fetch_failed": "Failed to load data",
+    "invalid_credentials": "Invalid email or password",
+    "email_not_confirmed": "Please confirm your email before signing in",
+    "user_exists": "User already exists",
+    "network": "Network connection problem",
+    "timeout": "Request timed out",
+    "unknown": "An error occurred",
+    "empty_credentials": "Enter your email and password",
+    "invalid_email": "Invalid email",
+    "weak_password": "Weak password",
+    "auth_failed": "Authorization error",
+    "duplicate": "Duplicate data",
+    "foreign_key": "Related data error",
+    "permission_denied": "Permission denied",
+    "database": "Database error",
+    "file_not_found": "File not found",
+    "storage": "Storage error",
+    "file_web_not_supported": "Opening files is not supported on Web",
+    "file_open_failed": "Failed to open file",
+    "no_permission": "Not enough permissions",
+    "project_not_found": "Project not found",
+    "invalid_files": "Invalid files",
+    "invalid_files_bytes": "Invalid file bytes",
+    "not_authenticated": "User not authenticated"
+  },
+
+  "chat": {
+    "translate": "Translate",
+    "send_error": "Send error",
+    "file_send_error": "File send error",
+    "title": "Chat",
+    "no_messages": "No messages yet",
+    "hint": "Enter message",
+    "you": "You",
+    "typing": "is typing...",
+    "reply": "Reply",
+    "deleted": "Message deleted",
+    "today": "Today",
+    "edited": "edited",
+    "photo": "Photo",
+    "file": "File"
+  },
+
+  "members": {
+    "title": "Members"
+  },
+
+  "language": {
+    "changed": "Language changed successfully"
+  },
+
+  "calendar": {
+    "select_date": "Select Date",
+    "no_projects": "No projects"
+  },
+
+  "export": {
+    "title": "Export",
+    "no_preview": "No Preview",
+    "generate": "Generate"
+  }
+}

@@ -1,0 +1,93 @@
+name: taskio
+description: Приложение для управления учебными проектами
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  flutter_localizations:
+    sdk: flutter
+
+  # Backend
+  supabase_flutter: ^2.12.4
+
+  # State management
+  provider: ^6.1.5
+
+  # UI
+  table_calendar: ^3.2.0
+  cupertino_icons: ^1.0.9
+  easy_localization: ^3.0.7
+  image_picker: ^1.1.2
+  file_picker: ^11.0.2
+  url_launcher: 6.3.2
+  flutter_animate: ^4.5.0
+  open_file: ^3.5.11
+  cached_network_image: ^3.3.1
+
+  # Notifications
+  flutter_local_notifications: ^21.0.0
+  timezone: ^0.11.0
+  flutter_timezone: ^5.0.2
+
+  firebase_core: ^4.7.0
+  firebase_messaging: ^16.2.0
+
+  flutter_app_badger_plus: ^1.0.1
+
+  shared_preferences: ^2.5.5
+  rxdart: ^0.28.0
+
+  # PDF generation
+  pdf: ^3.11.3
+  printing: ^5.14.3
+
+  # Utils
+  flutter_dotenv: ^6.0.1
+  uuid: ^4.5.3
+  intl: ^0.20.2
+
+  path_provider: ^2.1.5
+  collection: ^1.18.0
+
+  scrollable_positioned_list: ^0.3.8
+
+  path: ^1.9.0
+
+
+  # Info
+  package_info_plus: ^9.0.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+  flutter_launcher_icons: ^0.14.4
+  mocktail: ^1.0.5
+
+  integration_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/fonts/
+    - assets/lang/
+    - assets/images/
+    - assets/.env
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/taskio_icon.png"
+  min_sdk_android: 23
