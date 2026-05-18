@@ -2,7 +2,9 @@
   "common": {
     "ok": "ОК",
     "cancel": "Отмена",
+    "close": "Закрыть",
     "save": "Сохранить",
+    "saving": "Сохранение...",
     "edit": "Редактировать",
     "delete": "Удалить",
     "open": "Открыть",
@@ -16,7 +18,16 @@
     "reset": "Сбросить",
     "refresh": "Обновить",
     "share": "Поделиться",
-    "print": "Печать"
+    "print": "Печать",
+    "user": "Пользователь",
+    "yes": "Да",
+    "no": "Нет",
+    "search": "Поиск",
+    "clear": "Очистить",
+    "confirm": "Подтвердить",
+    "back": "Назад",
+    "next": "Далее",
+    "select_all": "Выбрать все"
   },
 
   "snackbar": {
@@ -78,13 +89,26 @@
     "empty_email": "Введите email",
     "empty_password": "Введите пароль",
     "empty_name": "Введите имя",
-    "enter_project_name": "Введите название проекта"
+    "enter_project_name": "Введите название проекта",
+    "short_username": "Имя пользователя должно быть минимум 3 символа",
+    "invalid_username": "Username может содержать только латинские буквы, цифры и подчёркивание",
+    "username_taken": "Это имя пользователя уже занято"
   },
 
   "roles": {
     "student": "Студент",
     "teacher": "Учитель",
-    "leader": "Тимлид"
+    "leader": "Тимлид",
+    "general": "Обычный пользователь",
+    "owner": "Владелец",
+    "editor": "Редактор",
+    "viewer": "Наблюдатель"
+  },
+
+  "project_roles": {
+    "owner": "Владелец",
+    "editor": "Редактор",
+    "viewer": "Наблюдатель"
   },
 
   "projects": {
@@ -98,6 +122,9 @@
     "status": "Статус",
     "grade": "Оценка",
     "color": "Цвет проекта",
+    "category": "Категория проекта",
+    "educational": "Учебный",
+    "creative": "Творческий",
     "no_projects": "Нет проектов",
     "login_to_view": "Войдите, чтобы увидеть проекты",
     "refresh": "Обновить",
@@ -110,7 +137,16 @@
     "operation_denied_guest": "Доступ запрещён для гостей",
     "search": "Поиск проектов",
     "empty": "Нет проектов",
-    "completed": "Завершён"
+    "completed": "Завершён",
+    "tasks_on_create": "Задачи проекта",
+    "add_task_before_save": "Добавить задачу перед сохранением",
+    "no_draft_tasks": "Задачи ещё не добавлены",
+    "grading_enabled": "Оценивание включено",
+    "grading_enabled_hint": "Для учебного проекта можно выставлять итоговую оценку",
+    "max_members": "Максимум участников",
+    "max_attachments": "Максимум вложений",
+    "max_members_error": "Превышен лимит участников",
+    "max_attachments_error": "Превышен лимит вложений"
   },
 
   "project": {
@@ -120,6 +156,11 @@
     "participants": "Участники",
     "select_participants": "Выберите участников",
     "owner": "Владелец"
+  },
+
+  "project_category": {
+    "educational": "Учебный проект",
+    "creative": "Творческий проект"
   },
 
   "tasks": {
@@ -135,7 +176,8 @@
     "completed": "Проект {title} завершён",
     "added": "Задача добавлена",
     "updated": "Обновлено",
-    "deleted": "Задача удалена"
+    "deleted": "Задача удалена",
+    "update_failed": "Не удалось обновить задачу"
   },
 
   "attachments": {
@@ -215,7 +257,10 @@
     "bio": "О себе",
     "role": "Роль",
     "save_changes": "Сохранить изменения",
-    "tasks_summary": "Статистика задач"
+    "tasks_summary": "Статистика задач",
+    "avatar_updated": "Аватар обновлён",
+    "change_avatar": "Сменить аватар",
+    "load_failed": "Не удалось загрузить профиль"
   },
 
   "reports": {
@@ -251,7 +296,29 @@
     "completed_projects": "Завершено",
     "overdue_projects": "Просрочено",
     "total_progress": "Общий прогресс",
-    "no_preview": "Нет предпросмотра"
+    "no_preview": "Нет предпросмотра",
+    "single_project_report": "Отчёт по одному проекту",
+    "selected_projects_report": "Отчёт по выбранным проектам",
+    "all_projects_report": "Отчёт по всем проектам",
+    "no_participants": "Участники не указаны"
+  },
+
+  "grades": {
+    "title": "Оценка проекта",
+    "grade": "Оценка",
+    "comment": "Комментарий к оценке",
+    "save": "Сохранить оценку",
+    "saved": "Оценка сохранена",
+    "select_grade": "Выберите оценку",
+    "not_graded": "Оценка ещё не выставлена",
+    "readonly": "Вы можете просматривать оценку, но не можете её изменять",
+    "graded_by": "Выставил",
+    "updated": "Обновлено",
+    "loading": "Загрузка оценки...",
+    "load_error": "Ошибка загрузки оценки",
+    "save_error": "Ошибка сохранения оценки",
+    "delete_error": "Ошибка удаления оценки",
+    "invalid_grade": "Оценка должна быть от 2 до 5"
   },
 
   "errors": {
@@ -283,6 +350,7 @@
 
   "chat": {
     "translate": "Перевести",
+    "translation": "Перевод",
     "send_error": "Ошибка отправки",
     "file_send_error": "Ошибка отправки файла",
     "title": "Чат",
@@ -291,15 +359,33 @@
     "you": "Вы",
     "typing": "печатает...",
     "reply": "Ответить",
+    "cancel_reply": "Отменить ответ",
     "deleted": "Сообщение удалено",
+    "message_deleted": "Сообщение удалено",
     "today": "Сегодня",
     "edited": "изменено",
     "photo": "Фотография",
-    "file": "Файл"
+    "file": "Файл",
+    "translate_error": "Ошибка перевода",
+    "show_original": "Показать оригинал",
+    "translated": "Переведено",
+    "message_too_long": "Сообщение слишком длинное"
   },
 
   "members": {
-    "title": "Участники"
+    "title": "Участники",
+    "no_participants": "Участники не выбраны",
+    "select": "Выбрать участников",
+    "search_hint": "Поиск по имени или username",
+    "empty": "Пользователи не найдены",
+    "role": "Роль участника"
+  },
+
+  "users": {
+    "no_name": "Без имени",
+    "username": "Имя пользователя",
+    "full_name": "Имя",
+    "search_hint": "Введите имя или username"
   },
 
   "language": {
@@ -314,6 +400,14 @@
   "export": {
     "title": "Экспорт",
     "no_preview": "Нет предпросмотра",
-    "generate": "Сгенерировать"
+    "generate": "Сгенерировать",
+    "report_type": "Тип отчёта",
+    "current_project": "Текущий проект",
+    "selected_projects": "Выбранные проекты",
+    "all_projects": "Все проекты",
+    "selected_count": "Выбрано проектов",
+    "generate_preview": "Сформировать предпросмотр",
+    "generate_preview_hint": "Выберите тип отчёта и сформируйте предпросмотр",
+    "no_projects_selected": "Выберите хотя бы один проект"
   }
 }

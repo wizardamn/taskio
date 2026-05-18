@@ -39,31 +39,35 @@ class MessageModel {
 
   final MessageType type;
 
-  /// comes from message_reads
+  /// Comes from message_reads.
   final bool isRead;
 
   final String? originalLanguage;
   final String? translatedContent;
 
-  /// reply
+  /// Reply data.
   final String? replyToMessageId;
   final String? replyPreview;
   final String? replySenderName;
+  final MessageType? replyType;
+  final String? replyFileName;
+  final String? replyPreviewUrl;
+  final String? replyMimeType;
 
-  /// ui
+  /// UI.
   final bool isHighlighted;
 
-  /// edit/delete
+  /// Edit/delete.
   final DateTime? editedAt;
   final bool isDeleted;
 
-  /// file meta
+  /// File meta.
   final String? fileName;
   final int? fileSize;
   final String? mimeType;
   final String? previewUrl;
 
-  /// delivery status
+  /// Delivery status.
   final MessageStatus status;
 
   const MessageModel({
@@ -80,6 +84,10 @@ class MessageModel {
     this.replyToMessageId,
     this.replyPreview,
     this.replySenderName,
+    this.replyType,
+    this.replyFileName,
+    this.replyPreviewUrl,
+    this.replyMimeType,
     this.isHighlighted = false,
     this.editedAt,
     this.isDeleted = false,
@@ -98,6 +106,19 @@ class MessageModel {
   bool get isFile => type == MessageType.file;
   bool get isText => type == MessageType.text;
   bool get isEdited => editedAt != null;
+
+  bool get hasReply => replyToMessageId != null;
+
+  bool get isReplyImage {
+    if (replyType == MessageType.image) {
+      return true;
+    }
+
+    final value = replyPreviewUrl ?? replyPreview ?? '';
+    return _looksLikeImageUrl(value);
+  }
+
+  bool get isReplyFile => replyType == MessageType.file;
 
   String get displayContent {
     if (isDeleted) {
@@ -125,20 +146,42 @@ class MessageModel {
             : 'chat.file'.tr();
 
       case MessageType.text:
-        return content.length > 40
-            ? '${content.substring(0, 40)}...'
-            : content;
+        return _shorten(content);
     }
   }
 
   String get replyText {
-    if (replyPreview == null || replyPreview!.isEmpty) {
+    if (replyType == MessageType.image) {
+      return 'chat.photo'.tr();
+    }
+
+    if (replyType == MessageType.file) {
+      if (replyFileName != null && replyFileName!.trim().isNotEmpty) {
+        return '📎 $replyFileName';
+      }
+
+      return 'chat.file'.tr();
+    }
+
+    final text = replyPreview?.trim() ?? '';
+
+    if (text.isEmpty) {
       return '';
     }
 
-    return replyPreview!.length > 40
-        ? '${replyPreview!.substring(0, 40)}...'
-        : replyPreview!;
+    return _shorten(text);
+  }
+
+  String get replyRawContent => replyPreview?.trim() ?? '';
+
+  String get replyImageUrl {
+    final url = replyPreviewUrl?.trim();
+
+    if (url != null && url.isNotEmpty) {
+      return url;
+    }
+
+    return replyPreview?.trim() ?? '';
   }
 
   String get replyDisplay {
@@ -164,55 +207,37 @@ class MessageModel {
         bool isRead = false,
       }) {
     final profile = _extractProfile(json);
+    final replyData = _extractReplyData(json);
 
     return MessageModel(
       id: json['id']?.toString() ?? '',
       projectId: json['project_id']?.toString() ?? '',
       senderId: json['sender_id']?.toString() ?? '',
-
       senderName: _extractSenderName(
         json,
         profile,
       ),
-
       content: json['content']?.toString() ?? '',
       createdAt: _parseDate(json['created_at']),
       type: _parseType(json['type']),
       isRead: isRead,
-
-      originalLanguage:
-      json['original_language']?.toString(),
-
-      translatedContent:
-      json['translated_content']?.toString(),
-
+      originalLanguage: json['original_language']?.toString(),
+      translatedContent: json['translated_content']?.toString(),
       editedAt: _parseDateNullable(
         json['edited_at'],
       ),
-
-      isDeleted:
-      json['is_deleted'] == true,
-
-      replyToMessageId:
-      json['reply_to_message_id']?.toString(),
-
-      replyPreview: _extractReplyPreview(json),
-
-      replySenderName:
-      _extractReplySender(json),
-
-      fileName:
-      json['file_name']?.toString(),
-
-      fileSize:
-      _parseInt(json['file_size']),
-
-      mimeType:
-      json['mime_type']?.toString(),
-
-      previewUrl:
-      json['preview_url']?.toString(),
-
+      isDeleted: json['is_deleted'] == true,
+      replyToMessageId: json['reply_to_message_id']?.toString(),
+      replyPreview: _extractReplyPreview(replyData),
+      replySenderName: _extractReplySender(replyData),
+      replyType: _extractReplyType(replyData),
+      replyFileName: _extractReplyFileName(replyData),
+      replyPreviewUrl: _extractReplyPreviewUrl(replyData),
+      replyMimeType: _extractReplyMimeType(replyData),
+      fileName: json['file_name']?.toString(),
+      fileSize: _parseInt(json['file_size']),
+      mimeType: json['mime_type']?.toString(),
+      previewUrl: json['preview_url']?.toString(),
       status: MessageStatusExtension.fromString(
         json['status']?.toString(),
       ),
@@ -257,6 +282,10 @@ class MessageModel {
     bool? isHighlighted,
     String? replyPreview,
     String? replySenderName,
+    MessageType? replyType,
+    String? replyFileName,
+    String? replyPreviewUrl,
+    String? replyMimeType,
   }) {
     return MessageModel(
       id: id,
@@ -268,14 +297,15 @@ class MessageModel {
       type: type,
       isRead: isRead ?? this.isRead,
       originalLanguage: originalLanguage,
-      translatedContent:
-      translatedContent ?? this.translatedContent,
+      translatedContent: translatedContent ?? this.translatedContent,
       replyToMessageId: replyToMessageId,
       replyPreview: replyPreview ?? this.replyPreview,
-      replySenderName:
-      replySenderName ?? this.replySenderName,
-      isHighlighted:
-      isHighlighted ?? this.isHighlighted,
+      replySenderName: replySenderName ?? this.replySenderName,
+      replyType: replyType ?? this.replyType,
+      replyFileName: replyFileName ?? this.replyFileName,
+      replyPreviewUrl: replyPreviewUrl ?? this.replyPreviewUrl,
+      replyMimeType: replyMimeType ?? this.replyMimeType,
+      isHighlighted: isHighlighted ?? this.isHighlighted,
       editedAt: editedAt ?? this.editedAt,
       isDeleted: isDeleted ?? this.isDeleted,
       fileName: fileName,
@@ -300,43 +330,51 @@ class MessageModel {
         'Unknown';
   }
 
-  static String? _extractReplyPreview(
+  static Map<String, dynamic>? _extractReplyData(
       Map<String, dynamic> json,
       ) {
     final reply = json['reply'];
 
     if (reply is Map<String, dynamic>) {
-      return reply['content']?.toString();
+      return reply;
     }
 
     if (reply is List && reply.isNotEmpty) {
       final first = reply.first;
 
       if (first is Map<String, dynamic>) {
-        return first['content']?.toString();
+        return first;
       }
     }
 
     return null;
   }
 
-  static String? _extractReplySender(
-      Map<String, dynamic> json,
+  static String? _extractReplyPreview(
+      Map<String, dynamic>? replyData,
       ) {
-    final reply = json['reply'];
-
-    Map<String, dynamic>? replyData;
-
-    if (reply is Map<String, dynamic>) {
-      replyData = reply;
-    } else if (reply is List && reply.isNotEmpty) {
-      final first = reply.first;
-
-      if (first is Map<String, dynamic>) {
-        replyData = first;
-      }
+    if (replyData == null) {
+      return null;
     }
 
+    final type = _parseType(replyData['type']);
+
+    if (type == MessageType.image) {
+      return replyData['preview_url']?.toString() ??
+          replyData['content']?.toString();
+    }
+
+    if (type == MessageType.file) {
+      return replyData['file_name']?.toString() ??
+          replyData['content']?.toString();
+    }
+
+    return replyData['content']?.toString();
+  }
+
+  static String? _extractReplySender(
+      Map<String, dynamic>? replyData,
+      ) {
     if (replyData == null) {
       return null;
     }
@@ -358,6 +396,47 @@ class MessageModel {
     }
 
     return null;
+  }
+
+  static MessageType? _extractReplyType(
+      Map<String, dynamic>? replyData,
+      ) {
+    if (replyData == null) {
+      return null;
+    }
+
+    return _parseType(replyData['type']);
+  }
+
+  static String? _extractReplyFileName(
+      Map<String, dynamic>? replyData,
+      ) {
+    if (replyData == null) {
+      return null;
+    }
+
+    return replyData['file_name']?.toString();
+  }
+
+  static String? _extractReplyPreviewUrl(
+      Map<String, dynamic>? replyData,
+      ) {
+    if (replyData == null) {
+      return null;
+    }
+
+    return replyData['preview_url']?.toString() ??
+        replyData['content']?.toString();
+  }
+
+  static String? _extractReplyMimeType(
+      Map<String, dynamic>? replyData,
+      ) {
+    if (replyData == null) {
+      return null;
+    }
+
+    return replyData['mime_type']?.toString();
   }
 
   static Map<String, dynamic>? _extractProfile(
@@ -433,8 +512,36 @@ class MessageModel {
         return MessageType.image;
       case 'file':
         return MessageType.file;
+      case 'text':
       default:
         return MessageType.text;
     }
+  }
+
+  static String _shorten(String value) {
+    final text = value.trim();
+
+    if (text.length <= 40) {
+      return text;
+    }
+
+    return '${text.substring(0, 40)}...';
+  }
+
+  static bool _looksLikeImageUrl(String value) {
+    final lower = value.toLowerCase();
+
+    if (lower.isEmpty) {
+      return false;
+    }
+
+    return lower.startsWith('http') &&
+        (lower.contains('.jpg') ||
+            lower.contains('.jpeg') ||
+            lower.contains('.png') ||
+            lower.contains('.gif') ||
+            lower.contains('.webp') ||
+            lower.contains('/storage/') ||
+            lower.contains('supabase'));
   }
 }

@@ -4,7 +4,6 @@ import 'package:easy_localization/easy_localization.dart';
 
 import '../../models/message_model.dart';
 import '../../providers/chat_provider.dart';
-import '../../services/chat_service.dart';
 import '../../services/ai_service.dart';
 import '../../utils/snackbar_manager.dart';
 
@@ -20,12 +19,10 @@ class ChatBubble extends StatelessWidget {
   final AIService aiService;
   final Function(String)? onScrollTo;
 
-  final ChatService _chatService = ChatService();
-
   static const double _maxBubbleWidthFactor = 0.75;
   static const double _swipeTrigger = 60;
 
-  ChatBubble({
+  const ChatBubble({
     super.key,
     required this.message,
     required this.isMe,
@@ -36,25 +33,31 @@ class ChatBubble extends StatelessWidget {
     this.isHighlighted = false,
   });
 
-  void _openImage(BuildContext context, String url) {
+  // =========================================================
+  // IMAGE VIEWER
+  // =========================================================
+
+  void _openImage(
+      BuildContext context,
+      String url,
+      ) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => _ImageViewer(url: url),
+        builder: (_) => _ImageViewer(
+          url: url,
+        ),
       ),
     );
   }
 
-  bool _isReplyImage(String? preview) {
-    if (preview == null || preview.isEmpty) {
-      return false;
-    }
+  // =========================================================
+  // TRANSLATE
+  // =========================================================
 
-    return preview.startsWith('http://') ||
-        preview.startsWith('https://');
-  }
-
-  Future<void> _translate(BuildContext context) async {
+  Future<void> _translate(
+      BuildContext context,
+      ) async {
     if (!message.isText ||
         message.isDeleted ||
         message.content.trim().isEmpty) {
@@ -62,17 +65,58 @@ class ChatBubble extends StatelessWidget {
     }
 
     try {
-      final lang =
-      await aiService.detectLanguage(message.content);
+      final currentLang =
+          context.locale.languageCode;
 
-      final translated = await aiService.translate(
-        text: message.content,
-        targetLanguage: lang == 'ru' ? 'en' : 'ru',
+      final detectedLang =
+      await aiService.detectLanguage(
+        message.content,
       );
 
-      if (context.mounted) {
-        SnackbarManager.showSuccess(translated);
+      final sourceLang =
+      detectedLang == 'unknown'
+          ? 'auto'
+          : detectedLang;
+
+      final targetLang =
+      detectedLang == currentLang
+          ? currentLang == 'ru'
+          ? 'en'
+          : 'ru'
+          : currentLang;
+
+      final translated =
+      await aiService.translate(
+        text: message.content,
+        sourceLanguage: sourceLang,
+        targetLanguage: targetLang,
+      );
+
+      if (!context.mounted) {
+        return;
       }
+
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text(
+            'chat.translate'.tr(),
+          ),
+          content: SelectableText(
+            translated,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: Text(
+                'common.ok'.tr(),
+              ),
+            ),
+          ],
+        ),
+      );
     } catch (_) {
       if (context.mounted) {
         SnackbarManager.showError(
@@ -82,47 +126,71 @@ class ChatBubble extends StatelessWidget {
     }
   }
 
-  Future<void> _editMessage(BuildContext context) async {
-    final controller = TextEditingController(
+  // =========================================================
+  // EDIT
+  // =========================================================
+
+  Future<void> _editMessage(
+      BuildContext context,
+      ) async {
+    final provider =
+    context.read<ChatProvider>();
+
+    final controller =
+    TextEditingController(
       text: message.content,
     );
 
     try {
-      final newText = await showDialog<String>(
+      final newText =
+      await showDialog<String>(
         context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: Text('common.edit'.tr()),
-          content: TextField(
-            controller: controller,
-            maxLines: null,
-            autofocus: true,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () =>
-                  Navigator.pop(dialogContext),
-              child: Text('common.cancel'.tr()),
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: Text(
+              'common.edit'.tr(),
             ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(
-                  dialogContext,
-                  controller.text,
-                );
-              },
-              child: Text('common.save'.tr()),
+            content: TextField(
+              controller: controller,
+              maxLines: null,
+              autofocus: true,
             ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(
+                    dialogContext,
+                  );
+                },
+                child: Text(
+                  'common.cancel'.tr(),
+                ),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(
+                    dialogContext,
+                    controller.text.trim(),
+                  );
+                },
+                child: Text(
+                  'common.save'.tr(),
+                ),
+              ),
+            ],
+          );
+        },
       );
 
-      if (newText == null || newText.trim().isEmpty) {
+      if (newText == null ||
+          newText.isEmpty ||
+          newText == message.content) {
         return;
       }
 
-      await _chatService.editMessage(
+      await provider.editMessage(
         message.id,
-        newText.trim(),
+        newText,
       );
     } catch (_) {
       if (context.mounted) {
@@ -135,11 +203,20 @@ class ChatBubble extends StatelessWidget {
     }
   }
 
+  // =========================================================
+  // DELETE
+  // =========================================================
+
   Future<void> _deleteMessage(
       BuildContext context,
       ) async {
+    final provider =
+    context.read<ChatProvider>();
+
     try {
-      await _chatService.deleteMessage(message.id);
+      await provider.deleteMessage(
+        message.id,
+      );
     } catch (_) {
       if (context.mounted) {
         SnackbarManager.showError(
@@ -149,34 +226,159 @@ class ChatBubble extends StatelessWidget {
     }
   }
 
-  void _showMessageMenu(BuildContext context) {
-    if (!isMe) {
-      return;
-    }
+  // =========================================================
+  // MENU
+  // =========================================================
 
+  void _showMessageMenu(
+      BuildContext context,
+      ) {
     showModalBottomSheet(
       context: context,
-      builder: (_) => SafeArea(
+      builder: (_) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize:
+            MainAxisSize.min,
+            children: [
+              if (!message.isDeleted)
+                ListTile(
+                  leading: const Icon(
+                    Icons.reply,
+                  ),
+                  title: Text(
+                    'chat.reply'.tr(),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    onReply();
+                  },
+                ),
+
+              if (message.isText &&
+                  !message.isDeleted)
+                ListTile(
+                  leading: const Icon(
+                    Icons.translate,
+                  ),
+                  title: Text(
+                    'chat.translate'.tr(),
+                  ),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await _translate(context);
+                  },
+                ),
+
+              if (isMe &&
+                  message.isText &&
+                  !message.isDeleted)
+                ListTile(
+                  leading: const Icon(
+                    Icons.edit,
+                  ),
+                  title: Text(
+                    'common.edit'.tr(),
+                  ),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await _editMessage(context);
+                  },
+                ),
+
+              if (isMe && !message.isDeleted)
+                ListTile(
+                  leading: const Icon(
+                    Icons.delete,
+                  ),
+                  title: Text(
+                    'common.delete'.tr(),
+                  ),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await _deleteMessage(context);
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // =========================================================
+  // REPLY PREVIEW INSIDE BUBBLE
+  // =========================================================
+
+  Widget _buildReplyPreview(
+      BuildContext context,
+      Color textColor,
+      ) {
+    final theme = Theme.of(context);
+
+    return GestureDetector(
+      onTap: () {
+        final replyId =
+            message.replyToMessageId;
+
+        if (replyId != null) {
+          onScrollTo?.call(replyId);
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.only(
+          top: 4,
+          bottom: 6,
+        ),
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primary
+              .withValues(alpha: 0.08),
+          borderRadius:
+          BorderRadius.circular(8),
+          border: Border(
+            left: BorderSide(
+              width: 3,
+              color:
+              theme.colorScheme.primary,
+            ),
+          ),
+        ),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
           children: [
-            if (message.isText && !message.isDeleted)
-              ListTile(
-                leading: const Icon(Icons.edit),
-                title: Text('common.edit'.tr()),
-                onTap: () async {
-                  Navigator.pop(context);
-                  await _editMessage(context);
-                },
+            if (message.replySenderName != null &&
+                message.replySenderName!
+                    .trim()
+                    .isNotEmpty)
+              Text(
+                message.replySenderName!,
+                maxLines: 1,
+                overflow:
+                TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color:
+                  theme.colorScheme.primary,
+                  fontSize: 12,
+                ),
               ),
-            if (!message.isDeleted)
-              ListTile(
-                leading: const Icon(Icons.delete),
-                title: Text('common.delete'.tr()),
-                onTap: () async {
-                  Navigator.pop(context);
-                  await _deleteMessage(context);
-                },
+
+            if (message.replySenderName != null &&
+                message.replySenderName!
+                    .trim()
+                    .isNotEmpty)
+              const SizedBox(height: 4),
+
+            if (message.isReplyImage)
+              _buildReplyImage(context)
+            else if (message.isReplyFile)
+              _buildReplyFile(context)
+            else
+              _buildReplyText(
+                context,
+                textColor,
               ),
           ],
         ),
@@ -184,12 +386,136 @@ class ChatBubble extends StatelessWidget {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildReplyImage(
+      BuildContext context,
+      ) {
+    final theme = Theme.of(context);
+    final imageUrl =
+    message.replyImageUrl.trim();
+
+    if (imageUrl.isEmpty) {
+      return Text(
+        'chat.photo'.tr(),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color:
+          theme.colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ClipRRect(
+          borderRadius:
+          BorderRadius.circular(6),
+          child: Image.network(
+            imageUrl,
+            height: 52,
+            width: 52,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) {
+              return Container(
+                height: 52,
+                width: 52,
+                alignment: Alignment.center,
+                color: theme.colorScheme
+                    .surfaceContainerHighest,
+                child: const Icon(
+                  Icons.image_not_supported,
+                  size: 20,
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            'chat.photo'.tr(),
+            maxLines: 1,
+            overflow:
+            TextOverflow.ellipsis,
+            style: TextStyle(
+              color: theme
+                  .colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReplyFile(
+      BuildContext context,
+      ) {
     final theme = Theme.of(context);
 
-    final isOnline = context.select<ChatProvider, bool>(
-          (p) => p.onlineUsers[message.senderId] == true,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          Icons.attach_file,
+          size: 18,
+          color:
+          theme.colorScheme.primary,
+        ),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(
+            message.replyText.isEmpty
+                ? 'chat.file'.tr()
+                : message.replyText,
+            maxLines: 1,
+            overflow:
+            TextOverflow.ellipsis,
+            style: TextStyle(
+              color: theme
+                  .colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReplyText(
+      BuildContext context,
+      Color textColor,
+      ) {
+    final theme = Theme.of(context);
+
+    final text = message.replyText.trim();
+
+    return Text(
+      text.isEmpty ? '...' : text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: isMe
+            ? textColor.withValues(alpha: 0.82)
+            : theme.colorScheme.onSurfaceVariant,
+      ),
+    );
+  }
+
+  // =========================================================
+  // BUILD
+  // =========================================================
+
+  @override
+  Widget build(
+      BuildContext context,
+      ) {
+    final theme = Theme.of(context);
+
+    final isOnline =
+    context.select<ChatProvider, bool>(
+          (p) =>
+      p.onlineUsers[message.senderId] ==
+          true,
     );
 
     final bubbleColor = message.isDeleted
@@ -197,22 +523,27 @@ class ChatBubble extends StatelessWidget {
         .withValues(alpha: 0.5)
         : isMe
         ? theme.colorScheme.primaryContainer
-        : theme.colorScheme.surfaceContainerHighest;
+        : theme.colorScheme
+        .surfaceContainerHighest;
 
     final textColor = isMe
         ? theme.colorScheme.onPrimaryContainer
         : theme.colorScheme.onSurface;
 
-    final senderName = message.senderName.trim().isNotEmpty
+    final senderName =
+    message.senderName.trim().isNotEmpty
         ? message.senderName
         : 'common.user'.tr();
 
-    final senderInitial = senderName.isNotEmpty
+    final senderInitial =
+    senderName.isNotEmpty
         ? senderName[0].toUpperCase()
         : '?';
 
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
+      duration: const Duration(
+        milliseconds: 200,
+      ),
       color: isHighlighted
           ? theme.colorScheme.primary
           .withValues(alpha: 0.12)
@@ -224,7 +555,8 @@ class ChatBubble extends StatelessWidget {
           mainAxisAlignment: isMe
               ? MainAxisAlignment.end
               : MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.end,
+          crossAxisAlignment:
+          CrossAxisAlignment.end,
           children: [
             if (!isMe)
               Padding(
@@ -238,8 +570,9 @@ class ChatBubble extends StatelessWidget {
                       radius: 12,
                       child: Text(
                         senderInitial,
-                        style:
-                        const TextStyle(fontSize: 10),
+                        style: const TextStyle(
+                          fontSize: 10,
+                        ),
                       ),
                     ),
                     if (isOnline)
@@ -249,12 +582,15 @@ class ChatBubble extends StatelessWidget {
                         child: Container(
                           width: 8,
                           height: 8,
-                          decoration: BoxDecoration(
+                          decoration:
+                          BoxDecoration(
                             color: Colors.green,
-                            shape: BoxShape.circle,
+                            shape:
+                            BoxShape.circle,
                             border: Border.all(
-                              color:
-                              theme.colorScheme.surface,
+                              color: theme
+                                  .colorScheme
+                                  .surface,
                               width: 1,
                             ),
                           ),
@@ -263,33 +599,45 @@ class ChatBubble extends StatelessWidget {
                   ],
                 ),
               ),
+
             GestureDetector(
               onDoubleTap: () =>
                   _showMessageMenu(context),
-              onLongPress: () => _translate(context),
+              onLongPress: () =>
+                  _showMessageMenu(context),
               child: Container(
-                margin: const EdgeInsets.symmetric(
+                margin: const EdgeInsets
+                    .symmetric(
                   vertical: 4,
                   horizontal: 4,
                 ),
-                padding: const EdgeInsets.symmetric(
+                padding: const EdgeInsets
+                    .symmetric(
                   horizontal: 12,
                   vertical: 8,
                 ),
                 constraints: BoxConstraints(
                   maxWidth:
-                  MediaQuery.of(context).size.width *
+                  MediaQuery.of(context)
+                      .size
+                      .width *
                       _maxBubbleWidthFactor,
                 ),
                 decoration: BoxDecoration(
                   color: bubbleColor,
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(18),
-                    topRight: const Radius.circular(18),
-                    bottomLeft:
-                    Radius.circular(isMe ? 18 : 6),
+                  borderRadius:
+                  BorderRadius.only(
+                    topLeft:
+                    const Radius.circular(18),
+                    topRight:
+                    const Radius.circular(18),
+                    bottomLeft: Radius.circular(
+                      isMe ? 18 : 6,
+                    ),
                     bottomRight:
-                    Radius.circular(isMe ? 6 : 18),
+                    Radius.circular(
+                      isMe ? 6 : 18,
+                    ),
                   ),
                 ),
                 child: Column(
@@ -299,104 +647,41 @@ class ChatBubble extends StatelessWidget {
                     if (!isMe)
                       Text(
                         senderName,
+                        maxLines: 1,
+                        overflow:
+                        TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 11,
-                          fontWeight: FontWeight.bold,
+                          fontWeight:
+                          FontWeight.bold,
                           color: textColor,
                         ),
                       ),
-                    if (message.replyToMessageId != null)
-                      GestureDetector(
-                        onTap: () => onScrollTo?.call(
-                          message.replyToMessageId!,
-                        ),
-                        child: Container(
-                          margin:
-                          const EdgeInsets.only(
-                            top: 4,
-                            bottom: 6,
-                          ),
-                          padding:
-                          const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: theme
-                                .colorScheme.primary
-                                .withValues(alpha: 0.08),
-                            borderRadius:
-                            BorderRadius.circular(8),
-                            border: Border(
-                              left: BorderSide(
-                                width: 3,
-                                color: theme
-                                    .colorScheme.primary,
-                              ),
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment:
-                            CrossAxisAlignment
-                                .start,
-                            children: [
-                              if (message
-                                  .replySenderName !=
-                                  null)
-                                Text(
-                                  message.replySenderName!,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight:
-                                    FontWeight.bold,
-                                    color: theme
-                                        .colorScheme
-                                        .primary,
-                                  ),
-                                ),
-                              if (_isReplyImage(
-                                  message.replyPreview))
-                                ClipRRect(
-                                  borderRadius:
-                                  BorderRadius
-                                      .circular(6),
-                                  child: Image.network(
-                                    message.replyPreview!,
-                                    width: 40,
-                                    height: 40,
-                                    fit: BoxFit.cover,
-                                    errorBuilder:
-                                        (_, __, ___) =>
-                                    const Icon(
-                                      Icons.broken_image,
-                                    ),
-                                  ),
-                                )
-                              else
-                                Text(
-                                  message.replyText,
-                                  maxLines: 1,
-                                  overflow:
-                                  TextOverflow
-                                      .ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: textColor,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
+
+                    if (message.hasReply)
+                      _buildReplyPreview(
+                        context,
+                        textColor,
                       ),
+
                     BubbleContent(
                       message: message,
                       textColor: textColor,
                       onOpenImage: (url) =>
-                          _openImage(context, url),
+                          _openImage(
+                            context,
+                            url,
+                          ),
                     ),
+
                     const SizedBox(height: 4),
+
                     MessageFooter(
                       time: message.createdAt,
                       isMe: isMe,
                       isRead: isRead,
-                      isEdited: message.isEdited,
+                      isEdited:
+                      message.isEdited,
                     ),
                   ],
                 ),
@@ -409,7 +694,12 @@ class ChatBubble extends StatelessWidget {
   }
 }
 
-class _SwipeReplyWrapper extends StatefulWidget {
+// =========================================================
+// SWIPE REPLY
+// =========================================================
+
+class _SwipeReplyWrapper
+    extends StatefulWidget {
   final Widget child;
   final VoidCallback onReply;
   final bool isMe;
@@ -430,24 +720,30 @@ class _SwipeReplyWrapperState
   double _offset = 0;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(
+      BuildContext context,
+      ) {
     return GestureDetector(
       onHorizontalDragUpdate: (details) {
-        if (widget.isMe && details.delta.dx < 0) {
+        if (widget.isMe &&
+            details.delta.dx < 0) {
           return;
         }
 
-        if (!widget.isMe && details.delta.dx > 0) {
+        if (!widget.isMe &&
+            details.delta.dx > 0) {
           return;
         }
 
         setState(() {
           _offset += details.delta.dx;
-          _offset = _offset.clamp(-80.0, 80.0);
+          _offset =
+              _offset.clamp(-80.0, 80.0);
         });
       },
       onHorizontalDragEnd: (_) {
-        if (_offset.abs() > ChatBubble._swipeTrigger) {
+        if (_offset.abs() >
+            ChatBubble._swipeTrigger) {
           widget.onReply();
         }
 
@@ -456,12 +752,19 @@ class _SwipeReplyWrapperState
         });
       },
       child: Transform.translate(
-        offset: Offset(_offset, 0),
+        offset: Offset(
+          _offset,
+          0,
+        ),
         child: widget.child,
       ),
     );
   }
 }
+
+// =========================================================
+// IMAGE VIEWER
+// =========================================================
 
 class _ImageViewer extends StatelessWidget {
   final String url;
@@ -471,7 +774,9 @@ class _ImageViewer extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(
+      BuildContext context,
+      ) {
     return Scaffold(
       backgroundColor: Colors.black,
       body: GestureDetector(
@@ -482,12 +787,13 @@ class _ImageViewer extends StatelessWidget {
             maxScale: 4,
             child: Image.network(
               url,
-              errorBuilder: (_, __, ___) =>
-              const Icon(
-                Icons.broken_image,
-                color: Colors.white,
-                size: 48,
-              ),
+              errorBuilder: (_, __, ___) {
+                return const Icon(
+                  Icons.broken_image,
+                  color: Colors.white,
+                  size: 48,
+                );
+              },
             ),
           ),
         ),

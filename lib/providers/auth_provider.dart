@@ -36,43 +36,77 @@ class AuthProvider extends ChangeNotifier {
 
   AuthStatus get status => _status;
 
-  bool get isLoading =>
-      _status == AuthStatus.loading;
+  bool get isLoading {
+    return _status == AuthStatus.loading;
+  }
 
-  bool get isGuest =>
-      _status == AuthStatus.guest;
+  bool get isGuest {
+    return _status == AuthStatus.guest;
+  }
 
-  bool get isAuthenticated =>
-      _status == AuthStatus.authenticated;
+  bool get isAuthenticated {
+    return _status == AuthStatus.authenticated;
+  }
 
-  User? get user => _user;
+  User? get user {
+    return _user;
+  }
 
-  ProfileModel? get profile => _profile;
+  ProfileModel? get profile {
+    return _profile;
+  }
 
-  String? get userId =>
-      isGuest ? 'guest' : _user?.id;
+  String? get userId {
+    if (isGuest) {
+      return 'guest';
+    }
+
+    return _user?.id;
+  }
 
   String get userName {
     if (isGuest) {
       return 'profile.guest'.tr();
     }
 
-    return _profile?.fullName ??
-        _user?.email?.split('@').first ??
-        'User';
+    final profile = _profile;
+
+    if (profile != null) {
+      return profile.displayName;
+    }
+
+    final email = _user?.email?.trim() ?? '';
+
+    if (email.contains('@')) {
+      return email.split('@').first;
+    }
+
+    return 'common.user'.tr();
   }
 
-  String? get username =>
-      _profile?.username;
+  String? get username {
+    return _profile?.username;
+  }
 
-  String? get avatarUrl =>
-      _profile?.avatarUrl;
+  String? get avatarUrl {
+    return _profile?.avatarUrl;
+  }
 
-  String get userRole =>
-      _profile?.role.name ?? 'student';
+  String get userRole {
+    return _profile?.role.value ?? UserRole.student.value;
+  }
 
-  String? get userLanguage =>
-      _profile?.language;
+  UserRole get userRoleEnum {
+    return _profile?.role ?? UserRole.student;
+  }
+
+  String? get userLanguage {
+    return _profile?.language;
+  }
+
+  String get email {
+    return _profile?.email ?? _user?.email ?? '';
+  }
 
   AuthProvider() {
     _initialize();
@@ -84,14 +118,10 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> _initialize() async {
     try {
-      final prefs =
-      await SharedPreferences.getInstance();
+      final prefs = await SharedPreferences.getInstance();
 
-      final savedGuest =
-          prefs.getBool('guest_mode') ?? false;
-
-      final currentUser =
-          _supabase.auth.currentUser;
+      final savedGuest = prefs.getBool('guest_mode') ?? false;
+      final currentUser = _supabase.auth.currentUser;
 
       if (savedGuest) {
         if (currentUser != null) {
@@ -104,8 +134,7 @@ class AuthProvider extends ChangeNotifier {
           profile: null,
         );
       } else if (currentUser != null) {
-        final profile =
-        await _authService.getProfile();
+        final profile = await _authService.getProfile();
 
         _setState(
           AuthStatus.authenticated,
@@ -122,12 +151,12 @@ class AuthProvider extends ChangeNotifier {
 
       _initialized = true;
 
-      _authSubscription = _supabase
-          .auth.onAuthStateChange
-          .listen(_handleAuthChange);
-    } catch (e, s) {
+      _authSubscription = _supabase.auth.onAuthStateChange.listen(
+        _handleAuthChange,
+      );
+    } catch (e, st) {
       debugPrint(
-        'AuthProvider init error: $e\n$s',
+        'AuthProvider init error: $e\n$st',
       );
 
       _setState(
@@ -143,13 +172,26 @@ class AuthProvider extends ChangeNotifier {
   // =========================================================
 
   Future<void> _handleAuthChange(
-      AuthState data) async {
+      AuthState data,
+      ) async {
     if (!_initialized || _disposed) {
       return;
     }
 
-    final sessionUser =
-        data.session?.user;
+    final prefs = await SharedPreferences.getInstance();
+    final savedGuest = prefs.getBool('guest_mode') ?? false;
+
+    if (savedGuest) {
+      _setState(
+        AuthStatus.guest,
+        user: null,
+        profile: null,
+      );
+
+      return;
+    }
+
+    final sessionUser = data.session?.user;
 
     if (sessionUser == null) {
       _setState(
@@ -157,16 +199,17 @@ class AuthProvider extends ChangeNotifier {
         user: null,
         profile: null,
       );
-    } else {
-      final profile =
-      await _authService.getProfile();
 
-      _setState(
-        AuthStatus.authenticated,
-        user: sessionUser,
-        profile: profile,
-      );
+      return;
     }
+
+    final profile = await _authService.getProfile();
+
+    _setState(
+      AuthStatus.authenticated,
+      user: sessionUser,
+      profile: profile,
+    );
   }
 
   // =========================================================
@@ -198,8 +241,7 @@ class AuthProvider extends ChangeNotifier {
       return;
     }
 
-    final profile =
-    await _authService.getProfile();
+    final profile = await _authService.getProfile();
 
     _setState(
       AuthStatus.authenticated,
@@ -215,7 +257,13 @@ class AuthProvider extends ChangeNotifier {
     String? username,
     String? bio,
     String? avatarUrl,
+    UserRole? role,
+    String? language,
   }) async {
+    if (!isAuthenticated || _user == null) {
+      return;
+    }
+
     await _authService.updateProfile(
       fullName: fullName,
       firstName: firstName,
@@ -223,13 +271,20 @@ class AuthProvider extends ChangeNotifier {
       username: username,
       bio: bio,
       avatarUrl: avatarUrl,
+      role: role,
+      language: language,
     );
 
     await refreshProfile();
   }
 
   Future<void> updateLanguage(
-      String language) async {
+      String language,
+      ) async {
+    if (!isAuthenticated || _user == null) {
+      return;
+    }
+
     await _authService.updateUserLanguage(
       language,
     );
@@ -242,17 +297,17 @@ class AuthProvider extends ChangeNotifier {
   // =========================================================
 
   Future<void> signInAsGuest() async {
-    final prefs =
-    await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
 
     try {
-      if (_supabase.auth.currentSession !=
-          null) {
+      if (_supabase.auth.currentSession != null) {
         await _authService.signOut();
       }
 
       _setState(
         AuthStatus.loading,
+        user: null,
+        profile: null,
       );
 
       await prefs.setBool(
@@ -279,11 +334,12 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> exitGuestMode() async {
-    final prefs =
-    await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
 
     _setState(
       AuthStatus.loading,
+      user: null,
+      profile: null,
     );
 
     try {
@@ -315,8 +371,7 @@ class AuthProvider extends ChangeNotifier {
       String email,
       String password,
       ) async {
-    final prefs =
-    await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
 
     try {
       await prefs.remove('guest_mode');
@@ -330,6 +385,15 @@ class AuthProvider extends ChangeNotifier {
       await _authService.signIn(
         email: email.trim(),
         password: password,
+      );
+
+      final currentUser = _supabase.auth.currentUser;
+      final profile = await _authService.getProfile();
+
+      _setState(
+        AuthStatus.authenticated,
+        user: currentUser,
+        profile: profile,
       );
     } catch (_) {
       _setState(
@@ -349,11 +413,10 @@ class AuthProvider extends ChangeNotifier {
   Future<void> signUp(
       String email,
       String password,
-      String fullName,
+      String username,
       String role,
       ) async {
-    final prefs =
-    await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
 
     try {
       await prefs.remove('guest_mode');
@@ -367,8 +430,28 @@ class AuthProvider extends ChangeNotifier {
       await _authService.signUp(
         email: email.trim(),
         password: password,
-        fullName: fullName,
-        role: role,
+        username: username.trim(),
+        role: role.trim(),
+      );
+
+      final currentUser = _supabase.auth.currentUser;
+
+      if (currentUser == null) {
+        _setState(
+          AuthStatus.unauthenticated,
+          user: null,
+          profile: null,
+        );
+
+        return;
+      }
+
+      final profile = await _authService.getProfile();
+
+      _setState(
+        AuthStatus.authenticated,
+        user: currentUser,
+        profile: profile,
       );
     } catch (_) {
       _setState(
@@ -386,14 +469,15 @@ class AuthProvider extends ChangeNotifier {
   // =========================================================
 
   Future<void> signOut() async {
-    final prefs =
-    await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
 
     final wasGuest = isGuest;
 
     try {
       _setState(
         AuthStatus.loading,
+        user: null,
+        profile: null,
       );
 
       await prefs.remove('guest_mode');

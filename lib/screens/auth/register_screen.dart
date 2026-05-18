@@ -10,29 +10,31 @@ import '../../utils/app_logger.dart';
 import '../../utils/error_mapper.dart';
 
 class RegisterScreen extends StatefulWidget {
-  const RegisterScreen({super.key});
+  const RegisterScreen({
+    super.key,
+  });
 
   @override
   State<RegisterScreen> createState() =>
       _RegisterScreenState();
 }
 
-class _RegisterScreenState
-    extends State<RegisterScreen> {
-  final _formKey = GlobalKey<FormState>();
+class _RegisterScreenState extends State<RegisterScreen> {
+  final GlobalKey<FormState> _formKey =
+  GlobalKey<FormState>();
 
-  final _emailController =
+  final TextEditingController _usernameController =
   TextEditingController();
 
-  final _passwordController =
+  final TextEditingController _emailController =
   TextEditingController();
 
-  final _fullNameController =
+  final TextEditingController _passwordController =
   TextEditingController();
 
-  final _emailFocus = FocusNode();
-  final _passwordFocus = FocusNode();
-  final _nameFocus = FocusNode();
+  final FocusNode _usernameFocus = FocusNode();
+  final FocusNode _emailFocus = FocusNode();
+  final FocusNode _passwordFocus = FocusNode();
 
   String _role = 'student';
 
@@ -43,15 +45,19 @@ class _RegisterScreenState
     r'^[\w\-.]+@([\w-]+\.)+[\w-]{2,}$',
   );
 
+  static final RegExp _usernameRegex = RegExp(
+    r'^[a-zA-Z0-9_]{3,20}$',
+  );
+
   @override
   void dispose() {
+    _usernameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
-    _fullNameController.dispose();
 
+    _usernameFocus.dispose();
     _emailFocus.dispose();
     _passwordFocus.dispose();
-    _nameFocus.dispose();
 
     super.dispose();
   }
@@ -73,8 +79,14 @@ class _RegisterScreenState
       return;
     }
 
-    final authProvider =
-    context.read<AuthProvider>();
+    final authProvider = context.read<AuthProvider>();
+
+    final username = _normalizeUsername(
+      _usernameController.text,
+    );
+
+    final email = _emailController.text.trim().toLowerCase();
+    final password = _passwordController.text.trim();
 
     try {
       setState(() {
@@ -83,18 +95,14 @@ class _RegisterScreenState
 
       LoadingOverlay.show();
 
-      /// FIX guest mode
       if (authProvider.isGuest) {
         await authProvider.signOut();
       }
 
-      final fullName =
-      _fullNameController.text.trim();
-
       await authProvider.signUp(
-        _emailController.text.trim(),
-        _passwordController.text.trim(),
-        fullName,
+        email,
+        password,
+        username,
         _role,
       );
 
@@ -120,7 +128,7 @@ class _RegisterScreenState
       }
 
       SnackbarManager.showError(
-        ErrorMapper.map(e).tr(),
+        ErrorMapper.map(e),
       );
     } finally {
       LoadingOverlay.hide();
@@ -131,6 +139,49 @@ class _RegisterScreenState
         });
       }
     }
+  }
+
+  String _normalizeUsername(String value) {
+    final username = value.trim();
+
+    if (username.startsWith('@')) {
+      return username.substring(1).toLowerCase();
+    }
+
+    return username.toLowerCase();
+  }
+
+  // =========================================================
+  // ROLE
+  // =========================================================
+
+  List<DropdownMenuItem<String>> _roleItems() {
+    return [
+      DropdownMenuItem(
+        value: 'student',
+        child: Text(
+          'roles.student'.tr(),
+        ),
+      ),
+      DropdownMenuItem(
+        value: 'teacher',
+        child: Text(
+          'roles.teacher'.tr(),
+        ),
+      ),
+      DropdownMenuItem(
+        value: 'leader',
+        child: Text(
+          'roles.leader'.tr(),
+        ),
+      ),
+      DropdownMenuItem(
+        value: 'general',
+        child: Text(
+          'roles.general'.tr(),
+        ),
+      ),
+    ];
   }
 
   // =========================================================
@@ -163,54 +214,72 @@ class _RegisterScreenState
         ),
       ),
       body: GestureDetector(
-        onTap: () =>
-            FocusScope.of(context).unfocus(),
+        onTap: () {
+          FocusScope.of(context).unfocus();
+        },
         child: Center(
           child: SingleChildScrollView(
-            padding:
-            const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(24),
             child: Form(
               key: _formKey,
               autovalidateMode:
-              AutovalidateMode
-                  .onUserInteraction,
+              AutovalidateMode.onUserInteraction,
               child: Column(
                 children: [
                   _animated(
                     TextFormField(
-                      controller:
-                      _fullNameController,
-                      focusNode: _nameFocus,
+                      controller: _usernameController,
+                      focusNode: _usernameFocus,
                       enabled: !_isSubmitting,
+                      keyboardType: TextInputType.text,
                       autofillHints: const [
-                        AutofillHints.name,
+                        AutofillHints.username,
                       ],
-                      textInputAction:
-                      TextInputAction.next,
-                      decoration:
-                      InputDecoration(
-                        labelText:
-                        'auth.full_name'.tr(),
-                        prefixIcon:
-                        const Icon(
-                          Icons
-                              .person_outline,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(
+                        labelText: 'profile.username'.tr(),
+                        hintText: 'users.search_hint'.tr(),
+                        prefixIcon: const Icon(
+                          Icons.alternate_email,
                         ),
                       ),
-                      onFieldSubmitted: (_) {
-                        _emailFocus
-                            .requestFocus();
-                      },
-                      validator: (v) {
-                        final name =
-                            v?.trim() ?? '';
+                      onChanged: (value) {
+                        final normalized =
+                        _normalizeUsername(value);
 
-                        if (name.isEmpty) {
-                          return 'validation.empty_name'.tr();
+                        if (value != normalized &&
+                            value.isNotEmpty) {
+                          final selection =
+                              _usernameController.selection;
+
+                          _usernameController.value =
+                              TextEditingValue(
+                                text: normalized,
+                                selection: selection.copyWith(
+                                  baseOffset: normalized.length,
+                                  extentOffset: normalized.length,
+                                ),
+                              );
+                        }
+                      },
+                      onFieldSubmitted: (_) {
+                        _emailFocus.requestFocus();
+                      },
+                      validator: (value) {
+                        final username = _normalizeUsername(
+                          value ?? '',
+                        );
+
+                        if (username.isEmpty) {
+                          return 'validation.empty_field'.tr();
                         }
 
-                        if (name.length < 2) {
-                          return 'validation.invalid_name'.tr();
+                        if (username.length < 3) {
+                          return 'validation.short_username'.tr();
+                        }
+
+                        if (!_usernameRegex.hasMatch(username)) {
+                          return 'validation.invalid_username'.tr();
                         }
 
                         return null;
@@ -219,50 +288,37 @@ class _RegisterScreenState
                     0,
                   ),
 
-                  const SizedBox(
-                    height: 16,
-                  ),
+                  const SizedBox(height: 16),
 
                   _animated(
                     TextFormField(
-                      controller:
-                      _emailController,
+                      controller: _emailController,
                       focusNode: _emailFocus,
                       enabled: !_isSubmitting,
-                      keyboardType:
-                      TextInputType
-                          .emailAddress,
+                      keyboardType: TextInputType.emailAddress,
                       autofillHints: const [
                         AutofillHints.email,
                       ],
-                      textInputAction:
-                      TextInputAction.next,
-                      decoration:
-                      InputDecoration(
-                        labelText:
-                        'auth.email_label'.tr(),
-                        hintText:
-                        'auth.email_hint'.tr(),
-                        prefixIcon:
-                        const Icon(
-                          Icons
-                              .email_outlined,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(
+                        labelText: 'auth.email_label'.tr(),
+                        hintText: 'auth.email_hint'.tr(),
+                        prefixIcon: const Icon(
+                          Icons.email_outlined,
                         ),
                       ),
                       onFieldSubmitted: (_) {
-                        _passwordFocus
-                            .requestFocus();
+                        _passwordFocus.requestFocus();
                       },
-                      validator: (v) {
+                      validator: (value) {
                         final email =
-                            v?.trim() ?? '';
+                            value?.trim().toLowerCase() ?? '';
 
                         if (email.isEmpty) {
                           return 'validation.empty_email'.tr();
                         }
 
-                        if (!_emailRegex
-                            .hasMatch(email)) {
+                        if (!_emailRegex.hasMatch(email)) {
                           return 'validation.invalid_email'.tr();
                         }
 
@@ -272,146 +328,91 @@ class _RegisterScreenState
                     100,
                   ),
 
-                  const SizedBox(
-                    height: 16,
-                  ),
+                  const SizedBox(height: 16),
 
                   _animated(
                     TextFormField(
-                      controller:
-                      _passwordController,
-                      focusNode:
-                      _passwordFocus,
+                      controller: _passwordController,
+                      focusNode: _passwordFocus,
                       enabled: !_isSubmitting,
                       autofillHints: const [
-                        AutofillHints.password,
+                        AutofillHints.newPassword,
                       ],
-                      obscureText:
-                      !_isPasswordVisible,
-                      textInputAction:
-                      TextInputAction.done,
-                      decoration:
-                      InputDecoration(
-                        labelText:
-                        'auth.password_label'.tr(),
-                        hintText:
-                        'auth.password_hint'.tr(),
-                        prefixIcon:
-                        const Icon(
-                          Icons
-                              .lock_outline,
+                      obscureText: !_isPasswordVisible,
+                      textInputAction: TextInputAction.done,
+                      decoration: InputDecoration(
+                        labelText: 'auth.password_label'.tr(),
+                        hintText: 'auth.password_hint'.tr(),
+                        prefixIcon: const Icon(
+                          Icons.lock_outline,
                         ),
-                        suffixIcon:
-                        IconButton(
+                        suffixIcon: IconButton(
                           icon: Icon(
                             _isPasswordVisible
-                                ? Icons
-                                .visibility
-                                : Icons
-                                .visibility_off,
+                                ? Icons.visibility
+                                : Icons.visibility_off,
                           ),
-                          onPressed:
-                          _isSubmitting
+                          onPressed: _isSubmitting
                               ? null
                               : () {
-                            setState(
-                                  () {
-                                _isPasswordVisible =
-                                !_isPasswordVisible;
-                              },
-                            );
+                            setState(() {
+                              _isPasswordVisible =
+                              !_isPasswordVisible;
+                            });
                           },
                         ),
                       ),
-                      validator: (v) {
-                        if (v == null ||
-                            v.isEmpty) {
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
                           return 'validation.empty_password'.tr();
                         }
 
-                        if (v.length < 6) {
+                        if (value.length < 6) {
                           return 'validation.short_password'.tr();
                         }
 
                         return null;
                       },
-                      onFieldSubmitted: (_) =>
-                          _register(),
+                      onFieldSubmitted: (_) => _register(),
                     ),
                     200,
                   ),
 
-                  const SizedBox(
-                    height: 16,
-                  ),
+                  const SizedBox(height: 16),
 
                   _animated(
-                    DropdownButtonFormField<
-                        String>(
+                    DropdownButtonFormField<String>(
                       initialValue: _role,
-                      decoration:
-                      InputDecoration(
-                        labelText:
-                        'auth.select_role'
-                            .tr(),
-                        prefixIcon:
-                        const Icon(
-                          Icons
-                              .work_outline,
+                      decoration: InputDecoration(
+                        labelText: 'auth.select_role'.tr(),
+                        prefixIcon: const Icon(
+                          Icons.work_outline,
                         ),
                       ),
-                      items: [
-                        DropdownMenuItem(
-                          value: 'student',
-                          child: Text(
-                            'roles.student'.tr(),
-                          ),
-                        ),
-                        DropdownMenuItem(
-                          value: 'teacher',
-                          child: Text(
-                            'roles.teacher'.tr(),
-                          ),
-                        ),
-                        DropdownMenuItem(
-                          value: 'leader',
-                          child: Text(
-                            'roles.leader'.tr(),
-                          ),
-                        ),
-                      ],
-                      onChanged:
-                      _isSubmitting
+                      items: _roleItems(),
+                      onChanged: _isSubmitting
                           ? null
-                          : (v) {
-                        if (v ==
-                            null) {
+                          : (value) {
+                        if (value == null) {
                           return;
                         }
 
                         setState(() {
-                          _role = v;
+                          _role = value;
                         });
                       },
                     ),
                     300,
                   ),
 
-                  const SizedBox(
-                    height: 30,
-                  ),
+                  const SizedBox(height: 30),
 
                   _animated(
                     ElevatedButton(
                       onPressed:
-                      _isSubmitting
-                          ? null
-                          : _register,
-                      style:
-                      ElevatedButton
-                          .styleFrom(
-                        minimumSize:
-                        const Size(
+                      _isSubmitting ? null : _register,
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(
                           double.infinity,
                           50,
                         ),
@@ -420,12 +421,9 @@ class _RegisterScreenState
                           ? const SizedBox(
                         height: 20,
                         width: 20,
-                        child:
-                        CircularProgressIndicator(
-                          strokeWidth:
-                          2,
-                          color: Colors
-                              .white,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
                         ),
                       )
                           : Text(

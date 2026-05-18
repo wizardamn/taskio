@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 import '../models/message_model.dart';
 import '../utils/app_logger.dart';
 
+import 'ai_service.dart';
 import 'chat_cache_service.dart';
 import 'notification_service.dart';
 import 'supabase_service.dart';
@@ -18,6 +19,7 @@ class ChatService {
 
   final ChatCacheService _cacheService = ChatCacheService();
   final NotificationService _notifications = NotificationService();
+  final AIService _aiService = AIService();
 
   static const int _pageSize = 30;
   static const int _maxUserCacheSize = 150;
@@ -54,14 +56,37 @@ class ChatService {
   String? get _currentUserId => _client.auth.currentUser?.id;
 
   bool _isProjectDisposed(String projectId) {
-    return _disposed ||
-        _disposingProjects.contains(projectId);
+    return _disposed || _disposingProjects.contains(projectId);
   }
+
+  String get _messageSelectQuery => '''
+    *,
+    profiles:sender_id(
+      full_name,
+      username
+    ),
+    reply:reply_to_message_id(
+      id,
+      content,
+      type,
+      sender_id,
+      file_name,
+      file_size,
+      mime_type,
+      preview_url,
+      profiles:sender_id(
+        full_name,
+        username
+      )
+    ),
+    message_reads!left(
+      user_id
+    )
+  ''';
 
   void _sortMessages(List<MessageModel> list) {
     list.sort((a, b) {
-      final cmp =
-      b.createdAt.compareTo(a.createdAt);
+      final cmp = b.createdAt.compareTo(a.createdAt);
 
       if (cmp != 0) {
         return cmp;
@@ -79,16 +104,14 @@ class ChatService {
       return;
     }
 
-    final controller =
-    _controllers[projectId];
+    final controller = _controllers[projectId];
 
-    if (controller == null ||
-        controller.isClosed) {
+    if (controller == null || controller.isClosed) {
       return;
     }
 
     controller.add(
-      List.unmodifiable(list),
+      List<MessageModel>.unmodifiable(list),
     );
   }
 
@@ -96,21 +119,41 @@ class ChatService {
       String projectId,
       List<MessageModel> messages,
       ) {
-    _sortMessages(messages);
+    final copy = List<MessageModel>.from(messages);
 
-    _cache[projectId] = messages;
+    _sortMessages(copy);
+
+    _cache[projectId] = copy;
 
     _cacheService.setMessages(
       projectId,
-      messages,
+      copy,
     );
   }
 
-  List<MessageModel> _getProjectCache(
-      String projectId) {
+  List<MessageModel> _getProjectCache(String projectId) {
     return List<MessageModel>.from(
-      _cache[projectId] ?? [],
+      _cache[projectId] ?? const [],
     );
+  }
+
+  MessageModel? _findCachedMessage(
+      String projectId,
+      String? messageId,
+      ) {
+    if (messageId == null || messageId.isEmpty) {
+      return null;
+    }
+
+    final list = _cache[projectId] ?? const [];
+
+    for (final message in list) {
+      if (message.id == messageId) {
+        return message;
+      }
+    }
+
+    return null;
   }
 
   Future<void> _ensureNotifications() async {
@@ -127,8 +170,7 @@ class ChatService {
   // USER CACHE
   // =========================================================
 
-  Future<String> _getUserName(
-      String userId) async {
+  Future<String> _getUserName(String userId) async {
     if (_userCache.containsKey(userId)) {
       return _userCache[userId]!;
     }
@@ -136,20 +178,21 @@ class ChatService {
     try {
       final res = await _client
           .from('profiles')
-          .select('full_name')
+          .select('full_name, username')
           .eq('id', userId)
           .maybeSingle();
 
-      final name =
-          res?['full_name']
-              ?.toString() ??
-              _fallbackUserName;
+      final fullName = res?['full_name']?.toString().trim();
+      final username = res?['username']?.toString().trim();
 
-      if (_userCache.length >=
-          _maxUserCacheSize) {
-        final firstKey =
-            _userCache.keys.first;
-        _userCache.remove(firstKey);
+      final name = fullName != null && fullName.isNotEmpty
+          ? fullName
+          : username != null && username.isNotEmpty
+          ? '@$username'
+          : _fallbackUserName;
+
+      if (_userCache.length >= _maxUserCacheSize) {
+        _userCache.remove(_userCache.keys.first);
       }
 
       _userCache[userId] = name;
@@ -187,17 +230,14 @@ class ChatService {
   // =========================================================
 
   Future<MessageModel> _buildMessageFromRow(
-      Map<String, dynamic> row,
+      Map<String, dynamic> rawRow,
       ) async {
-    final currentUserId =
-        _currentUserId;
+    final row = Map<String, dynamic>.from(rawRow);
+    final currentUserId = _currentUserId;
 
-    if (row['profiles'] == null &&
-        row['sender_id'] != null) {
-      final senderName =
-      await _getUserName(
-        row['sender_id']
-            .toString(),
+    if (row['profiles'] == null && row['sender_id'] != null) {
+      final senderName = await _getUserName(
+        row['sender_id'].toString(),
       );
 
       row['profiles'] = {
@@ -205,16 +245,23 @@ class ChatService {
       };
     }
 
-    if (row['reply_to_message_id'] != null &&
-        row['reply'] == null) {
+    if (row['reply_to_message_id'] != null && row['reply'] == null) {
       try {
         final reply = await _client
             .from('project_messages')
             .select('''
               id,
               content,
+              type,
               sender_id,
-              profiles:sender_id(full_name)
+              file_name,
+              file_size,
+              mime_type,
+              preview_url,
+              profiles:sender_id(
+                full_name,
+                username
+              )
             ''')
             .eq(
           'id',
@@ -228,23 +275,21 @@ class ChatService {
       } catch (_) {}
     }
 
-    final reads =
-        row['message_reads'] as List? ??
-            [];
+    final reads = row['message_reads'] is List
+        ? row['message_reads'] as List
+        : const [];
 
-    final isMine =
-        row['sender_id'] ==
-            currentUserId;
+    final senderId = row['sender_id']?.toString();
+    final isMine = senderId != null && senderId == currentUserId;
 
     final isRead = isMine ||
         reads.any(
-              (r) =>
-          r['user_id'] ==
-              currentUserId,
+              (r) => r is Map && r['user_id']?.toString() == currentUserId,
         );
 
-    return MessageModel.fromJson(row)
-        .copyWith(isRead: isRead);
+    return MessageModel.fromJson(row).copyWith(
+      isRead: isRead,
+    );
   }
 }
 
@@ -269,19 +314,7 @@ extension ChatServiceSubscriptions on ChatService {
     try {
       final rows = await _client
           .from('project_messages')
-          .select('''
-            *,
-            profiles:sender_id(full_name),
-            reply:reply_to_message_id(
-              id,
-              content,
-              sender_id,
-              profiles:sender_id(full_name)
-            ),
-            message_reads!left(
-              user_id
-            )
-          ''')
+          .select(_messageSelectQuery)
           .eq('project_id', projectId)
           .order(
         'created_at',
@@ -293,31 +326,25 @@ extension ChatServiceSubscriptions on ChatService {
         return [];
       }
 
-      final loaded =
-      <MessageModel>[];
+      final loaded = <MessageModel>[];
 
-      for (final row
-      in List<Map<String, dynamic>>.from(
-        rows,
-      )) {
+      for (final row in List<Map<String, dynamic>>.from(rows)) {
         loaded.add(
           await _buildMessageFromRow(row),
         );
       }
 
-      final existing =
-      _getProjectCache(projectId);
+      final existing = _getProjectCache(projectId);
 
       final merged = {
-        for (final m in existing) m.id: m,
+        for (final message in existing) message.id: message,
       };
 
-      for (final m in loaded) {
-        merged[m.id] = m;
+      for (final message in loaded) {
+        merged[message.id] = message;
       }
 
-      final result =
-      merged.values.toList();
+      final result = merged.values.toList();
 
       _cacheMessages(
         projectId,
@@ -348,21 +375,16 @@ extension ChatServiceSubscriptions on ChatService {
   // SUBSCRIBE
   // =========================================================
 
-  Stream<List<MessageModel>>
-  subscribeMessages(
+  Stream<List<MessageModel>> subscribeMessages(
       String projectId,
       ) {
     if (_disposed) {
-      throw Exception(
-        'ChatService disposed',
-      );
+      throw Exception('ChatService disposed');
     }
 
-    final existing =
-    _controllers[projectId];
+    final existing = _controllers[projectId];
 
-    if (existing != null &&
-        !existing.isClosed) {
+    if (existing != null && !existing.isClosed) {
       return existing.stream;
     }
 
@@ -371,12 +393,9 @@ extension ChatServiceSubscriptions on ChatService {
           () => [],
     );
 
-    late final StreamController<
-        List<MessageModel>> controller;
+    late final StreamController<List<MessageModel>> controller;
 
-    controller =
-    StreamController<
-        List<MessageModel>>.broadcast(
+    controller = StreamController<List<MessageModel>>.broadcast(
       onCancel: () async {
         if (!controller.hasListener) {
           await disposeProject(projectId);
@@ -384,19 +403,12 @@ extension ChatServiceSubscriptions on ChatService {
       },
     );
 
-    _controllers[projectId] =
-        controller;
+    _controllers[projectId] = controller;
 
-    final cached =
-    _cacheService.getMessages(
-      projectId,
-    );
+    final cached = _cacheService.getMessages(projectId);
 
     if (cached.isNotEmpty) {
-      _cache[projectId] =
-      List<MessageModel>.from(
-        cached,
-      );
+      _cache[projectId] = List<MessageModel>.from(cached);
 
       _safeEmit(
         projectId,
@@ -408,9 +420,7 @@ extension ChatServiceSubscriptions on ChatService {
       loadMessages(projectId),
     );
 
-    _subscribeProjectRealtime(
-      projectId,
-    );
+    _subscribeProjectRealtime(projectId);
 
     return controller.stream;
   }
@@ -422,9 +432,7 @@ extension ChatServiceSubscriptions on ChatService {
   void _subscribeProjectRealtime(
       String projectId,
       ) {
-    if (_chatChannels.containsKey(
-      projectId,
-    )) {
+    if (_chatChannels.containsKey(projectId)) {
       return;
     }
 
@@ -432,23 +440,16 @@ extension ChatServiceSubscriptions on ChatService {
       return;
     }
 
-    final channel = _client.channel(
-      'chat:$projectId',
-    );
+    final channel = _client.channel('chat:$projectId');
 
-    _chatChannels[projectId] =
-        channel;
-
-    // INSERT
+    _chatChannels[projectId] = channel;
 
     channel.onPostgresChanges(
-      event:
-      PostgresChangeEvent.insert,
+      event: PostgresChangeEvent.insert,
       schema: 'public',
       table: 'project_messages',
       filter: PostgresChangeFilter(
-        type:
-        PostgresChangeFilterType.eq,
+        type: PostgresChangeFilterType.eq,
         column: 'project_id',
         value: projectId,
       ),
@@ -460,16 +461,12 @@ extension ChatServiceSubscriptions on ChatService {
       },
     );
 
-    // UPDATE
-
     channel.onPostgresChanges(
-      event:
-      PostgresChangeEvent.update,
+      event: PostgresChangeEvent.update,
       schema: 'public',
       table: 'project_messages',
       filter: PostgresChangeFilter(
-        type:
-        PostgresChangeFilterType.eq,
+        type: PostgresChangeFilterType.eq,
         column: 'project_id',
         value: projectId,
       ),
@@ -481,16 +478,12 @@ extension ChatServiceSubscriptions on ChatService {
       },
     );
 
-    // DELETE
-
     channel.onPostgresChanges(
-      event:
-      PostgresChangeEvent.delete,
+      event: PostgresChangeEvent.delete,
       schema: 'public',
       table: 'project_messages',
       filter: PostgresChangeFilter(
-        type:
-        PostgresChangeFilterType.eq,
+        type: PostgresChangeFilterType.eq,
         column: 'project_id',
         value: projectId,
       ),
@@ -504,29 +497,41 @@ extension ChatServiceSubscriptions on ChatService {
 
     channel.subscribe(
           (status, [error]) {
-        if (status ==
-            RealtimeSubscribeStatus
-                .subscribed) {
+        if (status == RealtimeSubscribeStatus.subscribed) {
           AppLogger.info(
             'Chat realtime subscribed: $projectId',
             tag: 'ChatService',
           );
-        } else if (status ==
-            RealtimeSubscribeStatus
-                .channelError ||
-            status ==
-                RealtimeSubscribeStatus
-                    .timedOut) {
+          return;
+        }
+
+        if (status == RealtimeSubscribeStatus.channelError ||
+            status == RealtimeSubscribeStatus.timedOut) {
           AppLogger.error(
             'Chat realtime error',
             error: error,
             tag: 'ChatService',
           );
+
+          _chatChannels.remove(projectId);
+
+          if (!_isProjectDisposed(projectId)) {
+            Future.delayed(
+              const Duration(seconds: 2),
+                  () {
+                if (!_isProjectDisposed(projectId) &&
+                    !_chatChannels.containsKey(projectId)) {
+                  _subscribeProjectRealtime(projectId);
+                }
+              },
+            );
+          }
         }
       },
     );
   }
 }
+
 extension ChatServiceMessaging on ChatService {
   // =========================================================
   // REALTIME INSERT
@@ -541,71 +546,50 @@ extension ChatServiceMessaging on ChatService {
     }
 
     try {
-      final row = payload.newRecord;
+      final row = Map<String, dynamic>.from(payload.newRecord);
 
       if (row.isEmpty) {
         return;
       }
 
       final currentUserId = _currentUserId;
-
       final list = _getProjectCache(projectId);
 
-      final incomingId =
-      row['id']?.toString();
+      final incomingId = row['id']?.toString();
 
-      if (incomingId == null) {
+      if (incomingId == null || incomingId.isEmpty) {
         return;
       }
 
-      // Уже есть
-      if (list.any(
-            (m) => m.id == incomingId,
-      )) {
+      if (list.any((m) => m.id == incomingId)) {
         return;
       }
 
-      // Удаляем optimistic temp
       list.removeWhere(
             (m) =>
-            m.status == MessageStatus.sending &&
-            m.senderId ==
-                row['sender_id'] &&
-            m.content ==
-                row['content'],
+        m.status == MessageStatus.sending &&
+            m.senderId == row['sender_id']?.toString() &&
+            m.content == row['content']?.toString(),
       );
 
-      final isMine =
-          row['sender_id'] ==
-              currentUserId;
+      final isMine = row['sender_id']?.toString() == currentUserId;
 
       bool isRead = false;
 
       if (!isMine &&
-          _activeChats.contains(
-            projectId,
-          ) &&
+          _activeChats.contains(projectId) &&
           currentUserId != null) {
         isRead = true;
 
         try {
-          await _client
-              .from('message_reads')
-              .upsert(
+          await _client.from('message_reads').upsert(
             {
-              'message_id':
-              incomingId,
-              'user_id':
-              currentUserId,
-              'project_id':
-              projectId,
-              'read_at':
-              DateTime.now()
-                  .toUtc()
-                  .toIso8601String(),
+              'message_id': incomingId,
+              'user_id': currentUserId,
+              'project_id': projectId,
+              'read_at': DateTime.now().toUtc().toIso8601String(),
             },
-            onConflict:
-            'message_id,user_id',
+            onConflict: 'message_id,user_id',
           );
         } catch (e, st) {
           AppLogger.error(
@@ -617,15 +601,10 @@ extension ChatServiceMessaging on ChatService {
         }
       }
 
-      final built =
-      await _buildMessageFromRow(
-        row,
-      );
+      final built = await _buildMessageFromRow(row);
 
-      final message =
-      built.copyWith(
-        isRead:
-        isRead || built.isRead,
+      final message = built.copyWith(
+        isRead: isRead || built.isRead,
       );
 
       list.insert(0, message);
@@ -640,26 +619,14 @@ extension ChatServiceMessaging on ChatService {
         list,
       );
 
-      if (!isMine &&
-          !_activeChats.contains(
-            projectId,
-          )) {
+      if (!isMine && !_activeChats.contains(projectId)) {
         await _ensureNotifications();
 
-        String body;
-
-        switch (message.type) {
-          case MessageType.image:
-            body = '📷 Image';
-            break;
-
-          case MessageType.file:
-            body = '📎 File';
-            break;
-
-          default:
-            body = message.content;
-        }
+        final body = switch (message.type) {
+          MessageType.image => '📷 Image',
+          MessageType.file => '📎 File',
+          MessageType.text => message.content,
+        };
 
         await _notifications.showSimple(
           message.senderName,
@@ -690,22 +657,19 @@ extension ChatServiceMessaging on ChatService {
     }
 
     try {
-      final row = payload.newRecord;
+      final row = Map<String, dynamic>.from(payload.newRecord);
 
       if (row.isEmpty) {
         return;
       }
 
-      final incomingId =
-      row['id']?.toString();
+      final incomingId = row['id']?.toString();
 
-      if (incomingId == null) {
+      if (incomingId == null || incomingId.isEmpty) {
         return;
       }
 
-      final list = _getProjectCache(
-        projectId,
-      );
+      final list = _getProjectCache(projectId);
 
       final index = list.indexWhere(
             (m) => m.id == incomingId,
@@ -716,18 +680,13 @@ extension ChatServiceMessaging on ChatService {
         return;
       }
 
-      final old =
-      list[index];
+      final old = list[index];
 
-      final updated =
-      await _buildMessageFromRow(
-        row,
+      final updated = await _buildMessageFromRow(row);
+
+      list[index] = updated.copyWith(
+        isRead: old.isRead,
       );
-
-      list[index] =
-          updated.copyWith(
-            isRead: old.isRead,
-          );
 
       _cacheMessages(
         projectId,
@@ -761,21 +720,19 @@ extension ChatServiceMessaging on ChatService {
     }
 
     try {
-      final row = payload.oldRecord;
+      final row = Map<String, dynamic>.from(payload.oldRecord);
 
       if (row.isEmpty) {
         return;
       }
 
-      final id =
-      row['id']?.toString();
+      final id = row['id']?.toString();
 
-      if (id == null) {
+      if (id == null || id.isEmpty) {
         return;
       }
 
-      final list =
-      _getProjectCache(projectId);
+      final list = _getProjectCache(projectId);
 
       list.removeWhere(
             (m) => m.id == id,
@@ -809,23 +766,20 @@ extension ChatServiceMessaging on ChatService {
       String content, {
         String? replyTo,
       }) async {
-    final userId =
-        _currentUserId;
+    final userId = _currentUserId;
 
     if (userId == null) {
       return;
     }
 
-    final text =
-    content.trim();
+    final text = content.trim();
 
-    if (text.isEmpty ||
-        text.length > 1000) {
+    if (text.isEmpty || text.length > 1000) {
       return;
     }
 
-    final tempId =
-        'temp_${_uuid.v4()}';
+    final tempId = 'temp_${_uuid.v4()}';
+    final replyMessage = _findCachedMessage(projectId, replyTo);
 
     final temp = MessageModel(
       id: tempId,
@@ -836,11 +790,18 @@ extension ChatServiceMessaging on ChatService {
       createdAt: DateTime.now(),
       status: MessageStatus.sending,
       replyToMessageId: replyTo,
+      replyPreview: replyMessage?.replyRawContent.isNotEmpty == true
+          ? replyMessage!.replyRawContent
+          : replyMessage?.content,
+      replySenderName: replyMessage?.senderName,
+      replyType: replyMessage?.type,
+      replyFileName: replyMessage?.fileName,
+      replyPreviewUrl: replyMessage?.previewUrl ?? replyMessage?.content,
+      replyMimeType: replyMessage?.mimeType,
       isRead: true,
     );
 
-    final list =
-    _getProjectCache(projectId);
+    final list = _getProjectCache(projectId);
 
     list.insert(0, temp);
 
@@ -855,17 +816,12 @@ extension ChatServiceMessaging on ChatService {
     );
 
     try {
-      await _client
-          .from('project_messages')
-          .insert({
-        'project_id':
-        projectId,
-        'sender_id':
-        userId,
+      await _client.from('project_messages').insert({
+        'project_id': projectId,
+        'sender_id': userId,
         'content': text,
         'type': 'text',
-        'reply_to_message_id':
-        replyTo,
+        'reply_to_message_id': replyTo,
         'is_deleted': false,
         'status': 'sent',
       });
@@ -918,11 +874,11 @@ extension ChatServiceFinal on ChatService {
     }
 
     String? affectedProjectId;
+    List<MessageModel>? rollbackList;
 
     for (final entry in _cache.entries) {
       final projectId = entry.key;
-      final list =
-      List<MessageModel>.from(entry.value);
+      final list = List<MessageModel>.from(entry.value);
 
       final index = list.indexWhere(
             (m) => m.id == messageId,
@@ -941,6 +897,7 @@ extension ChatServiceFinal on ChatService {
       }
 
       affectedProjectId = projectId;
+      rollbackList = List<MessageModel>.from(list);
 
       list[index] = current.copyWith(
         content: text,
@@ -962,14 +919,16 @@ extension ChatServiceFinal on ChatService {
           .from('project_messages')
           .update({
         'content': text,
-        'edited_at':
-        DateTime.now()
-            .toUtc()
-            .toIso8601String(),
+        'edited_at': DateTime.now().toUtc().toIso8601String(),
       })
           .eq('id', messageId)
           .eq('sender_id', userId);
     } catch (e, st) {
+      if (rollbackList != null) {
+        _cacheMessages(affectedProjectId, rollbackList);
+        _safeEmit(affectedProjectId, rollbackList);
+      }
+
       AppLogger.error(
         'Edit message error',
         error: e,
@@ -995,11 +954,11 @@ extension ChatServiceFinal on ChatService {
     }
 
     String? affectedProjectId;
+    List<MessageModel>? rollbackList;
 
     for (final entry in _cache.entries) {
       final projectId = entry.key;
-      final list =
-      List<MessageModel>.from(entry.value);
+      final list = List<MessageModel>.from(entry.value);
 
       final index = list.indexWhere(
             (m) => m.id == messageId,
@@ -1016,6 +975,7 @@ extension ChatServiceFinal on ChatService {
       }
 
       affectedProjectId = projectId;
+      rollbackList = List<MessageModel>.from(list);
 
       list[index] = current.copyWith(
         isDeleted: true,
@@ -1042,6 +1002,11 @@ extension ChatServiceFinal on ChatService {
           .eq('id', messageId)
           .eq('sender_id', userId);
     } catch (e, st) {
+      if (rollbackList != null) {
+        _cacheMessages(affectedProjectId, rollbackList);
+        _safeEmit(affectedProjectId, rollbackList);
+      }
+
       AppLogger.error(
         'Delete message error',
         error: e,
@@ -1071,13 +1036,8 @@ extension ChatServiceFinal on ChatService {
     }
 
     try {
-      final rawName =
-          fileName ??
-              (file != null
-                  ? file.path
-                  .split('/')
-                  .last
-                  : 'file');
+      final rawName = fileName ??
+          (file != null ? file.path.split('/').last : 'file');
 
       final safeName = rawName.replaceAll(
         RegExp(r'[^a-zA-Z0-9._-]'),
@@ -1087,20 +1047,15 @@ extension ChatServiceFinal on ChatService {
       final uniqueName =
           '${DateTime.now().millisecondsSinceEpoch}_$safeName';
 
-      final path =
-          'chat_files/$projectId/$uniqueName';
+      final path = 'chat_files/$projectId/$uniqueName';
 
       if (fileBytes != null) {
-        await _client.storage
-            .from(SupabaseService.bucket)
-            .uploadBinary(
+        await _client.storage.from(SupabaseService.bucket).uploadBinary(
           path,
           fileBytes,
         );
       } else if (file != null) {
-        await _client.storage
-            .from(SupabaseService.bucket)
-            .upload(
+        await _client.storage.from(SupabaseService.bucket).upload(
           path,
           file,
         );
@@ -1112,20 +1067,13 @@ extension ChatServiceFinal on ChatService {
           .from(SupabaseService.bucket)
           .getPublicUrl(path);
 
-      await _client
-          .from('project_messages')
-          .insert({
+      await _client.from('project_messages').insert({
         'project_id': projectId,
         'sender_id': userId,
         'content': url,
-        'type': type == MessageType.image
-            ? 'image'
-            : 'file',
+        'type': type == MessageType.image ? 'image' : 'file',
         'file_name': rawName,
-        'preview_url':
-        type == MessageType.image
-            ? url
-            : null,
+        'preview_url': type == MessageType.image ? url : null,
         'status': 'sent',
         'is_deleted': false,
       });
@@ -1148,14 +1096,11 @@ extension ChatServiceFinal on ChatService {
   Future<void> loadMore(
       String projectId,
       ) async {
-    if (_loadingMoreProjects.contains(
-      projectId,
-    )) {
+    if (_loadingMoreProjects.contains(projectId)) {
       return;
     }
 
-    final current =
-    _getProjectCache(projectId);
+    final current = _getProjectCache(projectId);
 
     if (current.isEmpty) {
       return;
@@ -1168,22 +1113,11 @@ extension ChatServiceFinal on ChatService {
 
       final rows = await _client
           .from('project_messages')
-          .select('''
-            *,
-            profiles:sender_id(full_name),
-            reply:reply_to_message_id(
-              id,
-              content,
-              sender_id,
-              profiles:sender_id(full_name)
-            ),
-            message_reads!left(user_id)
-          ''')
+          .select(_messageSelectQuery)
           .eq('project_id', projectId)
           .lt(
         'created_at',
-        last.createdAt
-            .toIso8601String(),
+        last.createdAt.toUtc().toIso8601String(),
       )
           .order(
         'created_at',
@@ -1195,36 +1129,56 @@ extension ChatServiceFinal on ChatService {
         return;
       }
 
-      final loaded =
-      <MessageModel>[];
+      final loaded = <MessageModel>[];
 
-      for (final row
-      in List<Map<String, dynamic>>.from(
-        rows,
-      )) {
+      for (final row in List<Map<String, dynamic>>.from(rows)) {
         loaded.add(
           await _buildMessageFromRow(row),
         );
       }
 
       final merged = {
-        for (final m in current) m.id: m,
+        for (final message in current) message.id: message,
       };
 
-      for (final m in loaded) {
-        merged[m.id] = m;
+      for (final message in loaded) {
+        merged[message.id] = message;
       }
 
-      final result =
-      merged.values.toList();
+      final result = merged.values.toList();
 
       _cacheMessages(projectId, result);
       _safeEmit(projectId, result);
-    } finally {
-      _loadingMoreProjects.remove(
-        projectId,
+    } catch (e, st) {
+      AppLogger.error(
+        'Load more messages error',
+        error: e,
+        stackTrace: st,
+        tag: 'ChatService',
       );
+    } finally {
+      _loadingMoreProjects.remove(projectId);
     }
+  }
+
+  // =========================================================
+  // TRANSLATE
+  // =========================================================
+
+  Future<String> translateMessage(
+      String text,
+      String targetLanguage,
+      ) async {
+    return _aiService.translate(
+      text: text,
+      targetLanguage: targetLanguage,
+    );
+  }
+
+  Future<String> detectMessageLanguage(
+      String text,
+      ) async {
+    return _aiService.detectLanguage(text);
   }
 
   // =========================================================
@@ -1243,7 +1197,7 @@ extension ChatServiceFinal on ChatService {
     try {
       final rows = await _client
           .from('project_messages')
-          .select('id,sender_id')
+          .select('id, sender_id')
           .eq('project_id', projectId)
           .neq('sender_id', userId);
 
@@ -1256,26 +1210,18 @@ extension ChatServiceFinal on ChatService {
           'message_id': m['id'],
           'user_id': userId,
           'project_id': projectId,
-          'read_at': DateTime.now()
-              .toUtc()
-              .toIso8601String(),
+          'read_at': DateTime.now().toUtc().toIso8601String(),
         };
       }).toList();
 
-      await _client
-          .from('message_reads')
-          .upsert(
+      await _client.from('message_reads').upsert(
         inserts,
-        onConflict:
-        'message_id,user_id',
+        onConflict: 'message_id,user_id',
       );
 
-      final list =
-      _getProjectCache(projectId);
+      final list = _getProjectCache(projectId);
 
-      for (int i = 0;
-      i < list.length;
-      i++) {
+      for (int i = 0; i < list.length; i++) {
         if (list[i].senderId != userId) {
           list[i] = list[i].copyWith(
             isRead: true,
@@ -1299,8 +1245,7 @@ extension ChatServiceFinal on ChatService {
   // UNREAD COUNTS
   // =========================================================
 
-  Stream<Map<String, int>>
-  getAllUnreadCounts(
+  Stream<Map<String, int>> getAllUnreadCounts(
       String userId,
       ) {
     if (_unreadUserId != userId) {
@@ -1308,7 +1253,9 @@ extension ChatServiceFinal on ChatService {
       _subscribeUnread(userId);
     }
 
-    unawaited(_loadUnread(userId));
+    unawaited(
+      _loadUnread(userId),
+    );
 
     return _unreadController.stream;
   }
@@ -1316,8 +1263,11 @@ extension ChatServiceFinal on ChatService {
   void _subscribeUnread(
       String userId,
       ) {
-    final channel =
-    _client.channel('unread:$userId');
+    if (_disposed) {
+      return;
+    }
+
+    final channel = _client.channel('unread:$userId');
 
     _unreadUserId = userId;
     _unreadChannel = channel;
@@ -1340,7 +1290,18 @@ extension ChatServiceFinal on ChatService {
       },
     );
 
-    channel.subscribe();
+    channel.subscribe(
+          (status, [error]) {
+        if (status == RealtimeSubscribeStatus.channelError ||
+            status == RealtimeSubscribeStatus.timedOut) {
+          AppLogger.error(
+            'Unread realtime error',
+            error: error,
+            tag: 'ChatService',
+          );
+        }
+      },
+    );
   }
 
   Future<void> _loadUnread(
@@ -1355,10 +1316,18 @@ extension ChatServiceFinal on ChatService {
       final map = <String, int>{};
 
       for (final row in rows) {
-        map[row['project_id']] =
-            (row['unread'] as num?)
-                ?.toInt() ??
-                0;
+        final projectId = row['project_id']?.toString();
+
+        if (projectId == null || projectId.isEmpty) {
+          continue;
+        }
+
+        final unreadValue =
+            row['unread'] ?? row['unread_count'] ?? row['count'];
+
+        map[projectId] = unreadValue is num
+            ? unreadValue.toInt()
+            : int.tryParse(unreadValue?.toString() ?? '0') ?? 0;
       }
 
       if (_mapEquals(
@@ -1368,10 +1337,12 @@ extension ChatServiceFinal on ChatService {
         return;
       }
 
-      _lastUnread = map;
+      _lastUnread = Map<String, int>.from(map);
 
       if (!_unreadController.isClosed) {
-        _unreadController.add(map);
+        _unreadController.add(
+          Map<String, int>.unmodifiable(map),
+        );
       }
     } catch (e, st) {
       AppLogger.error(
@@ -1405,7 +1376,7 @@ extension ChatServiceFinal on ChatService {
 
     _unreadChannel = null;
     _unreadUserId = null;
-    _lastUnread.clear();
+    _lastUnread = {};
 
     if (channel != null) {
       unawaited(
@@ -1414,7 +1385,9 @@ extension ChatServiceFinal on ChatService {
     }
   }
 
-  Future<void> forceReloadUnread(String userId) async {
+  Future<void> forceReloadUnread(
+      String userId,
+      ) async {
     await _loadUnread(userId);
   }
 
@@ -1425,30 +1398,23 @@ extension ChatServiceFinal on ChatService {
   Future<void> disposeProject(
       String projectId,
       ) async {
-    if (_disposingProjects.contains(
-      projectId,
-    )) {
+    if (_disposingProjects.contains(projectId)) {
       return;
     }
 
     _disposingProjects.add(projectId);
 
     try {
-      final channel =
-      _chatChannels.remove(projectId);
+      final channel = _chatChannels.remove(projectId);
 
       if (channel != null) {
         await channel.unsubscribe();
-        await _client.removeChannel(
-          channel,
-        );
+        await _client.removeChannel(channel);
       }
 
-      final controller =
-      _controllers.remove(projectId);
+      final controller = _controllers.remove(projectId);
 
-      if (controller != null &&
-          !controller.isClosed) {
+      if (controller != null && !controller.isClosed) {
         await controller.close();
       }
 
@@ -1457,21 +1423,16 @@ extension ChatServiceFinal on ChatService {
       _loadingProjects.remove(projectId);
       _loadingMoreProjects.remove(projectId);
 
-      _cacheService.clearProject(
-        projectId,
-      );
+      _cacheService.clearProject(projectId);
     } finally {
-      _disposingProjects.remove(
-        projectId,
-      );
+      _disposingProjects.remove(projectId);
     }
   }
 
   Future<void> dispose() async {
     _disposed = true;
 
-    for (final id
-    in _chatChannels.keys.toList()) {
+    for (final id in _chatChannels.keys.toList()) {
       await disposeProject(id);
     }
 
@@ -1484,7 +1445,7 @@ extension ChatServiceFinal on ChatService {
     _controllers.clear();
     _cache.clear();
     _activeChats.clear();
-    _lastUnread.clear();
+    _lastUnread = {};
     _userCache.clear();
 
     _cacheService.clearAll();

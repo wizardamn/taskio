@@ -1,19 +1,17 @@
-import 'dart:io';
-import 'package:uuid/uuid.dart';
+import 'dart:io' show File;
 
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/project_model.dart';
 import '../services/notification_service.dart';
 import '../services/supabase_service.dart';
 
 class ProjectService {
-  final SupabaseClient client =
-      SupabaseService.client;
+  final SupabaseClient client = SupabaseService.client;
 
-  final String bucketName =
-      SupabaseService.bucket;
+  final String bucketName = SupabaseService.bucket;
 
   final NotificationService _notifications =
   NotificationService();
@@ -28,6 +26,8 @@ class ProjectService {
     _currentUserId = userId;
   }
 
+  String? get currentUserId => _currentUserId;
+
   // =========================================================
   // ERROR
   // =========================================================
@@ -37,9 +37,7 @@ class ProjectService {
       StackTrace st,
       String operation,
       ) {
-    debugPrint(
-      '[ProjectService] $operation: $e',
-    );
+    debugPrint('[ProjectService] $operation: $e');
 
     Error.throwWithStackTrace(
       Exception('$operation: $e'),
@@ -52,42 +50,55 @@ class ProjectService {
   // =========================================================
 
   Future<void> _ensureCurrentUserProfile() async {
-    if (_currentUserId == null) return;
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      return;
+    }
 
     try {
       final exists = await client
           .from('profiles')
           .select('id')
-          .eq('id', _currentUserId!)
+          .eq('id', userId)
           .maybeSingle();
 
-      if (exists != null) return;
+      if (exists != null) {
+        return;
+      }
 
       final user = client.auth.currentUser;
-
       final email = user?.email ?? '';
 
       final fullName =
-          user?.userMetadata?['full_name'] ??
-              email.split('@').first;
+      user?.userMetadata?['full_name']?.toString().trim();
 
       final username =
-          user?.userMetadata?['username'] ??
-              email
-                  .split('@')
-                  .first
-                  .toLowerCase();
+      user?.userMetadata?['username']?.toString().trim();
 
-      await client.from('profiles').upsert({
-        'id': _currentUserId,
-        'username': username,
-        'full_name': fullName,
-        'role': 'student',
-        'created_at':
-        DateTime.now().toUtc().toIso8601String(),
-        'updated_at':
-        DateTime.now().toUtc().toIso8601String(),
-      });
+      final fallbackName = email.contains('@')
+          ? email.split('@').first
+          : 'User';
+
+      final fallbackUsername = fallbackName
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9_]+'), '_');
+
+      await client.from('profiles').upsert(
+        {
+          'id': userId,
+          'username': username != null && username.isNotEmpty
+              ? username
+              : fallbackUsername,
+          'full_name': fullName != null && fullName.isNotEmpty
+              ? fullName
+              : fallbackName,
+          'role': 'student',
+          'created_at': DateTime.now().toUtc().toIso8601String(),
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        onConflict: 'id',
+      );
     } catch (e, st) {
       _handleError(
         e,
@@ -98,33 +109,151 @@ class ProjectService {
   }
 
   // =========================================================
-// PERMISSIONS
-// Проверка прав текущего пользователя на редактирование проекта
-// =========================================================
+  // PERMISSIONS
+  // =========================================================
 
-  bool canEditProject(ProjectModel project) {
-    // Получение ID текущего авторизованного пользователя
+  bool isOwner(ProjectModel project) {
     final userId = _currentUserId;
-    // Если пользователь не авторизован — доступ запрещён
-    if (userId == null) {
+
+    if (userId == null || userId.isEmpty) {
       return false;
     }
-    // Поиск текущего пользователя среди участников проекта
+
+    return project.ownerId == userId;
+  }
+
+  bool isProjectMember(ProjectModel project) {
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      return false;
+    }
+
+    if (project.ownerId == userId) {
+      return true;
+    }
+
+    return project.participantsData.any(
+          (participant) => participant.id == userId,
+    );
+  }
+
+  bool canOpenProject(ProjectModel project) {
+    return isProjectMember(project);
+  }
+
+  bool canEditProject(ProjectModel project) {
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      return false;
+    }
+
+    if (project.ownerId == userId) {
+      return true;
+    }
+
     for (final participant in project.participantsData) {
-      // Если это не текущий пользователь — переходим к следующему участнику
       if (participant.id != userId) {
         continue;
       }
-      // Разрешаем редактирование только владельцу или редактору проекта
+
       return participant.role == ProjectRole.owner ||
           participant.role == ProjectRole.editor;
     }
-    // Если пользователь не найден среди участников — доступ запрещён
+
     return false;
   }
 
-  bool isOwner(ProjectModel project) {
-    return project.ownerId == _currentUserId;
+  bool canManageProjectContent(ProjectModel project) {
+    return isProjectMember(project);
+  }
+
+  bool canManageMembers(ProjectModel project) {
+    return isOwner(project);
+  }
+
+  bool canGradeProject(ProjectModel project) {
+    return isOwner(project) || canEditProject(project);
+  }
+
+  Future<bool> canEditProjectById(String projectId) async {
+    final project = await getById(projectId);
+
+    if (project == null) {
+      return false;
+    }
+
+    return canEditProject(project);
+  }
+
+  // =========================================================
+  // USERS FOR PARTICIPANT SELECTION
+  // =========================================================
+
+  Future<List<Map<String, dynamic>>> getUsersForSelection() async {
+    try {
+      final response = await client
+          .from('profiles')
+          .select(
+        '''
+            id,
+            full_name,
+            first_name,
+            last_name,
+            username,
+            avatar_url,
+            role
+            ''',
+      )
+          .order('full_name', ascending: true);
+
+      final users = List<Map<String, dynamic>>.from(response);
+
+      users.sort((a, b) {
+        final aName = _displayNameFromMap(a).toLowerCase();
+        final bName = _displayNameFromMap(b).toLowerCase();
+
+        return aName.compareTo(bName);
+      });
+
+      return users;
+    } catch (e, st) {
+      _handleError(
+        e,
+        st,
+        'load users failed',
+      );
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getAllUsers() {
+    return getUsersForSelection();
+  }
+
+  String _displayNameFromMap(Map<String, dynamic> user) {
+    final fullName = user['full_name']?.toString().trim();
+
+    if (fullName != null && fullName.isNotEmpty) {
+      return fullName;
+    }
+
+    final firstName = user['first_name']?.toString().trim() ?? '';
+    final lastName = user['last_name']?.toString().trim() ?? '';
+
+    final combined = '$firstName $lastName'.trim();
+
+    if (combined.isNotEmpty) {
+      return combined;
+    }
+
+    final username = user['username']?.toString().trim();
+
+    if (username != null && username.isNotEmpty) {
+      return username;
+    }
+
+    return 'User';
   }
 
   // =========================================================
@@ -132,7 +261,9 @@ class ProjectService {
   // =========================================================
 
   Future<List<ProjectModel>> getAll() async {
-    if (_currentUserId == null) {
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
       return [];
     }
 
@@ -141,8 +272,7 @@ class ProjectService {
         'get_my_project_ids',
       );
 
-      final ids =
-      List<String>.from(idsRaw ?? []);
+      final ids = List<String>.from(idsRaw ?? []);
 
       if (ids.isEmpty) {
         return [];
@@ -159,8 +289,9 @@ class ProjectService {
 
       return response
           .map<ProjectModel>(
-            (raw) =>
-            ProjectModel.fromJson(raw),
+            (raw) => ProjectModel.fromJson(
+          Map<String, dynamic>.from(raw),
+        ),
       )
           .toList();
     } catch (e, st) {
@@ -176,9 +307,11 @@ class ProjectService {
   // GET BY ID
   // =========================================================
 
-  Future<ProjectModel?> getById(
-      String id,
-      ) async {
+  Future<ProjectModel?> getById(String id) async {
+    if (id.trim().isEmpty) {
+      return null;
+    }
+
     try {
       final data = await client
           .from('projects_view')
@@ -190,7 +323,9 @@ class ProjectService {
         return null;
       }
 
-      return ProjectModel.fromJson(data);
+      return ProjectModel.fromJson(
+        Map<String, dynamic>.from(data),
+      );
     } catch (e, st) {
       _handleError(
         e,
@@ -201,6 +336,49 @@ class ProjectService {
   }
 
   // =========================================================
+  // PROJECT JSON
+  // =========================================================
+
+  Map<String, dynamic> _projectJsonForDb(
+      ProjectModel project, {
+        String? ownerId,
+      }) {
+    final source = Map<String, dynamic>.from(
+      project.toJson(),
+    );
+
+    final allowed = <String>{
+      'owner_id',
+      'title',
+      'description',
+      'deadline',
+      'status',
+      'color',
+      'category',
+      'max_members',
+      'max_attachments',
+      'grading_enabled',
+      'grade',
+    };
+
+    final json = <String, dynamic>{};
+
+    for (final entry in source.entries) {
+      if (allowed.contains(entry.key)) {
+        json[entry.key] = entry.value;
+      }
+    }
+
+    if (ownerId != null && ownerId.isNotEmpty) {
+      json['owner_id'] = ownerId;
+    }
+
+    json.removeWhere((key, value) => value == null);
+
+    return json;
+  }
+
+  // =========================================================
   // SYNC PARTICIPANTS
   // =========================================================
 
@@ -208,34 +386,75 @@ class ProjectService {
     required String projectId,
     required String ownerId,
     required List<String> participantIds,
+    List<ProjectParticipant>? participants,
   }) async {
+    if (projectId.trim().isEmpty || ownerId.trim().isEmpty) {
+      return;
+    }
+
     try {
-      final existing = await client
-          .from('project_members')
-          .select('member_id')
-          .eq('project_id', projectId);
+      final project = await getById(projectId);
 
-      final existingIds = existing
-          .map<String>(
-            (e) =>
-            e['member_id'].toString(),
-      )
+      final roleById = <String, ProjectRole>{};
+
+      if (participants != null) {
+        for (final participant in participants) {
+          final id = participant.id.trim();
+
+          if (id.isEmpty) {
+            continue;
+          }
+
+          roleById[id] = id == ownerId
+              ? ProjectRole.owner
+              : _normalizeEditableRole(participant.role);
+        }
+      }
+
+      final targetIds = participantIds
+          .map((id) => id.trim())
+          .where((id) => id.isNotEmpty)
           .toSet();
-
-      final targetIds =
-      participantIds.toSet();
 
       targetIds.add(ownerId);
 
-      final toAdd =
-      targetIds.difference(existingIds);
+      if (project != null &&
+          project.maxMembers > 0 &&
+          targetIds.length > project.maxMembers) {
+        throw Exception('projects.max_members_error');
+      }
+
+      final existing = await client
+          .from('project_members')
+          .select('member_id, role')
+          .eq('project_id', projectId);
+
+      final existingRows =
+      List<Map<String, dynamic>>.from(existing);
+
+      final existingIds = existingRows
+          .map<String>((row) => row['member_id'].toString())
+          .toSet();
+
+      final existingRoles = <String, String>{};
+
+      for (final row in existingRows) {
+        final memberId = row['member_id']?.toString();
+        final role = row['role']?.toString();
+
+        if (memberId == null || memberId.isEmpty) {
+          continue;
+        }
+
+        existingRoles[memberId] =
+        role != null && role.isNotEmpty ? role : 'viewer';
+      }
 
       final toRemove = existingIds
           .difference(targetIds)
           .where((id) => id != ownerId)
           .toSet();
 
-      // REMOVE
       if (toRemove.isNotEmpty) {
         await client
             .from('project_members')
@@ -247,37 +466,31 @@ class ProjectService {
         );
       }
 
-      // ADD
-      if (toAdd.isNotEmpty) {
-        final rows = toAdd.map((id) {
-          return {
-            'project_id': projectId,
-            'member_id': id,
-            'role': id == ownerId
-                ? 'owner'
-                : 'editor',
-          };
-        }).toList();
+      final rowsToUpsert = <Map<String, dynamic>>[];
 
-        await client
-            .from('project_members')
-            .insert(rows);
+      for (final id in targetIds) {
+        final role = id == ownerId
+            ? ProjectRole.owner
+            : roleById[id] ??
+            ProjectRoleExtension.fromString(
+              existingRoles[id],
+            );
+
+        rowsToUpsert.add({
+          'project_id': projectId,
+          'member_id': id,
+          'role': id == ownerId
+              ? ProjectRole.owner.value
+              : _normalizeEditableRole(role).value,
+        });
       }
 
-      // ENSURE OWNER
-      await client
-          .from('project_members')
-          .upsert(
-        [
-          {
-            'project_id': projectId,
-            'member_id': ownerId,
-            'role': 'owner',
-          }
-        ],
-        onConflict:
-        'project_id,member_id',
-      );
+      if (rowsToUpsert.isNotEmpty) {
+        await client.from('project_members').upsert(
+          rowsToUpsert,
+          onConflict: 'project_id,member_id',
+        );
+      }
     } catch (e, st) {
       _handleError(
         e,
@@ -287,65 +500,112 @@ class ProjectService {
     }
   }
 
-// =========================================================
-// ADD PROJECT - создание нового проекта
-// =========================================================
-  Future<ProjectModel> add(
-      ProjectModel project,
-      ) async {
-    // Проверка авторизации пользователя
-    if (_currentUserId == null) {
-      throw Exception(
-        'errors.not_authenticated',
+  ProjectRole _normalizeEditableRole(ProjectRole role) {
+    if (role == ProjectRole.owner) {
+      return ProjectRole.editor;
+    }
+
+    return role;
+  }
+
+  Future<void> updateMemberRole({
+    required String projectId,
+    required String memberId,
+    required ProjectRole role,
+  }) async {
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      throw Exception('errors.not_authenticated');
+    }
+
+    try {
+      final project = await getById(projectId);
+
+      if (project == null) {
+        throw Exception('errors.project_not_found');
+      }
+
+      if (!isOwner(project)) {
+        throw Exception('errors.no_permission');
+      }
+
+      if (memberId == project.ownerId && role != ProjectRole.owner) {
+        throw Exception('errors.no_permission');
+      }
+
+      await client
+          .from('project_members')
+          .update({
+        'role': memberId == project.ownerId
+            ? ProjectRole.owner.value
+            : _normalizeEditableRole(role).value,
+      })
+          .eq('project_id', projectId)
+          .eq('member_id', memberId);
+    } catch (e, st) {
+      _handleError(
+        e,
+        st,
+        'update member role failed',
       );
     }
-    // Убеждаемся, что профиль пользователя существует
+  }
+
+  // =========================================================
+  // ADD PROJECT
+  // =========================================================
+
+  Future<ProjectModel> add(ProjectModel project) async {
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      throw Exception('errors.not_authenticated');
+    }
+
     await _ensureCurrentUserProfile();
+
     try {
-      // Преобразуем проект в JSON и назначаем текущего пользователя владельцем
-      final json = project.toJson()
-        ..['owner_id'] = _currentUserId;
-      // Создаём проект в базе данных
+      final json = _projectJsonForDb(
+        project,
+        ownerId: userId,
+      );
+
       final response = await client
           .from('projects')
           .insert(json)
-          .select()
+          .select('id')
           .single();
-      // Получаем ID созданного проекта
-      final createdId =
-      response['id'].toString();
-      // Получаем список участников проекта
-      final participantIds = project
-          .participantsData
-          .map((e) => e.id)
-          .toSet();
-      // Добавляем владельца проекта в список участников
-      participantIds.add(_currentUserId!);
-      // Сохраняем участников в таблицу project_members
-      await client
-          .from('project_members')
-          .upsert(
-        participantIds.map((id) {
-          return {
-            'project_id': createdId,
-            'member_id': id,
-            // Назначаем роль: owner для создателя, editor для остальных
-            'role': id == _currentUserId
-                ? 'owner'
-                : 'editor',
-          };
-        }).toList(),
-        onConflict: 'project_id,member_id',
+
+      final createdId = response['id'].toString();
+
+      final participants = _normalizeProjectParticipants(
+        ownerId: userId,
+        participants: project.participantsData,
       );
-      // Показываем уведомление о создании проекта
+
+      await syncParticipants(
+        projectId: createdId,
+        ownerId: userId,
+        participantIds: participants
+            .map((participant) => participant.id)
+            .toList(),
+        participants: participants,
+      );
+
       await _notifications.showSimple(
         'project_created',
         project.title,
       );
-      // Возвращаем полностью загруженный созданный проект
-      return (await getById(createdId))!;
+
+      final created = await getById(createdId);
+
+      if (created == null) {
+        throw Exception('errors.project_not_found');
+      }
+
+      return created;
     } catch (e, st) {
-      // Обработка ошибок
       _handleError(
         e,
         st,
@@ -358,36 +618,43 @@ class ProjectService {
   // UPDATE PROJECT
   // =========================================================
 
-  Future<void> update(
-      ProjectModel project,
-      ) async {
-    if (_currentUserId == null) {
-      throw Exception(
-        'User not authenticated',
-      );
+  Future<void> update(ProjectModel project) async {
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      throw Exception('errors.not_authenticated');
     }
 
     try {
-      if (!canEditProject(project)) {
-        throw Exception(
-          'errors.no_permission',
-        );
+      final dbProject = await getById(project.id);
+
+      if (dbProject == null) {
+        throw Exception('errors.project_not_found');
       }
 
-      final json = project.toJson();
+      if (!canEditProject(dbProject)) {
+        throw Exception('errors.no_permission');
+      }
+
+      final json = _projectJsonForDb(project);
 
       await client
           .from('projects')
           .update(json)
           .eq('id', project.id);
 
+      final participants = _normalizeProjectParticipants(
+        ownerId: dbProject.ownerId,
+        participants: project.participantsData,
+      );
+
       await syncParticipants(
         projectId: project.id,
-        ownerId: project.ownerId,
-        participantIds: project
-            .participantsData
-            .map((e) => e.id)
+        ownerId: dbProject.ownerId,
+        participantIds: participants
+            .map((participant) => participant.id)
             .toList(),
+        participants: participants,
       );
 
       await _notifications.showSimple(
@@ -403,61 +670,140 @@ class ProjectService {
     }
   }
 
+  List<ProjectParticipant> _normalizeProjectParticipants({
+    required String ownerId,
+    required List<ProjectParticipant> participants,
+  }) {
+    final map = <String, ProjectParticipant>{};
+
+    for (final participant in participants) {
+      final id = participant.id.trim();
+
+      if (id.isEmpty) {
+        continue;
+      }
+
+      map[id] = ProjectParticipant(
+        id: id,
+        fullName: participant.fullName,
+        username: participant.username,
+        avatarUrl: participant.avatarUrl,
+        role: id == ownerId
+            ? ProjectRole.owner
+            : _normalizeEditableRole(participant.role),
+      );
+    }
+
+    if (ownerId.isNotEmpty) {
+      final owner = map[ownerId];
+
+      map[ownerId] = ProjectParticipant(
+        id: ownerId,
+        fullName: owner?.fullName ?? 'Owner',
+        username: owner?.username,
+        avatarUrl: owner?.avatarUrl,
+        role: ProjectRole.owner,
+      );
+    }
+
+    final result = map.values.toList();
+
+    result.sort((a, b) {
+      if (a.id == ownerId) {
+        return -1;
+      }
+
+      if (b.id == ownerId) {
+        return 1;
+      }
+
+      return a.fullName
+          .toLowerCase()
+          .compareTo(b.fullName.toLowerCase());
+    });
+
+    return result;
+  }
+
   // =========================================================
   // DELETE PROJECT
   // =========================================================
 
   Future<void> delete(String id) async {
-    if (_currentUserId == null) {
-      throw Exception(
-        'User not authenticated',
-      );
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      throw Exception('errors.not_authenticated');
     }
 
     try {
-      final project =
-      await getById(id);
+      final project = await getById(id);
 
       if (project == null) {
         return;
       }
 
       if (!isOwner(project)) {
-        throw Exception(
-          'errors.no_permission',
-        );
+        throw Exception('errors.no_permission');
       }
 
-      // DELETE FILES
       if (project.attachments.isNotEmpty) {
         final paths = project.attachments
-            .map((e) => e.filePath)
+            .map((attachment) => attachment.filePath)
+            .where((path) => path.trim().isNotEmpty)
             .toList();
 
-        try {
-          await client.storage
-              .from(bucketName)
-              .remove(paths);
-        } catch (e) {
-          debugPrint(
-            'storage cleanup failed: $e',
-          );
+        if (paths.isNotEmpty) {
+          try {
+            await client.storage.from(bucketName).remove(paths);
+          } catch (e) {
+            debugPrint(
+              '[ProjectService] storage cleanup failed: $e',
+            );
+          }
         }
       }
 
-      // DELETE ATTACHMENTS
-      await client
-          .from('project_attachments')
-          .delete()
-          .eq('project_id', id);
+      await _safeDeleteByProjectId(
+        table: 'message_reads',
+        projectId: id,
+      );
 
-      // DELETE MEMBERS
-      await client
-          .from('project_members')
-          .delete()
-          .eq('project_id', id);
+      await _safeDeleteByProjectId(
+        table: 'chat_typing',
+        projectId: id,
+      );
 
-      // DELETE PROJECT
+      await _safeDeleteByProjectId(
+        table: 'chat_presence',
+        projectId: id,
+      );
+
+      await _safeDeleteByProjectId(
+        table: 'project_messages',
+        projectId: id,
+      );
+
+      await _safeDeleteByProjectId(
+        table: 'project_tasks',
+        projectId: id,
+      );
+
+      await _safeDeleteByProjectId(
+        table: 'project_grades',
+        projectId: id,
+      );
+
+      await _safeDeleteByProjectId(
+        table: 'project_attachments',
+        projectId: id,
+      );
+
+      await _safeDeleteByProjectId(
+        table: 'project_members',
+        projectId: id,
+      );
+
       await client
           .from('projects')
           .delete()
@@ -465,13 +811,26 @@ class ProjectService {
 
       await _notifications.showSimple(
         'project_deleted',
-        '',
+        project.title,
       );
     } catch (e, st) {
       _handleError(
         e,
         st,
         'delete project failed',
+      );
+    }
+  }
+
+  Future<void> _safeDeleteByProjectId({
+    required String table,
+    required String projectId,
+  }) async {
+    try {
+      await client.from(table).delete().eq('project_id', projectId);
+    } catch (e) {
+      debugPrint(
+        '[ProjectService] delete from $table skipped: $e',
       );
     }
   }
@@ -486,127 +845,115 @@ class ProjectService {
     List<File>? files,
     List<Uint8List>? filesBytes,
   }) async {
-    if (_currentUserId == null) {
-      throw Exception(
-        'User not authenticated',
-      );
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      throw Exception('errors.not_authenticated');
     }
 
     try {
-      final project =
-      await getById(projectId);
+      final project = await getById(projectId);
 
       if (project == null) {
-        throw Exception(
-          'errors.project_not_found',
-        );
+        throw Exception('errors.project_not_found');
       }
 
-      if (!canEditProject(project)) {
-        throw Exception(
-          'errors.no_permission',
-        );
+      if (!canManageProjectContent(project)) {
+        throw Exception('errors.no_permission');
       }
 
-      final List<Attachment> uploaded =
-      [];
+      if (fileNames.isEmpty) {
+        return project;
+      }
+
+      final totalAfterUpload =
+          project.attachments.length + fileNames.length;
+
+      if (project.maxAttachments > 0 &&
+          totalAfterUpload > project.maxAttachments) {
+        throw Exception('projects.max_attachments_error');
+      }
 
       if (kIsWeb) {
         if (filesBytes == null ||
-            filesBytes.length !=
-                fileNames.length) {
-          throw Exception(
-            'errors.invalid_files_bytes',
-          );
+            filesBytes.length != fileNames.length) {
+          throw Exception('errors.invalid_files_bytes');
         }
       } else {
-        if (files == null ||
-            files.length !=
-                fileNames.length) {
-          throw Exception(
-            'errors.invalid_files',
-          );
+        if (files == null || files.length != fileNames.length) {
+          throw Exception('errors.invalid_files');
         }
       }
 
-      for (int i = 0;
-      i < fileNames.length;
-      i++) {
-        final originalName =
-        fileNames[i];
+      final uploaded = <Attachment>[];
 
-        final ext =
-        originalName.contains('.')
-            ? originalName
-            .split('.')
-            .last
-            : 'bin';
+      for (int index = 0; index < fileNames.length; index++) {
+        final originalName = fileNames[index].trim();
 
-        final safeName =
-            '${DateTime.now().millisecondsSinceEpoch}_$i.$ext';
+        if (originalName.isEmpty) {
+          continue;
+        }
 
-        final path =
-            'projects/$projectId/$_currentUserId/$safeName';
+        final ext = _extensionOf(originalName);
+        final mimeType = _mimeTypeFromExtension(ext);
 
-        // STORAGE
-        if (kIsWeb &&
-            filesBytes != null) {
-          await client.storage
-              .from(bucketName)
-              .uploadBinary(
+        final safeName = _buildSafeStorageName(
+          originalName,
+          index,
+        );
+
+        final path = 'projects/$projectId/$userId/$safeName';
+
+        int fileSize = 0;
+
+        if (kIsWeb && filesBytes != null) {
+          fileSize = filesBytes[index].length;
+
+          await client.storage.from(bucketName).uploadBinary(
             path,
-            filesBytes[i],
-            fileOptions:
-            const FileOptions(
+            filesBytes[index],
+            fileOptions: FileOptions(
               upsert: true,
+              contentType: mimeType,
             ),
           );
         } else if (files != null) {
-          await client.storage
-              .from(bucketName)
-              .upload(
+          fileSize = await files[index].length();
+
+          await client.storage.from(bucketName).upload(
             path,
-            files[i],
-            fileOptions:
-            const FileOptions(
+            files[index],
+            fileOptions: FileOptions(
               upsert: true,
+              contentType: mimeType,
             ),
           );
         }
 
-        final attachmentId =
-        const Uuid().v4();
+        final attachmentId = const Uuid().v4();
 
-        final attachment =
-        Attachment(
+        final attachment = Attachment(
           id: attachmentId,
           projectId: projectId,
           fileName: originalName,
           filePath: path,
-          mimeType: ext,
+          mimeType: mimeType,
+          fileSize: fileSize,
           uploadedAt: DateTime.now(),
-          uploaderId: _currentUserId!,
+          uploaderId: userId,
         );
 
         uploaded.add(attachment);
 
-        // SAVE DB
-        await client
-            .from('project_attachments')
-            .insert({
+        await client.from('project_attachments').insert({
           'id': attachmentId,
           'project_id': projectId,
-          'uploaded_by':
-          _currentUserId,
-          'file_name':
-          originalName,
+          'uploaded_by': userId,
+          'file_name': originalName,
           'file_path': path,
-          'mime_type': ext,
-          'file_size': 0,
-          'created_at':
-          DateTime.now()
-              .toUtc()
-              .toIso8601String(),
+          'mime_type': mimeType,
+          'file_size': fileSize,
+          'created_at': DateTime.now().toUtc().toIso8601String(),
         });
       }
 
@@ -630,6 +977,83 @@ class ProjectService {
     }
   }
 
+  String _extensionOf(String fileName) {
+    final clean = fileName.trim();
+
+    if (!clean.contains('.')) {
+      return 'bin';
+    }
+
+    final ext = clean.split('.').last.toLowerCase().trim();
+
+    final safeExt = ext.replaceAll(
+      RegExp(r'[^a-zA-Z0-9]+'),
+      '',
+    );
+
+    return safeExt.isEmpty ? 'bin' : safeExt;
+  }
+
+  String _buildSafeStorageName(
+      String originalName,
+      int index,
+      ) {
+    final ext = _extensionOf(originalName);
+
+    return '${DateTime.now().millisecondsSinceEpoch}_'
+        '${index}_${const Uuid().v4()}.$ext';
+  }
+
+  String _mimeTypeFromExtension(String ext) {
+    switch (ext.toLowerCase()) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+
+      case 'png':
+        return 'image/png';
+
+      case 'gif':
+        return 'image/gif';
+
+      case 'webp':
+        return 'image/webp';
+
+      case 'pdf':
+        return 'application/pdf';
+
+      case 'doc':
+        return 'application/msword';
+
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+      case 'xls':
+        return 'application/vnd.ms-excel';
+
+      case 'xlsx':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+      case 'ppt':
+        return 'application/vnd.ms-powerpoint';
+
+      case 'pptx':
+        return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+
+      case 'txt':
+        return 'text/plain';
+
+      case 'zip':
+        return 'application/zip';
+
+      case 'rar':
+        return 'application/vnd.rar';
+
+      default:
+        return 'application/octet-stream';
+    }
+  }
+
   // =========================================================
   // DELETE ATTACHMENT
   // =========================================================
@@ -638,23 +1062,34 @@ class ProjectService {
       String projectId,
       String filePath,
       ) async {
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      throw Exception('errors.not_authenticated');
+    }
+
     try {
-      final project =
-      await getById(projectId);
+      final project = await getById(projectId);
 
       if (project == null) {
         return;
       }
 
-      if (!canEditProject(project)) {
-        throw Exception(
-          'errors.no_permission',
-        );
+      if (!canManageProjectContent(project)) {
+        throw Exception('errors.no_permission');
       }
 
-      await client.storage
-          .from(bucketName)
-          .remove([filePath]);
+      if (filePath.trim().isEmpty) {
+        return;
+      }
+
+      try {
+        await client.storage.from(bucketName).remove([filePath]);
+      } catch (e) {
+        debugPrint(
+          '[ProjectService] storage attachment delete failed: $e',
+        );
+      }
 
       await client
           .from('project_attachments')

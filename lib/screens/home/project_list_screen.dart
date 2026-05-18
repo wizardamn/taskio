@@ -29,9 +29,11 @@ class ProjectListScreen extends StatefulWidget {
       _ProjectListScreenState();
 }
 
-class _ProjectListScreenState
-    extends State<ProjectListScreen> {
+class _ProjectListScreenState extends State<ProjectListScreen> {
   Stream<Map<String, int>>? _unreadStream;
+
+  String? _unreadUserId;
+  bool _isUnreadSyncScheduled = false;
 
   bool _isSearching = false;
 
@@ -42,43 +44,14 @@ class _ProjectListScreenState
   void initState() {
     super.initState();
 
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) {
-      _initialize();
-    });
-  }
-
-  Future<void> _initialize() async {
-    if (!mounted) return;
-
-    final authProv =
-    context.read<AuthProvider>();
-
-    final chatProv =
-    context.read<ChatProvider>();
-
-    if (authProv.isGuest) {
-      return;
-    }
-
-    try {
-      final userId = authProv.userId;
-
-      if (userId != null) {
-        setState(() {
-          _unreadStream =
-              chatProv.getAllUnreadCounts(
-                userId,
-              );
-        });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
       }
-    } catch (e, st) {
-      AppLogger.error(
-        'ProjectListScreen init error',
-        error: e,
-        stackTrace: st,
-      );
-    }
+
+      final authProv = context.read<AuthProvider>();
+      _syncUnreadStream(authProv);
+    });
   }
 
   @override
@@ -88,10 +61,129 @@ class _ProjectListScreenState
   }
 
   // =========================================================
-  // CHAT
+  // UNREAD
   // =========================================================
 
+  void _syncUnreadStream(AuthProvider authProv) {
+    final requestedUserId = authProv.isGuest
+        ? null
+        : authProv.userId;
+
+    if (_unreadUserId == requestedUserId) {
+      return;
+    }
+
+    if (_isUnreadSyncScheduled) {
+      return;
+    }
+
+    _isUnreadSyncScheduled = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _isUnreadSyncScheduled = false;
+
+      if (!mounted) {
+        return;
+      }
+
+      final currentAuth = context.read<AuthProvider>();
+
+      final currentUserId = currentAuth.isGuest
+          ? null
+          : currentAuth.userId;
+
+      if (_unreadUserId == currentUserId) {
+        return;
+      }
+
+      if (currentUserId == null || currentUserId.isEmpty) {
+        setState(() {
+          _unreadUserId = null;
+          _unreadStream = null;
+        });
+
+        BadgeService.update(0);
+        return;
+      }
+
+      try {
+        final chatProv = context.read<ChatProvider>();
+
+        final stream = chatProv.getAllUnreadCounts(
+          currentUserId,
+        );
+
+        setState(() {
+          _unreadUserId = currentUserId;
+          _unreadStream = stream;
+        });
+      } catch (e, st) {
+        AppLogger.error(
+          'Unread stream init error',
+          error: e,
+          stackTrace: st,
+          tag: 'ProjectListScreen',
+        );
+      }
+    });
+  }
+
+  void _updateBadgeSafely(int totalUnread) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      BadgeService.update(totalUnread);
+    });
+  }
+
+  // =========================================================
+  // NAVIGATION
+  // =========================================================
+
+  Future<void> _openProject(ProjectModel project) async {
+    final provider = context.read<ProjectProvider>();
+
+    if (!provider.canOpenProject(project)) {
+      SnackbarManager.showError(
+        'errors.no_permission'.tr(),
+      );
+      return;
+    }
+
+    final updated = await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProjectFormScreen(
+          project: project,
+          isNew: false,
+        ),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    await provider.refreshProject(project.id);
+
+    if (updated == true) {
+      SnackbarManager.showSuccess(
+        'common.updated'.tr(),
+      );
+    }
+  }
+
   void _openChat(ProjectModel project) {
+    final provider = context.read<ProjectProvider>();
+
+    if (!provider.canOpenProject(project)) {
+      SnackbarManager.showError(
+        'errors.no_permission'.tr(),
+      );
+      return;
+    }
+
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ProjectChatScreen(
@@ -108,26 +200,21 @@ class _ProjectListScreenState
   // =========================================================
 
   Future<void> _addProject() async {
-    final authProv =
-    context.read<AuthProvider>();
+    final authProv = context.read<AuthProvider>();
 
     if (authProv.isGuest) {
       SnackbarManager.showWarning(
-        'projects.guest_cannot_create'
-            .tr(),
+        'projects.guest_cannot_create'.tr(),
       );
       return;
     }
 
-    final prov =
-    context.read<ProjectProvider>();
+    final prov = context.read<ProjectProvider>();
 
     try {
-      final newProject =
-      prov.createEmptyProject();
+      final newProject = prov.createEmptyProject();
 
-      final created =
-      await Navigator.of(context).push(
+      final created = await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => ProjectFormScreen(
             project: newProject,
@@ -136,12 +223,13 @@ class _ProjectListScreenState
         ),
       );
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       if (created == true) {
         SnackbarManager.showSuccess(
-          'projects.created_success'
-              .tr(),
+          'projects.created_success'.tr(),
         );
       }
     } catch (e, st) {
@@ -149,6 +237,7 @@ class _ProjectListScreenState
         'Add project error',
         error: e,
         stackTrace: st,
+        tag: 'ProjectListScreen',
       );
 
       SnackbarManager.showError(
@@ -178,19 +267,14 @@ class _ProjectListScreenState
           maxChildSize: 0.95,
           builder: (context, controller) {
             return StatefulBuilder(
-              builder: (context, setState) {
+              builder: (context, setModalState) {
                 return SingleChildScrollView(
                   controller: controller,
-                  padding:
-                  const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment:
                     CrossAxisAlignment.start,
                     children: [
-                      // =====================================
-                      // FILTERS
-                      // =====================================
-
                       Text(
                         'filter.title'.tr(),
                         style: Theme.of(context)
@@ -210,21 +294,19 @@ class _ProjectListScreenState
                             ),
                             selected:
                             prov.filter ==
-                                ProjectFilter
-                                    .all,
+                                ProjectFilter.all,
                             onSelected: (_) {
                               prov.setFilter(
                                 ProjectFilter.all,
                               );
 
-                              setState(() {});
+                              setModalState(() {});
                             },
                           ),
 
                           ChoiceChip(
                             label: Text(
-                              'filter.in_progress'
-                                  .tr(),
+                              'filter.in_progress'.tr(),
                             ),
                             selected:
                             prov.filter ==
@@ -236,14 +318,13 @@ class _ProjectListScreenState
                                     .inProgressOnly,
                               );
 
-                              setState(() {});
+                              setModalState(() {});
                             },
                           ),
 
                           ChoiceChip(
                             label: Text(
-                              'filter.completed'
-                                  .tr(),
+                              'filter.completed'.tr(),
                             ),
                             selected:
                             prov.filter ==
@@ -255,17 +336,13 @@ class _ProjectListScreenState
                                     .completedOnly,
                               );
 
-                              setState(() {});
+                              setModalState(() {});
                             },
                           ),
                         ],
                       ),
 
                       const SizedBox(height: 32),
-
-                      // =====================================
-                      // DEADLINE
-                      // =====================================
 
                       Text(
                         'projects.deadline'.tr(),
@@ -282,86 +359,71 @@ class _ProjectListScreenState
                         children: [
                           ChoiceChip(
                             label: Text(
-                              'deadline_filter.all'
-                                  .tr(),
+                              'deadline_filter.all'.tr(),
                             ),
                             selected:
                             prov.deadlineFilter ==
-                                DeadlineFilter
-                                    .all,
+                                DeadlineFilter.all,
                             onSelected: (_) {
                               prov.setDeadlineFilter(
                                 DeadlineFilter.all,
                               );
 
-                              setState(() {});
+                              setModalState(() {});
                             },
                           ),
 
                           ChoiceChip(
                             label: Text(
-                              'deadline_filter.today'
-                                  .tr(),
+                              'deadline_filter.today'.tr(),
                             ),
                             selected:
                             prov.deadlineFilter ==
-                                DeadlineFilter
-                                    .today,
+                                DeadlineFilter.today,
                             onSelected: (_) {
                               prov.setDeadlineFilter(
-                                DeadlineFilter
-                                    .today,
+                                DeadlineFilter.today,
                               );
 
-                              setState(() {});
+                              setModalState(() {});
                             },
                           ),
 
                           ChoiceChip(
                             label: Text(
-                              'deadline_filter.week'
-                                  .tr(),
+                              'deadline_filter.week'.tr(),
                             ),
                             selected:
                             prov.deadlineFilter ==
-                                DeadlineFilter
-                                    .week,
+                                DeadlineFilter.week,
                             onSelected: (_) {
                               prov.setDeadlineFilter(
-                                DeadlineFilter
-                                    .week,
+                                DeadlineFilter.week,
                               );
 
-                              setState(() {});
+                              setModalState(() {});
                             },
                           ),
 
                           ChoiceChip(
                             label: Text(
-                              'deadline_filter.overdue'
-                                  .tr(),
+                              'deadline_filter.overdue'.tr(),
                             ),
                             selected:
                             prov.deadlineFilter ==
-                                DeadlineFilter
-                                    .overdue,
+                                DeadlineFilter.overdue,
                             onSelected: (_) {
                               prov.setDeadlineFilter(
-                                DeadlineFilter
-                                    .overdue,
+                                DeadlineFilter.overdue,
                               );
 
-                              setState(() {});
+                              setModalState(() {});
                             },
                           ),
                         ],
                       ),
 
                       const SizedBox(height: 32),
-
-                      // =====================================
-                      // SORTING
-                      // =====================================
 
                       Text(
                         'sorting.title'.tr(),
@@ -380,26 +442,21 @@ class _ProjectListScreenState
                                 Icons.schedule,
                               ),
                               title: Text(
-                                'sorting.nearest'
-                                    .tr(),
+                                'sorting.nearest'.tr(),
                               ),
                               trailing:
                               prov.sortBy ==
-                                  SortBy
-                                      .deadlineAsc
+                                  SortBy.deadlineAsc
                                   ? const Icon(
                                 Icons.check,
                               )
                                   : null,
                               onTap: () {
                                 prov.setSort(
-                                  SortBy
-                                      .deadlineAsc,
+                                  SortBy.deadlineAsc,
                                 );
 
-                                Navigator.pop(
-                                  context,
-                                );
+                                Navigator.pop(context);
                               },
                             ),
 
@@ -408,26 +465,21 @@ class _ProjectListScreenState
                                 Icons.schedule_send,
                               ),
                               title: Text(
-                                'sorting.farthest'
-                                    .tr(),
+                                'sorting.farthest'.tr(),
                               ),
                               trailing:
                               prov.sortBy ==
-                                  SortBy
-                                      .deadlineDesc
+                                  SortBy.deadlineDesc
                                   ? const Icon(
                                 Icons.check,
                               )
                                   : null,
                               onTap: () {
                                 prov.setSort(
-                                  SortBy
-                                      .deadlineDesc,
+                                  SortBy.deadlineDesc,
                                 );
 
-                                Navigator.pop(
-                                  context,
-                                );
+                                Navigator.pop(context);
                               },
                             ),
 
@@ -436,13 +488,10 @@ class _ProjectListScreenState
                                 Icons.sort_by_alpha,
                               ),
                               title: Text(
-                                'sorting.by_title'
-                                    .tr(),
+                                'sorting.by_title'.tr(),
                               ),
                               trailing:
-                              prov.sortBy ==
-                                  SortBy
-                                      .title
+                              prov.sortBy == SortBy.title
                                   ? const Icon(
                                 Icons.check,
                               )
@@ -452,9 +501,7 @@ class _ProjectListScreenState
                                   SortBy.title,
                                 );
 
-                                Navigator.pop(
-                                  context,
-                                );
+                                Navigator.pop(context);
                               },
                             ),
 
@@ -463,13 +510,10 @@ class _ProjectListScreenState
                                 Icons.flag,
                               ),
                               title: Text(
-                                'sorting.by_status'
-                                    .tr(),
+                                'sorting.by_status'.tr(),
                               ),
                               trailing:
-                              prov.sortBy ==
-                                  SortBy
-                                      .status
+                              prov.sortBy == SortBy.status
                                   ? const Icon(
                                 Icons.check,
                               )
@@ -479,9 +523,7 @@ class _ProjectListScreenState
                                   SortBy.status,
                                 );
 
-                                Navigator.pop(
-                                  context,
-                                );
+                                Navigator.pop(context);
                               },
                             ),
                           ],
@@ -490,26 +532,18 @@ class _ProjectListScreenState
 
                       const SizedBox(height: 24),
 
-                      // =====================================
-                      // RESET
-                      // =====================================
-
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton.icon(
                           onPressed: () {
                             prov.resetFilters();
-
-                            Navigator.pop(
-                              context,
-                            );
+                            Navigator.pop(context);
                           },
                           icon: const Icon(
                             Icons.refresh,
                           ),
                           label: Text(
-                            'common.reset'
-                                .tr(),
+                            'common.reset'.tr(),
                           ),
                         ),
                       ),
@@ -532,14 +566,12 @@ class _ProjectListScreenState
 
   @override
   Widget build(BuildContext context) {
-    final prov =
-    context.watch<ProjectProvider>();
+    final prov = context.watch<ProjectProvider>();
+    final authProv = context.watch<AuthProvider>();
 
-    final authProv =
-    context.watch<AuthProvider>();
+    _syncUnreadStream(authProv);
 
     final projects = prov.projects;
-
     final isGuest = authProv.isGuest;
 
     return Scaffold(
@@ -555,7 +587,6 @@ class _ProjectListScreenState
             });
 
             _searchController.clear();
-
             prov.search('');
           },
         )
@@ -566,8 +597,7 @@ class _ProjectListScreenState
                 Icons.menu,
               ),
               onPressed: () {
-                Scaffold.of(context)
-                    .openDrawer();
+                Scaffold.of(context).openDrawer();
               },
             );
           },
@@ -579,26 +609,18 @@ class _ProjectListScreenState
           ),
           child: _isSearching
               ? TextField(
-            key: const ValueKey(
-              'search',
-            ),
-            controller:
-            _searchController,
+            key: const ValueKey('search'),
+            controller: _searchController,
             autofocus: true,
             decoration: InputDecoration(
-              hintText:
-              'search.hint'.tr(),
-              border:
-              InputBorder.none,
+              hintText: 'search.hint'.tr(),
+              border: InputBorder.none,
             ),
             onChanged: prov.search,
           )
               : Text(
-            'navigation.my_projects'
-                .tr(),
-            key: const ValueKey(
-              'title',
-            ),
+            'navigation.my_projects'.tr(),
+            key: const ValueKey('title'),
           ),
         ),
 
@@ -634,8 +656,7 @@ class _ProjectListScreenState
 
       body: prov.isLoading
           ? const Center(
-        child:
-        CircularProgressIndicator(),
+        child: CircularProgressIndicator(),
       )
           : RefreshIndicator(
         onRefresh: () async {
@@ -644,55 +665,72 @@ class _ProjectListScreenState
           }
         },
         child: projects.isEmpty
-            ? Center(
-          child: Text(
-            'projects.no_projects'
-                .tr(),
-          ),
-        )
-            : (_unreadStream == null
-            ? _buildList(
+            ? _buildEmptyState()
+            : _buildProjectsBody(
           projects,
           authProv,
-        )
-            : StreamBuilder<
-            Map<String, int>>(
-          stream:
-          _unreadStream,
-          builder: (
-              context,
-              snapshot,
-              ) {
-            final unreadMap =
-                snapshot.data ??
-                    {};
-
-            final totalUnread =
-            unreadMap.values
-                .fold(
-              0,
-                  (a, b) => a + b,
-            );
-
-            BadgeService.update(
-              totalUnread,
-            );
-
-            return _buildList(
-              projects,
-              authProv,
-            );
-          },
-        )),
+        ),
       ),
 
       floatingActionButton: isGuest
           ? null
           : FloatingActionButton(
+        tooltip: 'projects.create'.tr(),
         onPressed: _addProject,
-        child:
-        const Icon(Icons.add),
+        child: const Icon(Icons.add),
       ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        SizedBox(
+          height: MediaQuery.of(context).size.height * 0.55,
+          child: Center(
+            child: Text(
+              'projects.no_projects'.tr(),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProjectsBody(
+      List<ProjectModel> projects,
+      AuthProvider authProv,
+      ) {
+    if (_unreadStream == null) {
+      _updateBadgeSafely(0);
+
+      return _buildList(
+        projects,
+        authProv,
+        const {},
+      );
+    }
+
+    return StreamBuilder<Map<String, int>>(
+      stream: _unreadStream,
+      builder: (context, snapshot) {
+        final unreadMap =
+            snapshot.data ?? const <String, int>{};
+
+        final totalUnread = unreadMap.values.fold<int>(
+          0,
+              (sum, value) => sum + value,
+        );
+
+        _updateBadgeSafely(totalUnread);
+
+        return _buildList(
+          projects,
+          authProv,
+          unreadMap,
+        );
+      },
     );
   }
 
@@ -703,8 +741,12 @@ class _ProjectListScreenState
   Widget _buildList(
       List<ProjectModel> projects,
       AuthProvider authProv,
+      Map<String, int> unreadMap,
       ) {
+    final provider = context.read<ProjectProvider>();
+
     return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.only(
         bottom: 80,
       ),
@@ -713,59 +755,56 @@ class _ProjectListScreenState
         final project = projects[index];
 
         final isOwner =
-            project.ownerId ==
-                authProv.userId;
+            project.ownerId == authProv.userId;
 
-        final canEdit = context
-            .read<ProjectProvider>()
-            .canEditProject(project);
+        final canOpen =
+        provider.canOpenProject(project);
+
+        final canEdit =
+        provider.canEditProject(project);
+
+        final unreadCount =
+            unreadMap[project.id] ?? 0;
+
+        if (!canOpen) {
+          return const SizedBox.shrink();
+        }
 
         return ProjectCard(
           project: project,
+          unreadCount: unreadCount,
           canEdit: canEdit,
           isOwner: isOwner,
-          searchQuery: context
-              .read<ProjectProvider>()
-              .searchQuery,
-
-          onEdit: (p) async {
-            final updated =
-            await Navigator.of(context)
-                .push(
-              MaterialPageRoute(
-                builder: (_) =>
-                    ProjectFormScreen(
-                      project: p,
-                      isNew: false,
-                    ),
-              ),
-            );
-
-            if (!context.mounted) {
+          searchQuery: provider.searchQuery,
+          onEdit: _openProject,
+          onDelete: (p) async {
+            if (!provider.isOwner(p)) {
+              SnackbarManager.showError(
+                'errors.no_permission'.tr(),
+              );
               return;
             }
 
-            if (updated == true) {
+            try {
+              await provider.deleteProject(p.id);
+
+              if (!context.mounted) {
+                return;
+              }
+
               SnackbarManager.showSuccess(
-                'common.updated'.tr(),
+                'projects.deleted_success'.tr(),
+              );
+            } catch (e) {
+              if (!context.mounted) {
+                return;
+              }
+
+              SnackbarManager.showError(
+                ErrorMapper.map(e),
               );
             }
           },
-
-          onDelete: (p) async {
-            final prov = context
-                .read<ProjectProvider>();
-
-            await prov.deleteProject(
-              p.id,
-            );
-
-            SnackbarManager.showSuccess(
-              'projects.deleted_success'
-                  .tr(),
-            );
-          },
-
           onChat: () => _openChat(project),
         )
             .animate()

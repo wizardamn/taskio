@@ -33,18 +33,13 @@ class _ChatListState extends State<ChatList> {
   final AIService _aiService = AIService();
 
   bool _isLoadingMore = false;
+  bool _isLoadMoreScheduled = false;
   bool _isUserScrollingUp = false;
   bool _initialScrollDone = false;
 
   String? _highlightedMessageId;
 
   int _lastMessageCount = 0;
-
-  final DateFormat _dateFormatShort =
-  DateFormat('d MMMM', 'ru');
-
-  final DateFormat _dateFormatFull =
-  DateFormat('d MMMM yyyy', 'ru');
 
   @override
   void initState() {
@@ -65,6 +60,44 @@ class _ChatListState extends State<ChatList> {
   }
 
   // =========================================================
+  // SAFE STATE
+  // =========================================================
+
+  void _safeSetState(VoidCallback callback) {
+    if (!mounted) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(callback);
+    });
+  }
+
+  void _setLoadingMore(bool value) {
+    if (_isLoadingMore == value) {
+      return;
+    }
+
+    _isLoadingMore = value;
+
+    _safeSetState(() {});
+  }
+
+  void _setHighlightedMessage(String? messageId) {
+    if (_highlightedMessageId == messageId) {
+      return;
+    }
+
+    _highlightedMessageId = messageId;
+
+    _safeSetState(() {});
+  }
+
+  // =========================================================
   // POSITION TRACKING
   // =========================================================
 
@@ -81,7 +114,9 @@ class _ChatListState extends State<ChatList> {
     }
 
     final visible = positions
-        .where((p) => p.itemTrailingEdge > 0)
+        .where(
+          (position) => position.itemTrailingEdge > 0,
+    )
         .toList();
 
     if (visible.isEmpty) {
@@ -89,7 +124,7 @@ class _ChatListState extends State<ChatList> {
     }
 
     final minIndex = visible
-        .map((p) => p.index)
+        .map((position) => position.index)
         .reduce((a, b) => a < b ? a : b);
 
     _isUserScrollingUp = minIndex > 2;
@@ -99,26 +134,42 @@ class _ChatListState extends State<ChatList> {
   // LOAD MORE
   // =========================================================
 
+  void _scheduleLoadMore() {
+    if (_isLoadingMore ||
+        _isLoadMoreScheduled ||
+        !mounted) {
+      return;
+    }
+
+    _isLoadMoreScheduled = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _isLoadMoreScheduled = false;
+
+      if (!mounted || _isLoadingMore) {
+        return;
+      }
+
+      await _loadMore();
+    });
+  }
+
   Future<void> _loadMore() async {
     if (_isLoadingMore || !mounted) {
       return;
     }
 
-    setState(() {
-      _isLoadingMore = true;
-    });
+    _setLoadingMore(true);
 
     try {
       await context
           .read<ChatProvider>()
           .loadMore(widget.projectId);
     } catch (_) {
-      //
+      // Ошибку здесь не показываем, чтобы не спамить snackbar при скролле.
     } finally {
       if (mounted) {
-        setState(() {
-          _isLoadingMore = false;
-        });
+        _setLoadingMore(false);
       }
     }
   }
@@ -138,7 +189,12 @@ class _ChatListState extends State<ChatList> {
       _initialScrollDone = true;
       _lastMessageCount = messages.length;
 
-      _scrollController.jumpTo(index: 0);
+      try {
+        _scrollController.jumpTo(index: 0);
+      } catch (_) {
+        // Контроллер мог отцепиться во время перестроения списка.
+      }
+
       return;
     }
 
@@ -146,15 +202,31 @@ class _ChatListState extends State<ChatList> {
         messages.length > _lastMessageCount;
 
     if (hasNewMessage && !_isUserScrollingUp) {
-      _scrollController.scrollTo(
-        index: 0,
-        duration: const Duration(
-          milliseconds: 250,
-        ),
-      );
+      try {
+        _scrollController.scrollTo(
+          index: 0,
+          duration: const Duration(
+            milliseconds: 250,
+          ),
+        );
+      } catch (_) {
+        // Безопасно игнорируем, если список уже перестроился.
+      }
     }
 
     _lastMessageCount = messages.length;
+  }
+
+  void _scheduleAutoScroll(
+      List<MessageModel> messages,
+      ) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      _handleAutoScroll(messages);
+    });
   }
 
   // =========================================================
@@ -177,14 +249,24 @@ class _ChatListState extends State<ChatList> {
         current.year != next.year;
   }
 
-  String _formatDateGroup(DateTime date) {
+  String _formatDateGroup(
+      BuildContext context,
+      DateTime date,
+      ) {
     final now = DateTime.now();
+    final locale = context.locale.toString();
 
     if (date.year == now.year) {
-      return _dateFormatShort.format(date);
+      return DateFormat(
+        'd MMMM',
+        locale,
+      ).format(date);
     }
 
-    return _dateFormatFull.format(date);
+    return DateFormat(
+      'd MMMM yyyy',
+      locale,
+    ).format(date);
   }
 
   // =========================================================
@@ -196,26 +278,27 @@ class _ChatListState extends State<ChatList> {
       List<MessageModel> messages,
       ) {
     final index = messages.indexWhere(
-          (m) => m.id == messageId,
+          (message) => message.id == messageId,
     );
 
-    if (index == -1 || !_scrollController.isAttached) {
+    if (index == -1 ||
+        !_scrollController.isAttached) {
       return;
     }
 
-    if (mounted) {
-      setState(() {
-        _highlightedMessageId = messageId;
-      });
-    }
+    _setHighlightedMessage(messageId);
 
-    _scrollController.scrollTo(
-      index: index,
-      duration: const Duration(
-        milliseconds: 300,
-      ),
-      alignment: 0.3,
-    );
+    try {
+      _scrollController.scrollTo(
+        index: index,
+        duration: const Duration(
+          milliseconds: 300,
+        ),
+        alignment: 0.3,
+      );
+    } catch (_) {
+      return;
+    }
 
     Future.delayed(
       const Duration(seconds: 2),
@@ -224,11 +307,43 @@ class _ChatListState extends State<ChatList> {
           return;
         }
 
-        setState(() {
-          _highlightedMessageId = null;
-        });
+        if (_highlightedMessageId == messageId) {
+          _setHighlightedMessage(null);
+        }
       },
     );
+  }
+
+  // =========================================================
+  // SCROLL NOTIFICATION
+  // =========================================================
+
+  bool _handleScrollNotification(
+      ScrollNotification notification,
+      ) {
+    if (_isLoadingMore || _isLoadMoreScheduled) {
+      return false;
+    }
+
+    if (notification is! ScrollUpdateNotification &&
+        notification is! OverscrollNotification) {
+      return false;
+    }
+
+    final metrics = notification.metrics;
+
+    if (metrics.maxScrollExtent <= 0) {
+      return false;
+    }
+
+    final isNearOldMessages =
+        metrics.pixels >= metrics.maxScrollExtent - 200;
+
+    if (isNearOldMessages) {
+      _scheduleLoadMore();
+    }
+
+    return false;
   }
 
   // =========================================================
@@ -247,35 +362,15 @@ class _ChatListState extends State<ChatList> {
       return const ChatSkeleton();
     }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-
-      _handleAutoScroll(messages);
-    });
+    _scheduleAutoScroll(messages);
 
     return NotificationListener<ScrollNotification>(
-      onNotification: (notification) {
-        if (_isLoadingMore) {
-          return false;
-        }
-
-        final metrics = notification.metrics;
-
-        if (metrics.pixels >=
-            metrics.maxScrollExtent - 200) {
-          _loadMore();
-        }
-
-        return false;
-      },
+      onNotification: _handleScrollNotification,
       child: ScrollablePositionedList.builder(
         itemScrollController: _scrollController,
         itemPositionsListener: _positionsListener,
         reverse: true,
-        itemCount:
-        messages.length +
+        itemCount: messages.length +
             (_isLoadingMore ? 1 : 0),
         itemBuilder: (context, index) {
           if (_isLoadingMore &&
@@ -286,13 +381,16 @@ class _ChatListState extends State<ChatList> {
                 child: SizedBox(
                   width: 20,
                   height: 20,
-                  child:
-                  CircularProgressIndicator(
+                  child: CircularProgressIndicator(
                     strokeWidth: 2,
                   ),
                 ),
               ),
             );
+          }
+
+          if (index < 0 || index >= messages.length) {
+            return const SizedBox.shrink();
           }
 
           final msg = messages[index];
@@ -301,8 +399,7 @@ class _ChatListState extends State<ChatList> {
             children: [
               if (_isNewDay(index, messages))
                 Padding(
-                  padding:
-                  const EdgeInsets.symmetric(
+                  padding: const EdgeInsets.symmetric(
                     vertical: 10,
                   ),
                   child: Center(
@@ -313,13 +410,15 @@ class _ChatListState extends State<ChatList> {
                         vertical: 4,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.grey
-                            .withValues(alpha: 0.2),
+                        color: Colors.grey.withValues(
+                          alpha: 0.2,
+                        ),
                         borderRadius:
                         BorderRadius.circular(12),
                       ),
                       child: Text(
                         _formatDateGroup(
+                          context,
                           msg.createdAt,
                         ),
                         style: const TextStyle(
@@ -329,25 +428,20 @@ class _ChatListState extends State<ChatList> {
                     ),
                   ),
                 ),
+
               ChatBubble(
                 message: msg,
-                isMe:
-                msg.senderId ==
-                    currentUserId,
-                isRead: provider
-                    .otherReadMessages
+                isMe: msg.senderId == currentUserId,
+                isRead: provider.otherReadMessages
                     .contains(msg.id),
-                onReply: () =>
-                    widget.onReply(msg),
-                onScrollTo: (id) =>
-                    _scrollToMessage(
-                      id,
-                      messages,
-                    ),
+                onReply: () => widget.onReply(msg),
+                onScrollTo: (id) => _scrollToMessage(
+                  id,
+                  messages,
+                ),
                 aiService: _aiService,
                 isHighlighted:
-                msg.id ==
-                    _highlightedMessageId,
+                msg.id == _highlightedMessageId,
               ),
             ],
           );

@@ -11,9 +11,24 @@ import '../services/supabase_service.dart';
 import '../utils/app_logger.dart';
 import '../utils/error_mapper.dart';
 
+enum ReportScope {
+  singleProject,
+  selectedProjects,
+  allProjects,
+}
+
+class ReportOptions {
+  final ReportScope scope;
+  final String? customTitle;
+
+  const ReportOptions({
+    required this.scope,
+    this.customTitle,
+  });
+}
+
 class ReportService {
-  final SupabaseClient _client =
-      SupabaseService.client;
+  final SupabaseClient _client = SupabaseService.client;
 
   // =========================================================
   // PUBLIC
@@ -21,8 +36,11 @@ class ReportService {
 
   Future<pw.Document> generatePdf(
       BuildContext context,
-      List<ProjectModel> projects,
-      ) async {
+      List<ProjectModel> projects, {
+        ReportOptions options = const ReportOptions(
+          scope: ReportScope.selectedProjects,
+        ),
+      }) async {
     if (projects.isEmpty) {
       throw Exception('projects.empty');
     }
@@ -31,12 +49,14 @@ class ReportService {
       return await _buildPdf(
         context,
         projects,
+        options,
       );
     } catch (e, st) {
       AppLogger.error(
         'PDF generation error',
         error: e,
         stackTrace: st,
+        tag: 'ReportService',
       );
 
       throw Exception(
@@ -45,13 +65,56 @@ class ReportService {
     }
   }
 
+  Future<pw.Document> generateSingleProjectPdf(
+      BuildContext context,
+      ProjectModel project,
+      ) {
+    return generatePdf(
+      context,
+      [project],
+      options: const ReportOptions(
+        scope: ReportScope.singleProject,
+      ),
+    );
+  }
+
+  Future<pw.Document> generateSelectedProjectsPdf(
+      BuildContext context,
+      List<ProjectModel> selectedProjects,
+      ) {
+    return generatePdf(
+      context,
+      selectedProjects,
+      options: const ReportOptions(
+        scope: ReportScope.selectedProjects,
+      ),
+    );
+  }
+
+  Future<pw.Document> generateAllProjectsPdf(
+      BuildContext context,
+      List<ProjectModel> allProjects,
+      ) {
+    return generatePdf(
+      context,
+      allProjects,
+      options: const ReportOptions(
+        scope: ReportScope.allProjects,
+      ),
+    );
+  }
+
   Future<void> generateAndPrint(
       BuildContext context,
-      List<ProjectModel> projects,
-      ) async {
+      List<ProjectModel> projects, {
+        ReportOptions options = const ReportOptions(
+          scope: ReportScope.selectedProjects,
+        ),
+      }) async {
     final pdf = await generatePdf(
       context,
       projects,
+      options: options,
     );
 
     await Printing.layoutPdf(
@@ -66,6 +129,7 @@ class ReportService {
   Future<pw.Document> _buildPdf(
       BuildContext context,
       List<ProjectModel> projects,
+      ReportOptions options,
       ) async {
     final regularFont = pw.Font.ttf(
       await rootBundle.load(
@@ -86,51 +150,39 @@ class ReportService {
       ),
     );
 
-    final grades =
-    await _loadGrades(projects);
+    final grades = await _loadGrades(projects);
 
     final total = projects.length;
 
     final planned = projects
         .where(
-          (p) =>
-      p.statusEnum ==
-          ProjectStatus.planned,
+          (project) => project.statusEnum == ProjectStatus.planned,
     )
         .length;
 
     final inProgress = projects
         .where(
-          (p) =>
-      p.statusEnum ==
-          ProjectStatus.inProgress,
+          (project) => project.statusEnum == ProjectStatus.inProgress,
     )
         .length;
 
     final completed = projects
         .where(
-          (p) =>
-      p.statusEnum ==
-          ProjectStatus.completed,
+          (project) => project.statusEnum == ProjectStatus.completed,
     )
         .length;
 
     final archived = projects
         .where(
-          (p) =>
-      p.statusEnum ==
-          ProjectStatus.archived,
+          (project) => project.statusEnum == ProjectStatus.archived,
     )
         .length;
 
     final overdue = projects
         .where(
-          (p) =>
-      p.deadline.isBefore(
-        DateTime.now(),
-      ) &&
-          p.statusEnum !=
-              ProjectStatus.completed,
+          (project) =>
+      project.deadline.isBefore(DateTime.now()) &&
+          project.statusEnum != ProjectStatus.completed,
     )
         .length;
 
@@ -139,15 +191,14 @@ class ReportService {
 
     for (final project in projects) {
       totalTasks += project.totalTasks;
-      completedTasks +=
-          project.completedTasks;
+      completedTasks += project.completedTasks;
     }
 
-    final taskProgress =
-    totalTasks == 0
+    final taskProgress = totalTasks == 0
         ? 0.0
-        : completedTasks /
-        totalTasks;
+        : completedTasks / totalTasks;
+
+    final reportTitle = _reportTitle(options);
 
     // =====================================================
     // COVER PAGE
@@ -155,66 +206,69 @@ class ReportService {
 
     pdf.addPage(
       pw.Page(
-        margin:
-        const pw.EdgeInsets.all(40),
+        margin: const pw.EdgeInsets.all(40),
         build: (_) {
           return pw.Center(
             child: pw.Column(
-              mainAxisAlignment:
-              pw.MainAxisAlignment
-                  .center,
+              mainAxisAlignment: pw.MainAxisAlignment.center,
               children: [
                 pw.Container(
-                  padding:
-                  const pw.EdgeInsets
-                      .all(20),
-                  decoration:
-                  pw.BoxDecoration(
-                    color:
-                    PdfColors.blue,
-                    shape:
-                    pw.BoxShape.circle,
+                  padding: const pw.EdgeInsets.all(20),
+                  decoration: const pw.BoxDecoration(
+                    color: PdfColors.blue,
+                    shape: pw.BoxShape.circle,
                   ),
                   child: pw.Text(
                     'T',
                     style: pw.TextStyle(
                       font: boldFont,
                       fontSize: 50,
-                      color:
-                      PdfColors
-                          .white,
+                      color: PdfColors.white,
                     ),
                   ),
                 ),
+
                 pw.SizedBox(height: 30),
+
                 pw.Text(
                   'TASKIO',
                   style: pw.TextStyle(
                     font: boldFont,
                     fontSize: 38,
-                    color:
-                    PdfColors.blue,
+                    color: PdfColors.blue,
                   ),
                 ),
+
                 pw.SizedBox(height: 10),
+
                 pw.Text(
-                  'report.title'.tr(),
+                  reportTitle,
+                  textAlign: pw.TextAlign.center,
                   style: pw.TextStyle(
                     font: boldFont,
                     fontSize: 22,
                   ),
                 ),
+
                 pw.SizedBox(height: 20),
+
                 pw.Text(
-                  _formatDateTime(
-                    DateTime.now(),
-                  ),
+                  _formatDateTime(DateTime.now()),
                   style: pw.TextStyle(
                     font: regularFont,
                     fontSize: 14,
-                    color:
-                    PdfColors
-                        .grey700,
+                    color: PdfColors.grey700,
+                  ),
+                ),
+
+                pw.SizedBox(height: 10),
+
+                pw.Text(
+                  '${'report.total_projects'.tr()}: $total',
+                  style: pw.TextStyle(
+                    font: regularFont,
+                    fontSize: 12,
+                    color: PdfColors.grey700,
                   ),
                 ),
               ],
@@ -230,8 +284,20 @@ class ReportService {
 
     pdf.addPage(
       pw.MultiPage(
-        margin:
-        const pw.EdgeInsets.all(32),
+        margin: const pw.EdgeInsets.all(32),
+        footer: (context) {
+          return pw.Align(
+            alignment: pw.Alignment.centerRight,
+            child: pw.Text(
+              '${context.pageNumber} / ${context.pagesCount}',
+              style: pw.TextStyle(
+                font: regularFont,
+                fontSize: 9,
+                color: PdfColors.grey600,
+              ),
+            ),
+          );
+        },
         build: (_) {
           return [
             _sectionTitle(
@@ -260,9 +326,7 @@ class ReportService {
 
             pw.SizedBox(height: 14),
 
-            _progressBar(
-              taskProgress,
-            ),
+            _progressBar(taskProgress),
 
             pw.SizedBox(height: 8),
 
@@ -318,8 +382,7 @@ class ReportService {
               total: total,
               completed: completed,
               overdue: overdue,
-              progress:
-              taskProgress,
+              progress: taskProgress,
               font: regularFont,
             ),
           ];
@@ -331,16 +394,44 @@ class ReportService {
   }
 
   // =========================================================
+  // REPORT TITLE
+  // =========================================================
+
+  String _reportTitle(ReportOptions options) {
+    final customTitle = options.customTitle?.trim();
+
+    if (customTitle != null && customTitle.isNotEmpty) {
+      return customTitle;
+    }
+
+    switch (options.scope) {
+      case ReportScope.singleProject:
+        return 'report.single_project_report'.tr();
+
+      case ReportScope.selectedProjects:
+        return 'report.selected_projects_report'.tr();
+
+      case ReportScope.allProjects:
+        return 'report.all_projects_report'.tr();
+    }
+  }
+
+  // =========================================================
   // LOAD GRADES
   // =========================================================
 
-  Future<Map<String, double>>
-  _loadGrades(
+  Future<Map<String, double>> _loadGrades(
       List<ProjectModel> projects,
       ) async {
     try {
-      final ids =
-      projects.map((e) => e.id).toList();
+      final ids = projects
+          .where(
+            (project) =>
+        project.category == ProjectCategory.educational &&
+            project.gradingEnabled,
+      )
+          .map((project) => project.id)
+          .toList();
 
       if (ids.isEmpty) {
         return {};
@@ -356,30 +447,30 @@ class ReportService {
         ids,
       );
 
-      final Map<String, List<double>>
-      grouped = {};
+      final grouped = <String, List<double>>{};
 
       for (final item in response) {
-        final projectId =
-        item['project_id']
-            .toString();
+        final projectId = item['project_id']?.toString() ?? '';
 
-        final grade =
-            (item['grade'] as num?)
-                ?.toDouble() ??
-                0;
+        if (projectId.isEmpty) {
+          continue;
+        }
+
+        final grade = (item['grade'] as num?)?.toDouble();
+
+        if (grade == null) {
+          continue;
+        }
 
         grouped.putIfAbsent(
           projectId,
               () => [],
         );
 
-        grouped[projectId]!
-            .add(grade);
+        grouped[projectId]!.add(grade);
       }
 
-      final Map<String, double>
-      averages = {};
+      final averages = <String, double>{};
 
       grouped.forEach(
             (key, values) {
@@ -388,13 +479,11 @@ class ReportService {
             return;
           }
 
-          final avg =
-              values.reduce(
-                    (a, b) => a + b,
-              ) /
-                  values.length;
+          final sum = values.reduce(
+                (a, b) => a + b,
+          );
 
-          averages[key] = avg;
+          averages[key] = sum / values.length;
         },
       );
 
@@ -404,6 +493,7 @@ class ReportService {
         'Load grades failed',
         error: e,
         stackTrace: st,
+        tag: 'ReportService',
       );
 
       return {};
@@ -492,12 +582,10 @@ class ReportService {
       ) {
     return pw.Container(
       width: 110,
-      padding:
-      const pw.EdgeInsets.all(12),
+      padding: const pw.EdgeInsets.all(12),
       decoration: pw.BoxDecoration(
         color: color,
-        borderRadius:
-        pw.BorderRadius.circular(10),
+        borderRadius: pw.BorderRadius.circular(10),
       ),
       child: pw.Column(
         children: [
@@ -506,20 +594,19 @@ class ReportService {
             style: pw.TextStyle(
               font: bold,
               fontSize: 18,
-              color:
-              PdfColors.white,
+              color: PdfColors.white,
             ),
           ),
+
           pw.SizedBox(height: 6),
+
           pw.Text(
             title,
-            textAlign:
-            pw.TextAlign.center,
+            textAlign: pw.TextAlign.center,
             style: pw.TextStyle(
               font: bold,
               fontSize: 10,
-              color:
-              PdfColors.white,
+              color: PdfColors.white,
             ),
           ),
         ],
@@ -534,43 +621,32 @@ class ReportService {
   pw.Widget _progressBar(
       double progress,
       ) {
-    final safe =
-    progress.clamp(0.0, 1.0);
+    final safe = progress.clamp(0.0, 1.0);
 
     return pw.Column(
-      crossAxisAlignment:
-      pw.CrossAxisAlignment.start,
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         pw.Container(
           height: 14,
-          decoration:
-          pw.BoxDecoration(
-            color:
-            PdfColors.grey300,
-            borderRadius:
-            pw.BorderRadius
-                .circular(20),
+          decoration: pw.BoxDecoration(
+            color: PdfColors.grey300,
+            borderRadius: pw.BorderRadius.circular(20),
           ),
           child: pw.Stack(
             children: [
               pw.Container(
-                width:
-                500 * safe,
-                decoration:
-                pw.BoxDecoration(
-                  color:
-                  PdfColors.green,
-                  borderRadius:
-                  pw.BorderRadius
-                      .circular(
-                    20,
-                  ),
+                width: 500 * safe,
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.green,
+                  borderRadius: pw.BorderRadius.circular(20),
                 ),
               ),
             ],
           ),
         ),
+
         pw.SizedBox(height: 6),
+
         pw.Text(
           '${(safe * 100).toStringAsFixed(1)}%',
         ),
@@ -587,90 +663,81 @@ class ReportService {
       pw.Font font,
       pw.Font bold,
       ) {
-    final Map<String, UserStats>
-    stats = {};
+    final stats = <String, UserStats>{};
 
     for (final project in projects) {
-      for (final user
-      in project.participantsData) {
+      for (final user in project.participantsData) {
+        final name = _participantName(user);
+
         stats.putIfAbsent(
-          user.fullName,
+          name,
               () => UserStats(),
         );
 
-        stats[user.fullName]!
-            .total++;
+        stats[name]!.total++;
 
-        if (project.statusEnum ==
-            ProjectStatus.completed) {
-          stats[user.fullName]!
-              .completed++;
+        if (project.statusEnum == ProjectStatus.completed) {
+          stats[name]!.completed++;
         }
 
-        if (project.statusEnum ==
-            ProjectStatus.inProgress) {
-          stats[user.fullName]!
-              .inProgress++;
+        if (project.statusEnum == ProjectStatus.inProgress) {
+          stats[name]!.inProgress++;
         }
       }
     }
 
     if (stats.isEmpty) {
       return pw.Text(
-        'No participants',
+        'report.no_participants'.tr(),
+        style: pw.TextStyle(
+          font: font,
+          fontSize: 11,
+        ),
       );
     }
 
+    final entries = stats.entries.toList()
+      ..sort(
+            (a, b) => b.value.total.compareTo(a.value.total),
+      );
+
     return pw.Column(
-      children:
-      stats.entries.map((e) {
-        final s = e.value;
+      children: entries.map((entry) {
+        final stat = entry.value;
 
         return pw.Container(
-          margin:
-          const pw.EdgeInsets.only(
+          margin: const pw.EdgeInsets.only(
             bottom: 8,
           ),
-          padding:
-          const pw.EdgeInsets.all(
-            10,
-          ),
-          decoration:
-          pw.BoxDecoration(
+          padding: const pw.EdgeInsets.all(10),
+          decoration: pw.BoxDecoration(
             border: pw.Border.all(
-              color:
-              PdfColors.grey300,
+              color: PdfColors.grey300,
             ),
-            borderRadius:
-            pw.BorderRadius
-                .circular(8),
+            borderRadius: pw.BorderRadius.circular(8),
           ),
           child: pw.Row(
-            mainAxisAlignment:
-            pw.MainAxisAlignment
-                .spaceBetween,
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
               pw.Expanded(
                 flex: 3,
                 child: pw.Text(
-                  e.key,
-                  style:
-                  pw.TextStyle(
+                  entry.key,
+                  style: pw.TextStyle(
                     font: bold,
                     fontSize: 12,
                   ),
                 ),
               ),
+
               pw.Expanded(
                 flex: 5,
                 child: pw.Text(
-                  '${'report.total'.tr()}: ${s.total} | '
-                      '${'report.completed'.tr()}: ${s.completed} | '
-                      '${'report.in_progress'.tr()}: ${s.inProgress}',
-                  textAlign:
-                  pw.TextAlign.right,
-                  style:
-                  pw.TextStyle(
+                  '${'report.total'.tr()}: ${stat.total} | '
+                      '${'report.completed'.tr()}: ${stat.completed} | '
+                      '${'report.in_progress'.tr()}: ${stat.inProgress}',
+                  textAlign: pw.TextAlign.right,
+                  style: pw.TextStyle(
                     font: font,
                     fontSize: 11,
                   ),
@@ -681,6 +748,22 @@ class ReportService {
         );
       }).toList(),
     );
+  }
+
+  String _participantName(ProjectParticipant user) {
+    final fullName = user.fullName.trim();
+
+    if (fullName.isNotEmpty) {
+      return fullName;
+    }
+
+    final username = user.username?.trim();
+
+    if (username != null && username.isNotEmpty) {
+      return username.startsWith('@') ? username : '@$username';
+    }
+
+    return 'users.no_name'.tr();
   }
 
   // =========================================================
@@ -701,21 +784,18 @@ class ReportService {
         'report.tasks'.tr(),
         'report.grade'.tr(),
       ],
-      data: projects.map((p) {
-        final avgGrade =
-        grades[p.id];
+      data: projects.map((project) {
+        final gradeText = _gradeText(
+          project,
+          grades,
+        );
 
         return [
-          p.title,
-          _formatDate(
-            p.deadline,
-          ),
-          _status(p),
-          '${p.completedTasks}/${p.totalTasks}',
-          avgGrade == null
-              ? '-'
-              : avgGrade
-              .toStringAsFixed(1),
+          project.title,
+          _formatDate(project.deadline),
+          _status(project),
+          '${project.completedTasks}/${project.totalTasks}',
+          gradeText,
         ];
       }).toList(),
       headerStyle: pw.TextStyle(
@@ -723,16 +803,14 @@ class ReportService {
         color: PdfColors.white,
         fontSize: 11,
       ),
-      headerDecoration:
-      const pw.BoxDecoration(
+      headerDecoration: const pw.BoxDecoration(
         color: PdfColors.blue,
       ),
       cellStyle: pw.TextStyle(
         font: font,
         fontSize: 10,
       ),
-      cellPadding:
-      const pw.EdgeInsets.all(8),
+      cellPadding: const pw.EdgeInsets.all(8),
       border: pw.TableBorder.all(
         color: PdfColors.grey400,
       ),
@@ -744,6 +822,27 @@ class ReportService {
         4: const pw.FlexColumnWidth(1),
       },
     );
+  }
+
+  String _gradeText(
+      ProjectModel project,
+      Map<String, double> grades,
+      ) {
+    if (project.category != ProjectCategory.educational) {
+      return '-';
+    }
+
+    if (!project.gradingEnabled) {
+      return '-';
+    }
+
+    final grade = grades[project.id];
+
+    if (grade == null || grade <= 0) {
+      return '-';
+    }
+
+    return grade.toStringAsFixed(1);
   }
 
   // =========================================================
@@ -758,12 +857,10 @@ class ReportService {
     required pw.Font font,
   }) {
     return pw.Container(
-      padding:
-      const pw.EdgeInsets.all(14),
+      padding: const pw.EdgeInsets.all(14),
       decoration: pw.BoxDecoration(
         color: PdfColors.grey100,
-        borderRadius:
-        pw.BorderRadius.circular(8),
+        borderRadius: pw.BorderRadius.circular(8),
       ),
       child: pw.Text(
         '${'report.total_projects'.tr()}: $total.\n'
@@ -785,15 +882,14 @@ class ReportService {
   // =========================================================
 
   String _status(
-      ProjectModel p,
+      ProjectModel project,
       ) {
-    switch (p.statusEnum) {
+    switch (project.statusEnum) {
       case ProjectStatus.planned:
         return 'status.planned'.tr();
 
       case ProjectStatus.inProgress:
-        return 'status.in_progress'
-            .tr();
+        return 'status.in_progress'.tr();
 
       case ProjectStatus.completed:
         return 'status.completed'.tr();
@@ -806,13 +902,8 @@ class ReportService {
   String _formatDate(
       DateTime date,
       ) {
-    final day = date.day
-        .toString()
-        .padLeft(2, '0');
-
-    final month = date.month
-        .toString()
-        .padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
 
     return '$day.$month.${date.year}';
   }
@@ -820,13 +911,8 @@ class ReportService {
   String _formatDateTime(
       DateTime date,
       ) {
-    final hour = date.hour
-        .toString()
-        .padLeft(2, '0');
-
-    final minute = date.minute
-        .toString()
-        .padLeft(2, '0');
+    final hour = date.hour.toString().padLeft(2, '0');
+    final minute = date.minute.toString().padLeft(2, '0');
 
     return '${_formatDate(date)} $hour:$minute';
   }

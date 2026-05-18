@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/task_model.dart';
-import 'supabase_service.dart';
 import '../utils/app_logger.dart';
+import 'supabase_service.dart';
 
 class TaskService {
   final SupabaseClient _client = SupabaseService.client;
@@ -12,6 +12,8 @@ class TaskService {
   final Map<String, List<TaskModel>> _cache = {};
   final Map<String, StreamController<List<TaskModel>>> _controllers = {};
   final Map<String, RealtimeChannel> _channels = {};
+  final Map<String, Timer> _disposeTimers = {};
+  final Map<String, Timer> _refreshDebounce = {};
 
   final Set<String> _initializing = {};
   final Set<String> _disposing = {};
@@ -20,45 +22,75 @@ class TaskService {
   // STREAM
   // =========================================================
 
-  Stream<List<TaskModel>> getTasksStream(
-      String projectId,
-      ) {
-    _disposing.remove(projectId);
+  Stream<List<TaskModel>> getTasksStream(String projectId) {
+    final cleanProjectId = projectId.trim();
 
-    final existing = _controllers[projectId];
+    if (cleanProjectId.isEmpty) {
+      return const Stream.empty();
+    }
 
-    if (existing != null && !existing.isClosed) {
-      if (_cache.containsKey(projectId)) {
-        unawaited(_emitAsync(projectId));
+    _disposing.remove(cleanProjectId);
+    _disposeTimers.remove(cleanProjectId)?.cancel();
+
+    final existingController = _controllers[cleanProjectId];
+
+    if (existingController != null && !existingController.isClosed) {
+      if (_cache.containsKey(cleanProjectId)) {
+        unawaited(_emitAsync(cleanProjectId));
+      } else {
+        unawaited(_loadInitial(cleanProjectId));
       }
 
-      return existing.stream;
+      return existingController.stream;
     }
 
     AppLogger.info(
-      'INIT stream: $projectId',
+      'INIT task stream: $cleanProjectId',
       tag: 'TaskService',
     );
 
     late final StreamController<List<TaskModel>> controller;
 
     controller = StreamController<List<TaskModel>>.broadcast(
-      onCancel: () async {
-        if (!controller.hasListener) {
-          await disposeProject(projectId);
+      onListen: () {
+        _disposeTimers.remove(cleanProjectId)?.cancel();
+
+        if (!_cache.containsKey(cleanProjectId)) {
+          unawaited(_init(cleanProjectId));
+        } else {
+          unawaited(_emitAsync(cleanProjectId));
+          _subscribeRealtime(cleanProjectId);
         }
+      },
+      onCancel: () {
+        _scheduleDispose(cleanProjectId);
       },
     );
 
-    _controllers[projectId] = controller;
+    _controllers[cleanProjectId] = controller;
 
-    if (_cache.containsKey(projectId)) {
-      unawaited(_emitAsync(projectId));
-    }
-
-    unawaited(_init(projectId));
+    unawaited(_init(cleanProjectId));
 
     return controller.stream;
+  }
+
+  void _scheduleDispose(String projectId) {
+    _disposeTimers.remove(projectId)?.cancel();
+
+    _disposeTimers[projectId] = Timer(
+      const Duration(seconds: 8),
+          () async {
+        final controller = _controllers[projectId];
+
+        if (controller != null &&
+            !controller.isClosed &&
+            controller.hasListener) {
+          return;
+        }
+
+        await disposeProject(projectId);
+      },
+    );
   }
 
   // =========================================================
@@ -94,14 +126,22 @@ class TaskService {
   }
 
   // =========================================================
-  // INITIAL LOAD
+  // INITIAL LOAD / REFRESH
   // =========================================================
 
   Future<void> _loadInitial(String projectId) async {
     try {
       final data = await _client
           .from('project_tasks')
-          .select()
+          .select(
+        '''
+            id,
+            project_id,
+            title,
+            is_completed,
+            created_at
+            ''',
+      )
           .eq('project_id', projectId)
           .order(
         'created_at',
@@ -113,7 +153,7 @@ class TaskService {
       }
 
       final tasks = List<Map<String, dynamic>>.from(data)
-          .map((e) => TaskModel.fromJson(e))
+          .map(TaskModel.fromJson)
           .toList();
 
       _sort(tasks);
@@ -131,6 +171,21 @@ class TaskService {
     }
   }
 
+  void _scheduleRefresh(String projectId) {
+    _refreshDebounce.remove(projectId)?.cancel();
+
+    _refreshDebounce[projectId] = Timer(
+      const Duration(milliseconds: 250),
+          () {
+        if (_disposing.contains(projectId)) {
+          return;
+        }
+
+        unawaited(_loadInitial(projectId));
+      },
+    );
+  }
+
   // =========================================================
   // REALTIME
   // =========================================================
@@ -144,9 +199,9 @@ class TaskService {
       return;
     }
 
-    final channel = _client.channel(
-      'tasks:$projectId',
-    );
+    final channelName = 'project_tasks_$projectId';
+
+    final channel = _client.channel(channelName);
 
     channel.onPostgresChanges(
       event: PostgresChangeEvent.all,
@@ -165,39 +220,47 @@ class TaskService {
       },
     );
 
-    channel.subscribe((status, [error]) {
-      switch (status) {
-        case RealtimeSubscribeStatus.subscribed:
-          AppLogger.info(
-            'Realtime subscribed: $projectId',
-            tag: 'TaskService',
-          );
-          break;
+    channel.subscribe(
+          (status, [error]) {
+        switch (status) {
+          case RealtimeSubscribeStatus.subscribed:
+            AppLogger.info(
+              'Task realtime subscribed: $projectId',
+              tag: 'TaskService',
+            );
+            break;
 
-        case RealtimeSubscribeStatus.channelError:
-        case RealtimeSubscribeStatus.timedOut:
-          AppLogger.error(
-            'Realtime error',
-            error: error,
-            tag: 'TaskService',
-          );
+          case RealtimeSubscribeStatus.channelError:
+          case RealtimeSubscribeStatus.timedOut:
+            AppLogger.error(
+              'Task realtime error',
+              error: error,
+              tag: 'TaskService',
+            );
 
-          _channels.remove(projectId);
+            _channels.remove(projectId);
 
-          Future.delayed(
-            const Duration(seconds: 2),
-                () {
-              if (!_disposing.contains(projectId)) {
+            Future.delayed(
+              const Duration(seconds: 2),
+                  () {
+                if (_disposing.contains(projectId)) {
+                  return;
+                }
+
+                if (!_controllers.containsKey(projectId)) {
+                  return;
+                }
+
                 _subscribeRealtime(projectId);
-              }
-            },
-          );
-          break;
+              },
+            );
+            break;
 
-        default:
-          break;
-      }
-    });
+          default:
+            break;
+        }
+      },
+    );
 
     _channels[projectId] = channel;
   }
@@ -218,52 +281,39 @@ class TaskService {
       _cache.putIfAbsent(projectId, () => []);
 
       final list = _cache[projectId]!;
+      final newRecord = Map<String, dynamic>.from(payload.newRecord);
+      final oldRecord = Map<String, dynamic>.from(payload.oldRecord);
 
-      final newRecord = payload.newRecord;
-      final oldRecord = payload.oldRecord;
+      final event = payload.eventType.name.toLowerCase();
 
-      final event = payload.eventType.name;
+      if (event.contains('insert')) {
+        if (newRecord.isNotEmpty) {
+          _upsertTaskInList(
+            list,
+            TaskModel.fromJson(newRecord),
+          );
+        }
+      } else if (event.contains('update')) {
+        if (newRecord.isNotEmpty) {
+          _upsertTaskInList(
+            list,
+            TaskModel.fromJson(newRecord),
+          );
+        }
+      } else if (event.contains('delete')) {
+        final id = oldRecord['id']?.toString();
 
-      switch (event) {
-        case 'INSERT':
-          if (newRecord.isNotEmpty) {
-            final task = TaskModel.fromJson(newRecord);
-
-            final exists = list.any(
-                  (t) => t.id == task.id,
-            );
-
-            if (!exists) {
-              list.add(task);
-            }
-          }
-          break;
-
-        case 'UPDATE':
-          if (newRecord.isNotEmpty) {
-            final updated = TaskModel.fromJson(newRecord);
-
-            final index = list.indexWhere(
-                  (t) => t.id == updated.id,
-            );
-
-            if (index != -1) {
-              list[index] = updated;
-            } else {
-              list.add(updated);
-            }
-          }
-          break;
-
-        case 'DELETE':
-          if (oldRecord.isNotEmpty) {
-            final id = oldRecord['id'];
-
-            list.removeWhere(
-                  (t) => t.id == id,
-            );
-          }
-          break;
+        if (id != null && id.isNotEmpty) {
+          list.removeWhere(
+                (task) => task.id == id,
+          );
+        } else {
+          _scheduleRefresh(projectId);
+          return;
+        }
+      } else {
+        _scheduleRefresh(projectId);
+        return;
       }
 
       _sort(list);
@@ -275,6 +325,8 @@ class TaskService {
         stackTrace: st,
         tag: 'TaskService',
       );
+
+      _scheduleRefresh(projectId);
     }
   }
 
@@ -286,18 +338,46 @@ class TaskService {
       String projectId,
       String title,
       ) async {
+    final cleanProjectId = projectId.trim();
     final text = title.trim();
 
-    if (text.isEmpty) {
+    if (cleanProjectId.isEmpty || text.isEmpty) {
       return;
     }
 
     try {
-      await _client.from('project_tasks').insert({
-        'project_id': projectId,
+      final data = await _client
+          .from('project_tasks')
+          .insert({
+        'project_id': cleanProjectId,
         'title': text,
         'is_completed': false,
-      });
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+      })
+          .select(
+        '''
+            id,
+            project_id,
+            title,
+            is_completed,
+            created_at
+            ''',
+      )
+          .single();
+
+      final task = TaskModel.fromJson(
+        Map<String, dynamic>.from(data),
+      );
+
+      _cache.putIfAbsent(cleanProjectId, () => []);
+
+      _upsertTaskInList(
+        _cache[cleanProjectId]!,
+        task,
+      );
+
+      _sort(_cache[cleanProjectId]!);
+      _emit(cleanProjectId);
     } catch (e, st) {
       AppLogger.error(
         'addTask error',
@@ -305,6 +385,7 @@ class TaskService {
         stackTrace: st,
         tag: 'TaskService',
       );
+
       rethrow;
     }
   }
@@ -313,13 +394,56 @@ class TaskService {
       String taskId,
       bool current,
       ) async {
+    final cleanTaskId = taskId.trim();
+
+    if (cleanTaskId.isEmpty) {
+      return;
+    }
+
+    final projectId = _projectIdByTaskId(cleanTaskId);
+
     try {
-      await _client
+      final data = await _client
           .from('project_tasks')
           .update({
         'is_completed': !current,
       })
-          .eq('id', taskId);
+          .eq('id', cleanTaskId)
+          .select(
+        '''
+            id,
+            project_id,
+            title,
+            is_completed,
+            created_at
+            ''',
+      )
+          .maybeSingle();
+
+      if (data == null) {
+        throw Exception('tasks.update_failed');
+      }
+
+      final task = TaskModel.fromJson(
+        Map<String, dynamic>.from(data),
+      );
+
+      final effectiveProjectId = task.projectId.isNotEmpty
+          ? task.projectId
+          : projectId;
+
+      if (effectiveProjectId != null &&
+          effectiveProjectId.isNotEmpty) {
+        _cache.putIfAbsent(effectiveProjectId, () => []);
+
+        _upsertTaskInList(
+          _cache[effectiveProjectId]!,
+          task,
+        );
+
+        _sort(_cache[effectiveProjectId]!);
+        _emit(effectiveProjectId);
+      }
     } catch (e, st) {
       AppLogger.error(
         'toggleTask error',
@@ -327,16 +451,38 @@ class TaskService {
         stackTrace: st,
         tag: 'TaskService',
       );
+
       rethrow;
     }
   }
 
   Future<void> deleteTask(String taskId) async {
+    final cleanTaskId = taskId.trim();
+
+    if (cleanTaskId.isEmpty) {
+      return;
+    }
+
+    final projectId = _projectIdByTaskId(cleanTaskId);
+
     try {
       await _client
           .from('project_tasks')
           .delete()
-          .eq('id', taskId);
+          .eq('id', cleanTaskId);
+
+      if (projectId != null && projectId.isNotEmpty) {
+        final list = _cache[projectId];
+
+        if (list != null) {
+          list.removeWhere(
+                (task) => task.id == cleanTaskId,
+          );
+
+          _sort(list);
+          _emit(projectId);
+        }
+      }
     } catch (e, st) {
       AppLogger.error(
         'deleteTask error',
@@ -344,13 +490,53 @@ class TaskService {
         stackTrace: st,
         tag: 'TaskService',
       );
+
       rethrow;
     }
+  }
+
+  Future<void> refreshTasks(String projectId) async {
+    final cleanProjectId = projectId.trim();
+
+    if (cleanProjectId.isEmpty) {
+      return;
+    }
+
+    await _loadInitial(cleanProjectId);
   }
 
   // =========================================================
   // HELPERS
   // =========================================================
+
+  void _upsertTaskInList(
+      List<TaskModel> list,
+      TaskModel task,
+      ) {
+    final index = list.indexWhere(
+          (item) => item.id == task.id,
+    );
+
+    if (index == -1) {
+      list.add(task);
+    } else {
+      list[index] = task;
+    }
+  }
+
+  String? _projectIdByTaskId(String taskId) {
+    for (final entry in _cache.entries) {
+      final exists = entry.value.any(
+            (task) => task.id == taskId,
+      );
+
+      if (exists) {
+        return entry.key;
+      }
+    }
+
+    return null;
+  }
 
   void _sort(List<TaskModel> list) {
     list.sort(
@@ -367,7 +553,7 @@ class TaskService {
 
     controller.add(
       List.unmodifiable(
-        _cache[projectId] ?? [],
+        _cache[projectId] ?? const <TaskModel>[],
       ),
     );
   }
@@ -383,33 +569,41 @@ class TaskService {
   // =========================================================
 
   Future<void> disposeProject(String projectId) async {
-    if (_disposing.contains(projectId)) {
+    final cleanProjectId = projectId.trim();
+
+    if (cleanProjectId.isEmpty) {
       return;
     }
 
-    _disposing.add(projectId);
+    if (_disposing.contains(cleanProjectId)) {
+      return;
+    }
+
+    _disposing.add(cleanProjectId);
 
     AppLogger.info(
-      'DISPOSE: $projectId',
+      'DISPOSE task project: $cleanProjectId',
       tag: 'TaskService',
     );
 
     try {
-      final channel = _channels.remove(projectId);
+      _disposeTimers.remove(cleanProjectId)?.cancel();
+      _refreshDebounce.remove(cleanProjectId)?.cancel();
+
+      final channel = _channels.remove(cleanProjectId);
 
       if (channel != null) {
-        await channel.unsubscribe();
         await _client.removeChannel(channel);
       }
 
-      final controller = _controllers.remove(projectId);
+      final controller = _controllers.remove(cleanProjectId);
 
       if (controller != null && !controller.isClosed) {
         await controller.close();
       }
 
-      _cache.remove(projectId);
-      _initializing.remove(projectId);
+      _cache.remove(cleanProjectId);
+      _initializing.remove(cleanProjectId);
     } catch (e, st) {
       AppLogger.error(
         'disposeProject error',
@@ -418,7 +612,7 @@ class TaskService {
         tag: 'TaskService',
       );
     } finally {
-      _disposing.remove(projectId);
+      _disposing.remove(cleanProjectId);
     }
   }
 
@@ -429,6 +623,16 @@ class TaskService {
       await disposeProject(id);
     }
 
+    for (final timer in _disposeTimers.values) {
+      timer.cancel();
+    }
+
+    for (final timer in _refreshDebounce.values) {
+      timer.cancel();
+    }
+
+    _disposeTimers.clear();
+    _refreshDebounce.clear();
     _channels.clear();
     _cache.clear();
     _initializing.clear();

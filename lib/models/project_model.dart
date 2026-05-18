@@ -7,18 +7,73 @@ import 'package:easy_localization/easy_localization.dart';
 /// ============================================================
 
 DateTime _parseDateSafe(dynamic value) {
+  if (value == null) {
+    return DateTime.now();
+  }
+
   if (value is DateTime) {
     return value.toLocal();
   }
 
-  if (value is String) {
-    final parsed = DateTime.tryParse(value);
-    if (parsed != null) {
-      return parsed.toLocal();
-    }
+  final parsed = DateTime.tryParse(value.toString());
+
+  if (parsed != null) {
+    return parsed.toLocal();
   }
 
   return DateTime.now();
+}
+
+DateTime? _parseDateNullable(dynamic value) {
+  if (value == null) {
+    return null;
+  }
+
+  if (value is DateTime) {
+    return value.toLocal();
+  }
+
+  return DateTime.tryParse(value.toString())?.toLocal();
+}
+
+int _parseIntSafe(
+    dynamic value, {
+      int fallback = 0,
+    }) {
+  if (value == null) {
+    return fallback;
+  }
+
+  if (value is int) {
+    return value;
+  }
+
+  if (value is num) {
+    return value.toInt();
+  }
+
+  return int.tryParse(value.toString()) ?? fallback;
+}
+
+bool _parseBoolSafe(
+    dynamic value, {
+      bool fallback = false,
+    }) {
+  if (value == null) {
+    return fallback;
+  }
+
+  if (value is bool) {
+    return value;
+  }
+
+  final text = value.toString().toLowerCase().trim();
+
+  return text == 'true' || text == '1' || text == 'yes';
+}
+
+String _stringSafe(dynamic value) {
+  return value?.toString().trim() ?? '';
 }
 
 /// ============================================================
@@ -33,19 +88,35 @@ enum ProjectRole {
 
 extension ProjectRoleExtension on ProjectRole {
   static ProjectRole fromString(String? value) {
-    switch (value) {
+    switch (value?.toLowerCase().trim()) {
       case 'owner':
         return ProjectRole.owner;
+
       case 'editor':
         return ProjectRole.editor;
+
       case 'viewer':
         return ProjectRole.viewer;
+
       default:
         return ProjectRole.viewer;
     }
   }
 
   String get value => name;
+
+  String localizedText() {
+    switch (this) {
+      case ProjectRole.owner:
+        return 'project_roles.owner'.tr();
+
+      case ProjectRole.editor:
+        return 'project_roles.editor'.tr();
+
+      case ProjectRole.viewer:
+        return 'project_roles.viewer'.tr();
+    }
+  }
 }
 
 /// ============================================================
@@ -59,11 +130,13 @@ enum ProjectCategory {
 
 extension ProjectCategoryExtension on ProjectCategory {
   static ProjectCategory fromString(String? value) {
-    switch (value) {
+    switch (value?.toLowerCase().trim()) {
       case 'educational':
         return ProjectCategory.educational;
+
       case 'creative':
         return ProjectCategory.creative;
+
       default:
         return ProjectCategory.creative;
     }
@@ -74,10 +147,10 @@ extension ProjectCategoryExtension on ProjectCategory {
   String localizedText() {
     switch (this) {
       case ProjectCategory.educational:
-        return 'project.category.educational'.tr();
+        return 'project_category.educational'.tr();
 
       case ProjectCategory.creative:
-        return 'project.category.creative'.tr();
+        return 'project_category.creative'.tr();
     }
   }
 }
@@ -94,6 +167,51 @@ enum ProjectStatus {
 }
 
 extension ProjectStatusExtension on ProjectStatus {
+  static ProjectStatus fromValue(dynamic value) {
+    if (value is int) {
+      if (value >= 0 && value < ProjectStatus.values.length) {
+        return ProjectStatus.values[value];
+      }
+
+      return ProjectStatus.planned;
+    }
+
+    if (value is num) {
+      final index = value.toInt();
+
+      if (index >= 0 && index < ProjectStatus.values.length) {
+        return ProjectStatus.values[index];
+      }
+
+      return ProjectStatus.planned;
+    }
+
+    switch (value?.toString().toLowerCase().trim()) {
+      case 'planned':
+      case '0':
+        return ProjectStatus.planned;
+
+      case 'in_progress':
+      case 'inprogress':
+      case '1':
+        return ProjectStatus.inProgress;
+
+      case 'completed':
+      case '2':
+        return ProjectStatus.completed;
+
+      case 'archived':
+      case 'archive':
+      case '3':
+        return ProjectStatus.archived;
+
+      default:
+        return ProjectStatus.planned;
+    }
+  }
+
+  int get dbValue => index;
+
   String localizedText() {
     switch (this) {
       case ProjectStatus.planned:
@@ -149,26 +267,36 @@ class ProjectParticipant {
   factory ProjectParticipant.fromJson(
       Map<String, dynamic> json,
       ) {
-    final profile = json['profiles'];
+    final profileMap = _extractProfile(json);
 
-    Map<String, dynamic>? profileMap;
+    final id = _stringSafe(
+      json['member_id'] ?? json['id'] ?? json['user_id'],
+    );
 
-    if (profile is Map<String, dynamic>) {
-      profileMap = profile;
-    } else if (profile is List && profile.isNotEmpty) {
-      final first = profile.first;
-      if (first is Map<String, dynamic>) {
-        profileMap = first;
-      }
-    }
+    final firstName = _stringSafe(
+      profileMap?['first_name'] ?? json['first_name'],
+    );
+
+    final lastName = _stringSafe(
+      profileMap?['last_name'] ?? json['last_name'],
+    );
+
+    final fullName = _resolveFullName(
+      fullName: profileMap?['full_name'] ?? json['full_name'],
+      firstName: firstName,
+      lastName: lastName,
+      username: profileMap?['username'] ?? json['username'],
+    );
 
     return ProjectParticipant(
-      id: (json['member_id'] ?? json['id'] ?? '').toString(),
-      fullName: profileMap?['full_name']?.toString() ??
-          json['full_name']?.toString() ??
-          'Unknown',
-      username: profileMap?['username']?.toString(),
-      avatarUrl: profileMap?['avatar_url']?.toString(),
+      id: id,
+      fullName: fullName,
+      username: _normalizeUsername(
+        profileMap?['username'] ?? json['username'],
+      ),
+      avatarUrl: _emptyToNull(
+        profileMap?['avatar_url'] ?? json['avatar_url'],
+      ),
       role: ProjectRoleExtension.fromString(
         json['role']?.toString(),
       ),
@@ -178,11 +306,83 @@ class ProjectParticipant {
   Map<String, dynamic> toJson() {
     return {
       'member_id': id,
+      'id': id,
       'full_name': fullName,
       'username': username,
       'avatar_url': avatarUrl,
       'role': role.value,
     };
+  }
+
+  static Map<String, dynamic>? _extractProfile(
+      Map<String, dynamic> json,
+      ) {
+    final profile = json['profiles'] ?? json['profile'];
+
+    if (profile is Map) {
+      return Map<String, dynamic>.from(profile);
+    }
+
+    if (profile is List && profile.isNotEmpty) {
+      final first = profile.first;
+
+      if (first is Map) {
+        return Map<String, dynamic>.from(first);
+      }
+    }
+
+    return null;
+  }
+
+  static String _resolveFullName({
+    required dynamic fullName,
+    required String firstName,
+    required String lastName,
+    required dynamic username,
+  }) {
+    final directFullName = _stringSafe(fullName);
+
+    if (directFullName.isNotEmpty) {
+      return directFullName;
+    }
+
+    final combined = '$firstName $lastName'.trim();
+
+    if (combined.isNotEmpty) {
+      return combined;
+    }
+
+    final normalizedUsername = _normalizeUsername(username);
+
+    if (normalizedUsername != null && normalizedUsername.isNotEmpty) {
+      return '@$normalizedUsername';
+    }
+
+    return 'users.no_name'.tr();
+  }
+
+  static String? _normalizeUsername(dynamic value) {
+    final username = _stringSafe(value);
+
+    if (username.isEmpty) {
+      return null;
+    }
+
+    if (username.startsWith('@')) {
+      return username.substring(1);
+    }
+
+    return username;
+  }
+
+  static String? _emptyToNull(dynamic value) {
+    final text = _stringSafe(value);
+
+    if (text.isEmpty) {
+      return null;
+    }
+
+    return text;
   }
 }
 
@@ -196,6 +396,7 @@ class Attachment {
   final String fileName;
   final String filePath;
   final String mimeType;
+  final int fileSize;
   final DateTime uploadedAt;
   final String uploaderId;
 
@@ -205,6 +406,7 @@ class Attachment {
     required this.fileName,
     required this.filePath,
     required this.mimeType,
+    this.fileSize = 0,
     required this.uploadedAt,
     required this.uploaderId,
   });
@@ -213,16 +415,18 @@ class Attachment {
       Map<String, dynamic> json,
       ) {
     return Attachment(
-      id: json['id']?.toString() ?? '',
-      projectId: json['project_id']?.toString() ?? '',
-      fileName: json['file_name']?.toString() ?? '',
-      filePath: json['file_path']?.toString() ?? '',
-      mimeType: json['mime_type']?.toString() ?? '',
+      id: _stringSafe(json['id']),
+      projectId: _stringSafe(json['project_id']),
+      fileName: _stringSafe(json['file_name']),
+      filePath: _stringSafe(json['file_path']),
+      mimeType: _stringSafe(json['mime_type']),
+      fileSize: _parseIntSafe(json['file_size']),
       uploadedAt: _parseDateSafe(
         json['created_at'] ?? json['uploaded_at'],
       ),
-      uploaderId: (json['uploaded_by'] ?? json['uploader_id'] ?? '')
-          .toString(),
+      uploaderId: _stringSafe(
+        json['uploaded_by'] ?? json['uploader_id'],
+      ),
     );
   }
 
@@ -233,6 +437,7 @@ class Attachment {
       'file_name': fileName,
       'file_path': filePath,
       'mime_type': mimeType,
+      'file_size': fileSize,
       'created_at': uploadedAt.toUtc().toIso8601String(),
       'uploaded_by': uploaderId,
     };
@@ -244,43 +449,29 @@ class Attachment {
 /// ============================================================
 
 class ProjectModel {
-  // Уникальный идентификатор проекта
   final String id;
-  // ID владельца (создателя) проекта
   final String ownerId;
-  // Название проекта
   final String title;
-  // Описание проекта
   final String description;
-  // Крайний срок выполнения проекта
   final DateTime deadline;
-  // Дата создания проекта
   final DateTime createdAt;
-  // Текущий статус проекта
   final int status;
-  // Цвет проекта для отображения в интерфейсе
   final String color;
-  // Категория проекта
+
   final ProjectCategory category;
-  // Максимальное количество участников
   final int maxMembers;
-  // Максимальное количество вложений
   final int maxAttachments;
-  // Включена ли система оценивания
   final bool gradingEnabled;
-  // Список участников проекта
+
   final List<ProjectParticipant> participantsData;
-  // Список прикреплённых файлов
   final List<Attachment> attachments;
-  // Общее количество задач
+
   final int totalTasks;
-  // Количество выполненных задач
   final int completedTasks;
-  // Последнее сообщение в чате проекта
+
   final String? lastMessage;
-  // Дата и время последнего сообщения
   final DateTime? lastMessageAt;
-  // Количество непрочитанных сообщений
+
   final int unreadCount;
 
   const ProjectModel({
@@ -306,28 +497,34 @@ class ProjectModel {
   });
 
   ProjectStatus get statusEnum {
-    if (status < 0 || status >= ProjectStatus.values.length) {
-      return ProjectStatus.planned;
-    }
-
-    return ProjectStatus.values[status];
+    return ProjectStatusExtension.fromValue(status);
   }
 
-  List<String> get participantIds =>
-      participantsData.map((e) => e.id).toList();
+  List<String> get participantIds {
+    return participantsData
+        .map((participant) => participant.id)
+        .where((id) => id.trim().isNotEmpty)
+        .toSet()
+        .toList();
+  }
 
   double get progress {
-    if (totalTasks == 0) return 0;
+    if (totalTasks <= 0) {
+      return 0;
+    }
+
     return (completedTasks / totalTasks).clamp(0.0, 1.0);
   }
 
   Color get colorObj {
     try {
-      final value = color.startsWith('0x')
-          ? int.parse(color)
-          : int.parse('0xFF$color');
+      final prepared = color.startsWith('0x')
+          ? color
+          : color.startsWith('#')
+          ? '0xFF${color.substring(1)}'
+          : '0xFF$color';
 
-      return Color(value);
+      return Color(int.parse(prepared));
     } catch (_) {
       return const Color(0xFF2196F3);
     }
@@ -336,57 +533,107 @@ class ProjectModel {
   factory ProjectModel.fromJson(
       Map<String, dynamic> json,
       ) {
+    final parsedStatus = ProjectStatusExtension.fromValue(
+      json['status'],
+    );
+
     return ProjectModel(
-      id: json['id']?.toString() ?? '',
-      ownerId: json['owner_id']?.toString() ?? '',
-      title: json['title']?.toString() ?? '',
-      description: json['description']?.toString() ?? '',
+      id: _stringSafe(json['id']),
+      ownerId: _stringSafe(json['owner_id']),
+      title: _stringSafe(json['title']),
+      description: _stringSafe(json['description']),
       deadline: _parseDateSafe(json['deadline']),
       createdAt: _parseDateSafe(json['created_at']),
-      status: (json['status'] as num?)?.toInt() ?? 0,
-      color: json['color']?.toString() ?? '0xFF2196F3',
+      status: parsedStatus.dbValue,
+      color: _stringSafe(json['color']).isNotEmpty
+          ? _stringSafe(json['color'])
+          : '0xFF2196F3',
       category: ProjectCategoryExtension.fromString(
         json['category']?.toString(),
       ),
-      maxMembers: (json['max_members'] as num?)?.toInt() ?? 10,
-      maxAttachments: (json['max_attachments'] as num?)?.toInt() ?? 10,
-      gradingEnabled: json['grading_enabled'] == true,
+      maxMembers: _parseIntSafe(
+        json['max_members'],
+        fallback: 10,
+      ),
+      maxAttachments: _parseIntSafe(
+        json['max_attachments'],
+        fallback: 10,
+      ),
+      gradingEnabled: _parseBoolSafe(
+        json['grading_enabled'],
+      ),
       participantsData: _parseParticipantsData(json),
       attachments: _parseAttachments(json),
-      totalTasks: (json['total_tasks'] as num?)?.toInt() ?? 0,
-      completedTasks: (json['completed_tasks'] as num?)?.toInt() ?? 0,
-      unreadCount: (json['unread_count'] as num?)?.toInt() ?? 0,
-      lastMessage: json['last_message']?.toString(),
-      lastMessageAt: json['last_message_at'] != null
-          ? _parseDateSafe(json['last_message_at'])
-          : null,
+      totalTasks: _parseIntSafe(json['total_tasks']),
+      completedTasks: _parseIntSafe(json['completed_tasks']),
+      unreadCount: _parseIntSafe(
+        json['unread_count'] ?? json['unread'],
+      ),
+      lastMessage: _emptyStringToNull(json['last_message']),
+      lastMessageAt: _parseDateNullable(json['last_message_at']),
     );
   }
 
   static List<ProjectParticipant> _parseParticipantsData(
       Map<String, dynamic> json,
       ) {
-    final raw = json['participants_data'] ?? json['project_members'];
+    final raw = json['participants_data'] ??
+        json['project_members'] ??
+        json['members'];
 
-    if (raw is! List) return [];
+    if (raw is! List) {
+      return [];
+    }
 
-    return raw
-        .whereType<Map<String, dynamic>>()
-        .map(ProjectParticipant.fromJson)
-        .toList();
+    final result = <ProjectParticipant>[];
+
+    for (final item in raw) {
+      if (item is Map) {
+        result.add(
+          ProjectParticipant.fromJson(
+            Map<String, dynamic>.from(item),
+          ),
+        );
+      }
+    }
+
+    return result;
   }
 
   static List<Attachment> _parseAttachments(
       Map<String, dynamic> json,
       ) {
-    final raw = json['attachments_data'] ?? json['project_attachments'];
+    final raw = json['attachments_data'] ??
+        json['project_attachments'] ??
+        json['attachments'];
 
-    if (raw is! List) return [];
+    if (raw is! List) {
+      return [];
+    }
 
-    return raw
-        .whereType<Map<String, dynamic>>()
-        .map(Attachment.fromJson)
-        .toList();
+    final result = <Attachment>[];
+
+    for (final item in raw) {
+      if (item is Map) {
+        result.add(
+          Attachment.fromJson(
+            Map<String, dynamic>.from(item),
+          ),
+        );
+      }
+    }
+
+    return result;
+  }
+
+  static String? _emptyStringToNull(dynamic value) {
+    final text = _stringSafe(value);
+
+    if (text.isEmpty) {
+      return null;
+    }
+
+    return text;
   }
 
   Map<String, dynamic> toJson() {
@@ -396,6 +643,7 @@ class ProjectModel {
       'title': title,
       'description': description,
       'deadline': deadline.toUtc().toIso8601String(),
+      'created_at': createdAt.toUtc().toIso8601String(),
       'status': status,
       'color': color,
       'category': category.value,
@@ -457,14 +705,23 @@ class ProjectModel {
       ownerId: ownerId,
       title: '',
       description: '',
-      deadline: DateTime.now().add(const Duration(days: 7)),
+      deadline: DateTime.now().add(
+        const Duration(days: 7),
+      ),
       createdAt: DateTime.now(),
-      status: ProjectStatus.planned.index,
+      status: ProjectStatus.planned.dbValue,
       color: '0xFF2196F3',
       category: ProjectCategory.creative,
       maxMembers: 10,
       maxAttachments: 10,
       gradingEnabled: false,
+      participantsData: [
+        ProjectParticipant(
+          id: ownerId,
+          fullName: 'project.owner'.tr(),
+          role: ProjectRole.owner,
+        ),
+      ],
     );
   }
 }

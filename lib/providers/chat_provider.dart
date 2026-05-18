@@ -18,12 +18,12 @@ class ChatProvider with ChangeNotifier {
 
   Set<String> readMessages = {};
   Set<String> otherReadMessages = {};
+
   final Set<String> _pendingReads = {};
+  final Map<String, String> _userNameCache = {};
 
   String? typingUser;
   Map<String, bool> onlineUsers = {};
-
-  final Map<String, String> _userNameCache = {};
 
   StreamSubscription<List<MessageModel>>? _messagesSub;
   StreamSubscription<List<Map<String, dynamic>>>? _typingSub;
@@ -38,6 +38,7 @@ class ChatProvider with ChangeNotifier {
   bool _initialized = false;
   bool _isLoadingMore = false;
   bool _disposed = false;
+  bool _isSwitchingProject = false;
 
   bool? _lastTypingState;
 
@@ -46,24 +47,24 @@ class ChatProvider with ChangeNotifier {
 
   bool get isLoadingMore => _isLoadingMore;
 
+  String? get currentProjectId => _currentProjectId;
+
   // =========================================================
   // PROJECT CHANGE
   // =========================================================
 
-  Future<void> handleProjectChange(String? projectId) async {
-    if (_disposed || projectId == null) {
+  Future<void> handleProjectChange(
+      String? projectId,
+      ) async {
+    if (_disposed || projectId == null || projectId.isEmpty) {
       return;
     }
 
     if (_currentProjectId == projectId &&
+        _initialized &&
         _messagesSub != null) {
       return;
     }
-
-    AppLogger.info(
-      'OPEN CHAT: $projectId',
-      tag: 'ChatProvider',
-    );
 
     await init(projectId);
   }
@@ -75,11 +76,33 @@ class ChatProvider with ChangeNotifier {
   }
 
   // =========================================================
+  // TRANSLATE
+  // =========================================================
+
+  Future<String> translateMessage(
+      String text,
+      String targetLanguage,
+      ) async {
+    return _chatService.translateMessage(
+      text,
+      targetLanguage,
+    );
+  }
+
+  Future<String> detectMessageLanguage(
+      String text,
+      ) async {
+    return _chatService.detectMessageLanguage(text);
+  }
+
+  // =========================================================
   // INIT
   // =========================================================
 
-  Future<void> init(String projectId) async {
-    if (_disposed) {
+  Future<void> init(
+      String projectId,
+      ) async {
+    if (_disposed || _isSwitchingProject) {
       return;
     }
 
@@ -89,66 +112,176 @@ class ChatProvider with ChangeNotifier {
       return;
     }
 
-    if (_currentProjectId != null &&
-        _currentProjectId != projectId) {
-      await disposeStreams(clearCurrent: false);
-    }
+    _isSwitchingProject = true;
 
-    _initialized = true;
-    _currentProjectId = projectId;
-    _lastTypingState = null;
-
-    typingUser = null;
-    onlineUsers.clear();
-    cachedMessages = <MessageModel>[];
-
-    readMessages = <String>{};
-    otherReadMessages = <String>{};
-    _pendingReads.clear();
-
-    _userNameCache.clear();
-
-    _chatService.setChatActive(projectId, true);
-
-    final currentId = projectId;
-
-    messagesStream =
-        _chatService.subscribeMessages(currentId);
-
-    unawaited(_messagesSub?.cancel());
-
-    _messagesSub = messagesStream?.listen(
-          (messages) {
-        if (_disposed ||
-            _currentProjectId != currentId) {
-          return;
-        }
-
-        cachedMessages = List<MessageModel>.from(messages);
-
-        _markLocalRead();
-
-        if (_pendingReads.isNotEmpty) {
-          _scheduleRead(currentId);
-        }
-
-        _safeNotify();
-      },
-      onError: (e, st) {
-        AppLogger.error(
-          'Messages stream error',
-          tag: 'ChatProvider',
-          error: e,
-          stackTrace: st,
+    try {
+      if (_currentProjectId != null &&
+          _currentProjectId != projectId) {
+        await disposeStreams(
+          clearCurrent: false,
+          markOffline: true,
         );
-      },
-    );
+      }
 
-    _listenTyping(currentId);
-    _listenPresence(currentId);
-    _listenReads(currentId);
+      if (_disposed) {
+        return;
+      }
 
-    unawaited(setOnline(currentId, true));
+      _initialized = true;
+      _currentProjectId = projectId;
+      _lastTypingState = null;
+
+      _resetChatState();
+
+      await _loadParticipants(projectId);
+
+      if (_disposed || _currentProjectId != projectId) {
+        return;
+      }
+
+      _chatService.setChatActive(
+        projectId,
+        true,
+      );
+
+      messagesStream =
+          _chatService.subscribeMessages(projectId);
+
+      await _messagesSub?.cancel();
+
+      _messagesSub = messagesStream?.listen(
+            (messages) {
+          if (_disposed ||
+              _currentProjectId != projectId) {
+            return;
+          }
+
+          cachedMessages =
+          List<MessageModel>.from(messages);
+
+          _markLocalRead();
+
+          if (_pendingReads.isNotEmpty) {
+            _scheduleRead(projectId);
+          }
+
+          _safeNotify();
+        },
+        onError: (e, st) {
+          AppLogger.error(
+            'Messages stream error',
+            tag: 'ChatProvider',
+            error: e,
+            stackTrace: st,
+          );
+        },
+      );
+
+      _listenTyping(projectId);
+      _listenPresence(projectId);
+      _listenReads(projectId);
+
+      await setOnline(
+        projectId,
+        true,
+      );
+
+      _markLocalRead();
+
+      if (_pendingReads.isNotEmpty) {
+        await markAsRead(projectId);
+      }
+
+      _safeNotify();
+    } catch (e, st) {
+      AppLogger.error(
+        'ChatProvider init failed',
+        tag: 'ChatProvider',
+        error: e,
+        stackTrace: st,
+      );
+    } finally {
+      _isSwitchingProject = false;
+    }
+  }
+
+  void _resetChatState() {
+    typingUser = null;
+    onlineUsers = {};
+
+    cachedMessages = [];
+
+    readMessages = {};
+    otherReadMessages = {};
+
+    _pendingReads.clear();
+    _userNameCache.clear();
+  }
+
+  Future<void> _loadParticipants(
+      String projectId,
+      ) async {
+    try {
+      final rows = await SupabaseService.client
+          .from('project_members')
+          .select(
+        'member_id, profiles(full_name, username)',
+      )
+          .eq(
+        'project_id',
+        projectId,
+      );
+
+      _userNameCache.clear();
+
+      for (final row in rows) {
+        final userId =
+        row['member_id']?.toString();
+
+        if (userId == null || userId.isEmpty) {
+          continue;
+        }
+
+        String? fullName;
+        String? username;
+
+        final profile = row['profiles'];
+
+        if (profile is Map<String, dynamic>) {
+          fullName =
+              profile['full_name']?.toString();
+          username =
+              profile['username']?.toString();
+        } else if (profile is List &&
+            profile.isNotEmpty &&
+            profile.first is Map<String, dynamic>) {
+          final first =
+          profile.first as Map<String, dynamic>;
+
+          fullName =
+              first['full_name']?.toString();
+          username =
+              first['username']?.toString();
+        }
+
+        final name =
+        fullName != null && fullName.trim().isNotEmpty
+            ? fullName.trim()
+            : username != null &&
+            username.trim().isNotEmpty
+            ? '@${username.trim()}'
+            : 'User';
+
+        _userNameCache[userId] = name;
+      }
+    } catch (e, st) {
+      AppLogger.error(
+        'Load participants failed',
+        tag: 'ChatProvider',
+        error: e,
+        stackTrace: st,
+      );
+    }
   }
 
   // =========================================================
@@ -176,8 +309,20 @@ class ChatProvider with ChangeNotifier {
         trimmed,
         replyTo: replyId,
       );
+    } catch (e, st) {
+      AppLogger.error(
+        'Send message failed',
+        tag: 'ChatProvider',
+        error: e,
+        stackTrace: st,
+      );
+
+      rethrow;
     } finally {
-      setTyping(projectId, false);
+      setTyping(
+        projectId,
+        false,
+      );
     }
   }
 
@@ -204,8 +349,78 @@ class ChatProvider with ChangeNotifier {
         fileName: fileName,
         type: type,
       );
+    } catch (e, st) {
+      AppLogger.error(
+        'Send file failed',
+        tag: 'ChatProvider',
+        error: e,
+        stackTrace: st,
+      );
+
+      rethrow;
     } finally {
-      setTyping(projectId, false);
+      setTyping(
+        projectId,
+        false,
+      );
+    }
+  }
+
+  // =========================================================
+  // EDIT / DELETE
+  // =========================================================
+
+  Future<void> editMessage(
+      String messageId,
+      String newText,
+      ) async {
+    if (_disposed) {
+      return;
+    }
+
+    final trimmed = newText.trim();
+
+    if (trimmed.isEmpty) {
+      return;
+    }
+
+    try {
+      await _chatService.editMessage(
+        messageId,
+        trimmed,
+      );
+    } catch (e, st) {
+      AppLogger.error(
+        'Edit message failed',
+        tag: 'ChatProvider',
+        error: e,
+        stackTrace: st,
+      );
+
+      rethrow;
+    }
+  }
+
+  Future<void> deleteMessage(
+      String messageId,
+      ) async {
+    if (_disposed) {
+      return;
+    }
+
+    try {
+      await _chatService.deleteMessage(
+        messageId,
+      );
+    } catch (e, st) {
+      AppLogger.error(
+        'Delete message failed',
+        tag: 'ChatProvider',
+        error: e,
+        stackTrace: st,
+      );
+
+      rethrow;
     }
   }
 
@@ -213,7 +428,9 @@ class ChatProvider with ChangeNotifier {
   // READS
   // =========================================================
 
-  void _scheduleRead(String projectId) {
+  void _scheduleRead(
+      String projectId,
+      ) {
     _readDebounce?.cancel();
 
     _readDebounce = Timer(
@@ -224,7 +441,9 @@ class ChatProvider with ChangeNotifier {
           return;
         }
 
-        unawaited(markAsRead(projectId));
+        unawaited(
+          markAsRead(projectId),
+        );
       },
     );
   }
@@ -236,25 +455,29 @@ class ChatProvider with ChangeNotifier {
       return;
     }
 
-    bool changed = false;
+    for (final message in cachedMessages.take(50)) {
+      if (message.isDeleted) {
+        continue;
+      }
 
-    for (final m in cachedMessages.take(50)) {
-      if (m.isDeleted) continue;
-      if (m.senderId == userId) continue;
-      if (readMessages.contains(m.id)) continue;
+      if (message.senderId == userId) {
+        continue;
+      }
 
-      readMessages.add(m.id);
-      _pendingReads.add(m.id);
-      changed = true;
-    }
+      if (readMessages.contains(message.id)) {
+        continue;
+      }
 
-    if (changed) {
-      _safeNotify();
+      readMessages.add(message.id);
+      _pendingReads.add(message.id);
     }
   }
 
-  Future<void> markAsRead(String projectId) async {
-    if (_disposed) {
+  Future<void> markAsRead(
+      String projectId,
+      ) async {
+    if (_disposed ||
+        _currentProjectId != projectId) {
       return;
     }
 
@@ -264,7 +487,9 @@ class ChatProvider with ChangeNotifier {
       return;
     }
 
-    final toSend = _pendingReads.toList();
+    final toSend =
+    List<String>.from(_pendingReads);
+
     _pendingReads.clear();
 
     try {
@@ -283,12 +508,14 @@ class ChatProvider with ChangeNotifier {
         onConflict: 'message_id,user_id',
       );
 
-      await _chatService.forceReloadUnread(userId);
+      await _chatService.forceReloadUnread(
+        userId,
+      );
     } catch (e, st) {
       _pendingReads.addAll(toSend);
 
       AppLogger.error(
-        'markAsRead failed',
+        'Mark as read failed',
         tag: 'ChatProvider',
         error: e,
         stackTrace: st,
@@ -296,97 +523,146 @@ class ChatProvider with ChangeNotifier {
     }
   }
 
-  void _listenReads(String projectId) {
+  void _listenReads(
+      String projectId,
+      ) {
     unawaited(_readsSub?.cancel());
 
     _readsSub = SupabaseService.client
         .from('message_reads')
         .stream(
-      primaryKey: ['message_id', 'user_id'],
+      primaryKey: [
+        'message_id',
+        'user_id',
+      ],
     )
-        .eq('project_id', projectId)
-        .listen((data) {
-      if (_disposed ||
-          _currentProjectId != projectId) {
-        return;
-      }
-
-      final myId = currentUserId;
-
-      if (myId == null) {
-        return;
-      }
-
-      final myReads = <String>{};
-      final otherReads = <String>{};
-
-      for (final row in data) {
-        final msgId = row['message_id'].toString();
-        final userId = row['user_id'].toString();
-
-        if (userId == myId) {
-          myReads.add(msgId);
-        } else {
-          otherReads.add(msgId);
+        .eq(
+      'project_id',
+      projectId,
+    )
+        .listen(
+          (data) {
+        if (_disposed ||
+            _currentProjectId != projectId) {
+          return;
         }
-      }
 
-      if (!_setEquals(myReads, readMessages) ||
-          !_setEquals(
-            otherReads,
-            otherReadMessages,
-          )) {
-        otherReadMessages = Set<String>.from(otherReads);
-        readMessages = Set<String>.from(myReads);
+        final myId = currentUserId;
+
+        if (myId == null) {
+          return;
+        }
+
+        final myReads = <String>{};
+        final otherReads = <String>{};
+
+        for (final row in data) {
+          final msgId =
+          row['message_id']?.toString();
+
+          final userId =
+          row['user_id']?.toString();
+
+          if (msgId == null || userId == null) {
+            continue;
+          }
+
+          if (userId == myId) {
+            myReads.add(msgId);
+          } else {
+            otherReads.add(msgId);
+          }
+        }
+
+        readMessages = {
+          ...myReads,
+          ..._pendingReads,
+        };
+
+        otherReadMessages = otherReads;
+
         _safeNotify();
-      }
-    });
+      },
+      onError: (e, st) {
+        AppLogger.error(
+          'Reads stream error',
+          tag: 'ChatProvider',
+          error: e,
+          stackTrace: st,
+        );
+      },
+    );
   }
 
   // =========================================================
   // TYPING
   // =========================================================
 
-  void _listenTyping(String projectId) {
+  void _listenTyping(
+      String projectId,
+      ) {
     unawaited(_typingSub?.cancel());
 
     _typingSub = SupabaseService.client
         .from('chat_typing')
         .stream(
-      primaryKey: ['project_id', 'user_id'],
+      primaryKey: [
+        'project_id',
+        'user_id',
+      ],
     )
-        .eq('project_id', projectId)
-        .listen((data) async {
-      if (_disposed ||
-          _currentProjectId != projectId) {
-        return;
-      }
-
-      String? typingName;
-
-      for (final row in data) {
-        final userId = row['user_id'].toString();
-
-        if (row['is_typing'] == true &&
-            userId != currentUserId) {
-          typingName =
-              _userNameCache[userId] ?? 'User';
-          break;
+        .eq(
+      'project_id',
+      projectId,
+    )
+        .listen(
+          (data) {
+        if (_disposed ||
+            _currentProjectId != projectId) {
+          return;
         }
-      }
 
-      if (typingUser != typingName) {
-        typingUser = typingName;
-        _safeNotify();
-      }
-    });
+        String? typingName;
+
+        for (final row in data) {
+          final userId =
+          row['user_id']?.toString();
+
+          if (userId == null ||
+              userId == currentUserId) {
+            continue;
+          }
+
+          if (row['is_typing'] == true) {
+            typingName =
+                _userNameCache[userId] ?? 'User';
+            break;
+          }
+        }
+
+        if (typingUser != typingName) {
+          typingUser = typingName;
+          _safeNotify();
+        }
+      },
+      onError: (e, st) {
+        AppLogger.error(
+          'Typing stream error',
+          tag: 'ChatProvider',
+          error: e,
+          stackTrace: st,
+        );
+      },
+    );
   }
 
   void setTyping(
       String projectId,
       bool isTyping,
       ) {
-    if (_disposed || currentUserId == null) {
+    if (_disposed ||
+        currentUserId == null ||
+        _currentProjectId != projectId) {
       return;
     }
 
@@ -402,6 +678,7 @@ class ChatProvider with ChangeNotifier {
       const Duration(milliseconds: 400),
           () async {
         if (_disposed ||
+            currentUserId == null ||
             _currentProjectId != projectId) {
           return;
         }
@@ -426,10 +703,12 @@ class ChatProvider with ChangeNotifier {
     );
   }
 
-  Future<void> _forceTypingOff(String projectId) async {
+  Future<void> _forceTypingOff(
+      String projectId,
+      ) async {
     final userId = currentUserId;
 
-    if (userId == null || _disposed) {
+    if (userId == null) {
       return;
     }
 
@@ -448,43 +727,62 @@ class ChatProvider with ChangeNotifier {
   // PRESENCE
   // =========================================================
 
-  void _listenPresence(String projectId) {
+  void _listenPresence(
+      String projectId,
+      ) {
     unawaited(_presenceSub?.cancel());
 
     _presenceSub = SupabaseService.client
         .from('chat_presence')
         .stream(
-      primaryKey: ['project_id', 'user_id'],
+      primaryKey: [
+        'project_id',
+        'user_id',
+      ],
     )
-        .eq('project_id', projectId)
-        .listen((data) {
-      if (_disposed ||
-          _currentProjectId != projectId) {
-        return;
-      }
+        .eq(
+      'project_id',
+      projectId,
+    )
+        .listen(
+          (data) {
+        if (_disposed ||
+            _currentProjectId != projectId) {
+          return;
+        }
 
-      final newOnline = <String, bool>{};
+        final map = <String, bool>{};
 
-      for (final row in data) {
-        newOnline[row['user_id'].toString()] =
-            row['is_online'] == true;
-      }
+        for (final row in data) {
+          final userId =
+          row['user_id']?.toString();
 
-      if (!_mapEquals(newOnline, onlineUsers)) {
-        onlineUsers = newOnline;
+          if (userId == null) {
+            continue;
+          }
+
+          map[userId] =
+              row['is_online'] == true;
+        }
+
+        onlineUsers = map;
         _safeNotify();
-      }
-    });
+      },
+      onError: (e, st) {
+        AppLogger.error(
+          'Presence stream error',
+          tag: 'ChatProvider',
+          error: e,
+          stackTrace: st,
+        );
+      },
+    );
   }
 
   Future<void> setOnline(
       String projectId,
       bool isOnline,
       ) async {
-    if (_disposed) {
-      return;
-    }
-
     final userId = currentUserId;
 
     if (userId == null) {
@@ -498,8 +796,7 @@ class ChatProvider with ChangeNotifier {
         'project_id': projectId,
         'user_id': userId,
         'is_online': isOnline,
-        'last_seen':
-        DateTime.now().toIso8601String(),
+        'last_seen': DateTime.now().toIso8601String(),
       });
     } catch (e, st) {
       AppLogger.error(
@@ -515,8 +812,12 @@ class ChatProvider with ChangeNotifier {
   // PAGINATION
   // =========================================================
 
-  Future<void> loadMore(String projectId) async {
-    if (_disposed || _isLoadingMore) {
+  Future<void> loadMore(
+      String projectId,
+      ) async {
+    if (_disposed ||
+        _isLoadingMore ||
+        _currentProjectId != projectId) {
       return;
     }
 
@@ -525,6 +826,13 @@ class ChatProvider with ChangeNotifier {
 
     try {
       await _chatService.loadMore(projectId);
+    } catch (e, st) {
+      AppLogger.error(
+        'Load more messages failed',
+        tag: 'ChatProvider',
+        error: e,
+        stackTrace: st,
+      );
     } finally {
       _isLoadingMore = false;
       _safeNotify();
@@ -532,36 +840,8 @@ class ChatProvider with ChangeNotifier {
   }
 
   // =========================================================
-  // HELPERS
+  // NOTIFY
   // =========================================================
-
-  bool _mapEquals(
-      Map<String, bool> a,
-      Map<String, bool> b,
-      ) {
-    if (a.length != b.length) return false;
-
-    for (final key in a.keys) {
-      if (a[key] != b[key]) return false;
-    }
-
-    return true;
-  }
-
-  bool _setEquals(
-      Set<String> a,
-      Set<String> b,
-      ) {
-    if (a.length != b.length) return false;
-
-    for (final item in a) {
-      if (!b.contains(item)) {
-        return false;
-      }
-    }
-
-    return true;
-  }
 
   void _safeNotify() {
     if (!_disposed) {
@@ -575,68 +855,67 @@ class ChatProvider with ChangeNotifier {
 
   Future<void> disposeStreams({
     bool clearCurrent = true,
+    bool markOffline = true,
   }) async {
-    if (_disposed) return;
-
     final projectId = _currentProjectId;
-
-    if (projectId != null) {
-      unawaited(_forceTypingOff(projectId));
-      unawaited(setOnline(projectId, false));
-      _chatService.setChatActive(projectId, false);
+    _typingDebounce?.cancel();
+    _typingDebounce = null;
+    _readDebounce?.cancel();
+    _readDebounce = null;
+    if (projectId != null && markOffline) {
+      await _forceTypingOff(projectId);
+      await setOnline(
+        projectId,
+        false,
+      );
+      _chatService.setChatActive(
+        projectId,
+        false,
+      );
     }
-
     await _typingSub?.cancel();
     _typingSub = null;
-
     await _messagesSub?.cancel();
     _messagesSub = null;
-
     await _presenceSub?.cancel();
     _presenceSub = null;
-
     await _readsSub?.cancel();
     _readsSub = null;
-
-    _typingDebounce?.cancel();
-    _readDebounce?.cancel();
-
     if (projectId != null) {
-      await _chatService.disposeProject(projectId);
+      await _chatService.disposeProject(
+        projectId,
+      );
     }
-
+    messagesStream = null;
     if (clearCurrent) {
       _currentProjectId = null;
     }
-
     _initialized = false;
     _lastTypingState = null;
-
-    typingUser = null;
-    onlineUsers.clear();
-    cachedMessages = <MessageModel>[];
-
-    readMessages = <String>{};
-    otherReadMessages = <String>{};
-    _pendingReads.clear();
-
-    _userNameCache.clear();
-    messagesStream = null;
+    _resetChatState();
   }
 
-  void disposeProject(String projectId) {
+  void disposeProject(
+      String projectId,
+      ) {
     if (_currentProjectId == projectId) {
-      unawaited(disposeStreams());
+      unawaited(
+        disposeStreams(),
+      );
     }
   }
 
   @override
   void dispose() {
+    unawaited(
+      disposeStreams(
+        markOffline: true,
+      ),
+    );
+    unawaited(
+      _chatService.dispose(),
+    );
     _disposed = true;
-
-    unawaited(disposeStreams());
-    unawaited(_chatService.dispose());
-
     super.dispose();
   }
 }
