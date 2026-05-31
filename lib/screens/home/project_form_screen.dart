@@ -63,12 +63,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   bool _isUploading = false;
   bool _isSaving = false;
 
-  /// Право менять настройки проекта:
-  /// название, описание, срок, категорию, участников, роли.
   bool _canEdit = false;
-
-  /// Право работать с содержимым проекта:
-  /// вложения, задачи, чат.
   bool _canManageContent = false;
 
   String get _currentUserId {
@@ -110,6 +105,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     super.initState();
 
     _initFields();
+    _markAsCurrentProject();
     _initializeScreen();
   }
 
@@ -122,6 +118,22 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   // =========================================================
   // INIT
   // =========================================================
+
+  void _markAsCurrentProject() {
+    if (widget.project.id.trim().isEmpty) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      context.read<ProjectProvider>().setCurrentProject(
+        widget.project.id,
+      );
+    });
+  }
 
   void _initFields() {
     final project = widget.project;
@@ -685,6 +697,10 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       return;
     }
 
+    context.read<ProjectProvider>().setCurrentProject(
+      widget.project.id,
+    );
+
     final result = await FilePicker.pickFiles(
       allowMultiple: true,
       withData: kIsWeb,
@@ -738,6 +754,8 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       );
 
       if (updatedProject != null && mounted) {
+        provider.setCurrentProject(updatedProject.id);
+
         setState(() {
           _attachments = List<Attachment>.from(
             updatedProject.attachments,
@@ -774,6 +792,8 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     final provider = context.read<ProjectProvider>();
 
     try {
+      provider.setCurrentProject(widget.project.id);
+
       await provider.deleteAttachment(
         projectId: widget.project.id,
         filePath: attachment.filePath,
@@ -876,13 +896,23 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
           return;
         }
 
+        provider.setCurrentProject(created.id);
+
         await _saveDraftTasks(created.id);
 
-        await provider.refreshProject(created.id);
+        await provider.refreshProject(
+          created.id,
+          makeCurrent: true,
+        );
       } else {
+        provider.setCurrentProject(project.id);
+
         await provider.updateProject(project);
 
-        await provider.refreshProject(project.id);
+        await provider.refreshProject(
+          project.id,
+          makeCurrent: true,
+        );
       }
 
       if (!mounted) {

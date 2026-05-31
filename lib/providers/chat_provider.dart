@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:io' show File;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -42,8 +42,9 @@ class ChatProvider with ChangeNotifier {
 
   bool? _lastTypingState;
 
-  String? get currentUserId =>
-      SupabaseService.client.auth.currentUser?.id;
+  String? get currentUserId {
+    return SupabaseService.client.auth.currentUser?.id;
+  }
 
   bool get isLoadingMore => _isLoadingMore;
 
@@ -56,7 +57,12 @@ class ChatProvider with ChangeNotifier {
   Future<void> handleProjectChange(
       String? projectId,
       ) async {
-    if (_disposed || projectId == null || projectId.isEmpty) {
+    if (_disposed) {
+      return;
+    }
+
+    if (projectId == null || projectId.trim().isEmpty) {
+      await disposeStreams();
       return;
     }
 
@@ -73,6 +79,12 @@ class ChatProvider with ChangeNotifier {
       String userId,
       ) {
     return _chatService.getAllUnreadCounts(userId);
+  }
+
+  Future<void> forceReloadUnread(
+      String userId,
+      ) async {
+    await _chatService.forceReloadUnread(userId);
   }
 
   // =========================================================
@@ -144,20 +156,19 @@ class ChatProvider with ChangeNotifier {
         true,
       );
 
-      messagesStream =
-          _chatService.subscribeMessages(projectId);
+      messagesStream = _chatService.subscribeMessages(
+        projectId,
+      );
 
       await _messagesSub?.cancel();
 
       _messagesSub = messagesStream?.listen(
             (messages) {
-          if (_disposed ||
-              _currentProjectId != projectId) {
+          if (_disposed || _currentProjectId != projectId) {
             return;
           }
 
-          cachedMessages =
-          List<MessageModel>.from(messages);
+          cachedMessages = List<MessageModel>.from(messages);
 
           _markLocalRead();
 
@@ -235,8 +246,7 @@ class ChatProvider with ChangeNotifier {
       _userNameCache.clear();
 
       for (final row in rows) {
-        final userId =
-        row['member_id']?.toString();
+        final userId = row['member_id']?.toString();
 
         if (userId == null || userId.isEmpty) {
           continue;
@@ -248,27 +258,20 @@ class ChatProvider with ChangeNotifier {
         final profile = row['profiles'];
 
         if (profile is Map<String, dynamic>) {
-          fullName =
-              profile['full_name']?.toString();
-          username =
-              profile['username']?.toString();
+          fullName = profile['full_name']?.toString();
+          username = profile['username']?.toString();
         } else if (profile is List &&
             profile.isNotEmpty &&
             profile.first is Map<String, dynamic>) {
-          final first =
-          profile.first as Map<String, dynamic>;
+          final first = profile.first as Map<String, dynamic>;
 
-          fullName =
-              first['full_name']?.toString();
-          username =
-              first['username']?.toString();
+          fullName = first['full_name']?.toString();
+          username = first['username']?.toString();
         }
 
-        final name =
-        fullName != null && fullName.trim().isNotEmpty
+        final name = fullName != null && fullName.trim().isNotEmpty
             ? fullName.trim()
-            : username != null &&
-            username.trim().isNotEmpty
+            : username != null && username.trim().isNotEmpty
             ? '@${username.trim()}'
             : 'User';
 
@@ -436,8 +439,7 @@ class ChatProvider with ChangeNotifier {
     _readDebounce = Timer(
       const Duration(milliseconds: 500),
           () {
-        if (_disposed ||
-            _currentProjectId != projectId) {
+        if (_disposed || _currentProjectId != projectId) {
           return;
         }
 
@@ -476,8 +478,7 @@ class ChatProvider with ChangeNotifier {
   Future<void> markAsRead(
       String projectId,
       ) async {
-    if (_disposed ||
-        _currentProjectId != projectId) {
+    if (_disposed || _currentProjectId != projectId) {
       return;
     }
 
@@ -487,24 +488,20 @@ class ChatProvider with ChangeNotifier {
       return;
     }
 
-    final toSend =
-    List<String>.from(_pendingReads);
+    final toSend = List<String>.from(_pendingReads);
 
     _pendingReads.clear();
 
     try {
-      await SupabaseService.client
-          .from('message_reads')
-          .upsert(
-        toSend
-            .map(
-              (id) => {
+      await SupabaseService.client.from('message_reads').upsert(
+        toSend.map((id) {
+          return {
             'message_id': id,
             'user_id': userId,
             'project_id': projectId,
-          },
-        )
-            .toList(),
+            'read_at': DateTime.now().toUtc().toIso8601String(),
+          };
+        }).toList(),
         onConflict: 'message_id,user_id',
       );
 
@@ -542,8 +539,7 @@ class ChatProvider with ChangeNotifier {
     )
         .listen(
           (data) {
-        if (_disposed ||
-            _currentProjectId != projectId) {
+        if (_disposed || _currentProjectId != projectId) {
           return;
         }
 
@@ -557,11 +553,8 @@ class ChatProvider with ChangeNotifier {
         final otherReads = <String>{};
 
         for (final row in data) {
-          final msgId =
-          row['message_id']?.toString();
-
-          final userId =
-          row['user_id']?.toString();
+          final msgId = row['message_id']?.toString();
+          final userId = row['user_id']?.toString();
 
           if (msgId == null || userId == null) {
             continue;
@@ -617,25 +610,21 @@ class ChatProvider with ChangeNotifier {
     )
         .listen(
           (data) {
-        if (_disposed ||
-            _currentProjectId != projectId) {
+        if (_disposed || _currentProjectId != projectId) {
           return;
         }
 
         String? typingName;
 
         for (final row in data) {
-          final userId =
-          row['user_id']?.toString();
+          final userId = row['user_id']?.toString();
 
-          if (userId == null ||
-              userId == currentUserId) {
+          if (userId == null || userId == currentUserId) {
             continue;
           }
 
           if (row['is_typing'] == true) {
-            typingName =
-                _userNameCache[userId] ?? 'User';
+            typingName = _userNameCache[userId] ?? 'User';
             break;
           }
         }
@@ -684,9 +673,7 @@ class ChatProvider with ChangeNotifier {
         }
 
         try {
-          await SupabaseService.client
-              .from('chat_typing')
-              .upsert({
+          await SupabaseService.client.from('chat_typing').upsert({
             'project_id': projectId,
             'user_id': currentUserId,
             'is_typing': isTyping,
@@ -713,14 +700,14 @@ class ChatProvider with ChangeNotifier {
     }
 
     try {
-      await SupabaseService.client
-          .from('chat_typing')
-          .upsert({
+      await SupabaseService.client.from('chat_typing').upsert({
         'project_id': projectId,
         'user_id': userId,
         'is_typing': false,
       });
-    } catch (_) {}
+    } catch (_) {
+      // ignore
+    }
   }
 
   // =========================================================
@@ -746,23 +733,20 @@ class ChatProvider with ChangeNotifier {
     )
         .listen(
           (data) {
-        if (_disposed ||
-            _currentProjectId != projectId) {
+        if (_disposed || _currentProjectId != projectId) {
           return;
         }
 
         final map = <String, bool>{};
 
         for (final row in data) {
-          final userId =
-          row['user_id']?.toString();
+          final userId = row['user_id']?.toString();
 
           if (userId == null) {
             continue;
           }
 
-          map[userId] =
-              row['is_online'] == true;
+          map[userId] = row['is_online'] == true;
         }
 
         onlineUsers = map;
@@ -790,13 +774,11 @@ class ChatProvider with ChangeNotifier {
     }
 
     try {
-      await SupabaseService.client
-          .from('chat_presence')
-          .upsert({
+      await SupabaseService.client.from('chat_presence').upsert({
         'project_id': projectId,
         'user_id': userId,
         'is_online': isOnline,
-        'last_seen': DateTime.now().toIso8601String(),
+        'last_seen': DateTime.now().toUtc().toIso8601String(),
       });
     } catch (e, st) {
       AppLogger.error(
@@ -858,41 +840,59 @@ class ChatProvider with ChangeNotifier {
     bool markOffline = true,
   }) async {
     final projectId = _currentProjectId;
+
     _typingDebounce?.cancel();
     _typingDebounce = null;
+
     _readDebounce?.cancel();
     _readDebounce = null;
+
     if (projectId != null && markOffline) {
       await _forceTypingOff(projectId);
+
       await setOnline(
         projectId,
         false,
       );
+
       _chatService.setChatActive(
         projectId,
         false,
       );
     }
+
     await _typingSub?.cancel();
     _typingSub = null;
+
     await _messagesSub?.cancel();
     _messagesSub = null;
+
     await _presenceSub?.cancel();
     _presenceSub = null;
+
     await _readsSub?.cancel();
     _readsSub = null;
+
     if (projectId != null) {
       await _chatService.disposeProject(
         projectId,
       );
     }
+
     messagesStream = null;
+
     if (clearCurrent) {
       _currentProjectId = null;
     }
+
     _initialized = false;
     _lastTypingState = null;
+
     _resetChatState();
+
+    if (!_disposed) {
+      _safeNotify();
+    }
   }
 
   void disposeProject(
@@ -907,15 +907,18 @@ class ChatProvider with ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+
     unawaited(
       disposeStreams(
         markOffline: true,
       ),
     );
+
     unawaited(
       _chatService.dispose(),
     );
-    _disposed = true;
+
     super.dispose();
   }
 }

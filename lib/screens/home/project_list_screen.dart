@@ -16,13 +16,16 @@ import '../../utils/error_mapper.dart';
 import '../../utils/snackbar_manager.dart';
 
 import '../../widgets/project_card.dart';
+import '../../widgets/project_list_skeleton.dart';
 import '../../widgets/user_profile_drawer.dart';
 
 import 'project_chat_screen.dart';
 import 'project_form_screen.dart';
 
 class ProjectListScreen extends StatefulWidget {
-  const ProjectListScreen({super.key});
+  const ProjectListScreen({
+    super.key,
+  });
 
   @override
   State<ProjectListScreen> createState() =>
@@ -34,7 +37,6 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
 
   String? _unreadUserId;
   bool _isUnreadSyncScheduled = false;
-
   bool _isSearching = false;
 
   final TextEditingController _searchController =
@@ -152,6 +154,8 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
       return;
     }
 
+    provider.setCurrentProject(project.id);
+
     final updated = await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ProjectFormScreen(
@@ -165,7 +169,10 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
       return;
     }
 
-    await provider.refreshProject(project.id);
+    await provider.refreshProject(
+      project.id,
+      makeCurrent: true,
+    );
 
     if (updated == true) {
       SnackbarManager.showSuccess(
@@ -183,6 +190,8 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
       );
       return;
     }
+
+    provider.setCurrentProject(project.id);
 
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -228,6 +237,14 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
       }
 
       if (created == true) {
+        await prov.fetchProjects();
+
+        final currentProject = prov.currentProject;
+
+        if (currentProject != null) {
+          prov.setCurrentProject(currentProject.id);
+        }
+
         SnackbarManager.showSuccess(
           'projects.created_success'.tr(),
         );
@@ -654,10 +671,8 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
 
       drawer: const UserProfileDrawer(),
 
-      body: prov.isLoading
-          ? const Center(
-        child: CircularProgressIndicator(),
-      )
+      body: prov.isLoading && projects.isEmpty
+          ? const ProjectListSkeleton()
           : RefreshIndicator(
         onRefresh: () async {
           if (!isGuest) {
@@ -778,6 +793,8 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
           searchQuery: provider.searchQuery,
           onEdit: _openProject,
           onDelete: (p) async {
+            provider.setCurrentProject(p.id);
+
             if (!provider.isOwner(p)) {
               SnackbarManager.showError(
                 'errors.no_permission'.tr(),

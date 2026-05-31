@@ -47,9 +47,9 @@ class ProjectProvider extends ChangeNotifier {
 
   String? _errorMessage;
   String? _currentProjectId;
+  String? _lastEmittedCurrentProjectId;
 
-  final NotificationService _notifications =
-  NotificationService();
+  final NotificationService _notifications = NotificationService();
 
   final Set<String> _completedShown = {};
 
@@ -141,16 +141,14 @@ class ProjectProvider extends ChangeNotifier {
       final query = _searchQuery.toLowerCase();
 
       result = result.where((project) {
-        final inTitle =
-        project.title.toLowerCase().contains(query);
+        final inTitle = project.title.toLowerCase().contains(query);
 
         final inDescription =
         project.description.toLowerCase().contains(query);
 
         final inParticipants =
         project.participantsData.any((participant) {
-          final fullName =
-          participant.fullName.toLowerCase();
+          final fullName = participant.fullName.toLowerCase();
 
           final username =
           (participant.username ?? '').toLowerCase();
@@ -216,11 +214,14 @@ class ProjectProvider extends ChangeNotifier {
 
     _removeRealtime();
 
+    _notifications.clearSettingsCache();
+
     _projects.clear();
     _lastEmitted.clear();
     _completedShown.clear();
 
     _currentProjectId = null;
+    _lastEmittedCurrentProjectId = null;
     _errorMessage = null;
 
     _userId = userId;
@@ -245,6 +246,7 @@ class ProjectProvider extends ChangeNotifier {
     _errorMessage = null;
     _searchQuery = '';
     _currentProjectId = null;
+    _lastEmittedCurrentProjectId = null;
 
     _completedShown.clear();
 
@@ -265,6 +267,8 @@ class ProjectProvider extends ChangeNotifier {
     _lastEmitted.clear();
 
     _removeRealtime();
+
+    _notifications.clearSettingsCache();
 
     unawaited(
       _notifications.cancelAll(),
@@ -342,6 +346,8 @@ class ProjectProvider extends ChangeNotifier {
       _sort(loaded);
 
       if (_isSame(loaded, _projects)) {
+        _fixCurrentProject();
+        _emitIfChanged();
         return;
       }
 
@@ -351,11 +357,7 @@ class ProjectProvider extends ChangeNotifier {
 
       _fixCurrentProject();
 
-      if (_projects.isNotEmpty) {
-        await _notifications.scheduleProjects(
-          _projects,
-        );
-      }
+      await _rescheduleProjectDeadlines();
 
       _checkCompletedProjects();
 
@@ -380,8 +382,9 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   Future<ProjectModel?> refreshProject(
-      String projectId,
-      ) async {
+      String projectId, {
+        bool makeCurrent = false,
+      }) async {
     if (_disposed || projectId.trim().isEmpty) {
       return null;
     }
@@ -393,6 +396,12 @@ class ProjectProvider extends ChangeNotifier {
         _projects.removeWhere(
               (project) => project.id == projectId,
         );
+
+        if (_currentProjectId == projectId) {
+          _currentProjectId = null;
+        }
+
+        await _notifications.cancelProjectDeadline(projectId);
 
         _fixCurrentProject();
         _emitIfChanged();
@@ -411,6 +420,13 @@ class ProjectProvider extends ChangeNotifier {
       }
 
       _sort(_projects);
+
+      if (makeCurrent || _currentProjectId == null) {
+        _currentProjectId = fresh.id;
+      }
+
+      await _syncProjectDeadlineNotification(fresh);
+
       _fixCurrentProject();
       _emitIfChanged();
 
@@ -432,8 +448,15 @@ class ProjectProvider extends ChangeNotifier {
       return;
     }
 
+    final currentId = _currentProjectId;
+
+    if (currentId == null || currentId.isEmpty) {
+      _currentProjectId = _projects.first.id;
+      return;
+    }
+
     final exists = _projects.any(
-          (project) => project.id == _currentProjectId,
+          (project) => project.id == currentId,
     );
 
     if (!exists) {
@@ -446,6 +469,10 @@ class ProjectProvider extends ChangeNotifier {
   // =========================================================
 
   void setCurrentProject(String projectId) {
+    if (projectId.trim().isEmpty) {
+      return;
+    }
+
     if (_currentProjectId == projectId) {
       return;
     }
@@ -478,13 +505,9 @@ class ProjectProvider extends ChangeNotifier {
 
       _currentProjectId = created.id;
 
-      _emitIfChanged();
+      await _syncProjectDeadlineNotification(created);
 
-      await _notifications.scheduleProjectDeadline(
-        projectId: created.id,
-        title: created.title,
-        deadline: created.deadline,
-      );
+      _emitIfChanged();
 
       return created;
     } catch (e, st) {
@@ -501,7 +524,7 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   // =========================================================
-  // UPDATE PROJECT SETTINGS
+  // UPDATE PROJECT
   // =========================================================
 
   Future<void> updateProject(
@@ -520,6 +543,8 @@ class ProjectProvider extends ChangeNotifier {
     }
 
     try {
+      _setLoading(true);
+
       await _service.update(project);
 
       final fresh = await _service.getById(project.id);
@@ -541,19 +566,19 @@ class ProjectProvider extends ChangeNotifier {
 
       _sort(_projects);
 
-      _emitIfChanged();
+      _currentProjectId = fresh.id;
 
-      await _notifications.scheduleProjectDeadline(
-        projectId: fresh.id,
-        title: fresh.title,
-        deadline: fresh.deadline,
-      );
+      await _syncProjectDeadlineNotification(fresh);
+
+      _emitIfChanged();
     } catch (e, st) {
       _handleError(
         e,
         st,
         'updateProject',
       );
+    } finally {
+      _setLoading(false);
     }
   }
 
@@ -575,6 +600,8 @@ class ProjectProvider extends ChangeNotifier {
     }
 
     try {
+      _setLoading(true);
+
       await _service.delete(id);
 
       _projects.removeWhere(
@@ -586,15 +613,17 @@ class ProjectProvider extends ChangeNotifier {
         _projects.isNotEmpty ? _projects.first.id : null;
       }
 
-      _emitIfChanged();
+      await _notifications.cancelProjectDeadline(id);
 
-      await _notifications.cancel(id.hashCode);
+      _emitIfChanged();
     } catch (e, st) {
       _handleError(
         e,
         st,
         'deleteProject',
       );
+    } finally {
+      _setLoading(false);
     }
   }
 
@@ -628,7 +657,10 @@ class ProjectProvider extends ChangeNotifier {
         participants: participants,
       );
 
-      await refreshProject(projectId);
+      await refreshProject(
+        projectId,
+        makeCurrent: _currentProjectId == projectId,
+      );
     } catch (e, st) {
       _handleError(
         e,
@@ -654,10 +686,10 @@ class ProjectProvider extends ChangeNotifier {
       await refreshProject(projectId);
     }
 
-    final actualProject =
-        _findProject(projectId) ?? project;
+    final actualProject = _findProject(projectId) ?? project;
 
-    if (actualProject != null && !canChangeMemberRoles(actualProject)) {
+    if (actualProject != null &&
+        !canChangeMemberRoles(actualProject)) {
       _denyPermission();
       return;
     }
@@ -669,7 +701,10 @@ class ProjectProvider extends ChangeNotifier {
         role: role,
       );
 
-      await refreshProject(projectId);
+      await refreshProject(
+        projectId,
+        makeCurrent: _currentProjectId == projectId,
+      );
     } catch (e, st) {
       _handleError(
         e,
@@ -718,6 +753,10 @@ class ProjectProvider extends ChangeNotifier {
       } else {
         _projects.insert(0, updated);
       }
+
+      _sort(_projects);
+
+      _currentProjectId = updated.id;
 
       _emitIfChanged();
 
@@ -770,6 +809,8 @@ class ProjectProvider extends ChangeNotifier {
           )
               .toList(),
         );
+
+        _currentProjectId = projectId;
 
         _emitIfChanged();
       }
@@ -863,6 +904,54 @@ class ProjectProvider extends ChangeNotifier {
     }
 
     return null;
+  }
+
+  // =========================================================
+  // DEADLINE NOTIFICATIONS
+  // =========================================================
+
+  bool _shouldScheduleDeadline(ProjectModel project) {
+    final isActive =
+        project.statusEnum == ProjectStatus.planned ||
+            project.statusEnum == ProjectStatus.inProgress;
+
+    if (!isActive) {
+      return false;
+    }
+
+    return project.deadline.isAfter(DateTime.now());
+  }
+
+  List<ProjectModel> _activeDeadlineProjects() {
+    return _projects
+        .where(_shouldScheduleDeadline)
+        .toList();
+  }
+
+  Future<void> _rescheduleProjectDeadlines() async {
+    if (_projects.isEmpty) {
+      await _notifications.cancelAll();
+      return;
+    }
+
+    await _notifications.scheduleProjects(
+      _activeDeadlineProjects(),
+    );
+  }
+
+  Future<void> _syncProjectDeadlineNotification(
+      ProjectModel project,
+      ) async {
+    if (_shouldScheduleDeadline(project)) {
+      await _notifications.scheduleProjectDeadline(
+        projectId: project.id,
+        title: project.title,
+        deadline: project.deadline,
+      );
+      return;
+    }
+
+    await _notifications.cancelProjectDeadline(project.id);
   }
 
   // =========================================================
@@ -1184,11 +1273,20 @@ class ProjectProvider extends ChangeNotifier {
   // =========================================================
 
   void _emitIfChanged() {
-    if (_isSame(_projects, _lastEmitted)) {
+    final sameProjects = _isSame(
+      _projects,
+      _lastEmitted,
+    );
+
+    final sameCurrentProject =
+        _currentProjectId == _lastEmittedCurrentProjectId;
+
+    if (sameProjects && sameCurrentProject) {
       return;
     }
 
     _lastEmitted = List<ProjectModel>.from(_projects);
+    _lastEmittedCurrentProjectId = _currentProjectId;
 
     _safeNotify();
   }
@@ -1206,17 +1304,17 @@ class ProjectProvider extends ChangeNotifier {
       final p2 = b[i];
 
       final attachments1 =
-      p1.attachments.map((e) => e.id).toList();
+      p1.attachments.map(_attachmentSignature).toList();
 
       final attachments2 =
-      p2.attachments.map((e) => e.id).toList();
+      p2.attachments.map(_attachmentSignature).toList();
 
       final participants1 = p1.participantsData
-          .map((e) => '${e.id}_${e.role.value}')
+          .map(_participantSignature)
           .toList();
 
       final participants2 = p2.participantsData
-          .map((e) => '${e.id}_${e.role.value}')
+          .map(_participantSignature)
           .toList();
 
       if (p1.id != p2.id ||
@@ -1246,6 +1344,28 @@ class ProjectProvider extends ChangeNotifier {
     }
 
     return true;
+  }
+
+  String _participantSignature(ProjectParticipant participant) {
+    return [
+      participant.id,
+      participant.role.value,
+      participant.fullName,
+      participant.username ?? '',
+      participant.avatarUrl ?? '',
+    ].join('|');
+  }
+
+  String _attachmentSignature(Attachment attachment) {
+    return [
+      attachment.id,
+      attachment.fileName,
+      attachment.filePath,
+      attachment.mimeType,
+      attachment.fileSize.toString(),
+      attachment.uploaderId,
+      attachment.uploadedAt.toIso8601String(),
+    ].join('|');
   }
 
   // =========================================================
@@ -1323,6 +1443,7 @@ class ProjectProvider extends ChangeNotifier {
 
     _projects.clear();
     _lastEmitted.clear();
+    _lastEmittedCurrentProjectId = null;
 
     super.dispose();
   }

@@ -196,7 +196,7 @@ class ReportService {
 
     final taskProgress = totalTasks == 0
         ? 0.0
-        : completedTasks / totalTasks;
+        : (completedTasks / totalTasks).clamp(0.0, 1.0);
 
     final reportTitle = _reportTitle(options);
 
@@ -326,7 +326,10 @@ class ReportService {
 
             pw.SizedBox(height: 14),
 
-            _progressBar(taskProgress),
+            _progressBar(
+              taskProgress,
+              regularFont,
+            ),
 
             pw.SizedBox(height: 8),
 
@@ -620,28 +623,37 @@ class ReportService {
 
   pw.Widget _progressBar(
       double progress,
+      pw.Font font,
       ) {
     final safe = progress.clamp(0.0, 1.0);
+
+    const double barWidth = 420.0;
+    const double barHeight = 14.0;
+
+    final filledWidth = barWidth * safe;
 
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         pw.Container(
-          height: 14,
+          width: barWidth,
+          height: barHeight,
           decoration: pw.BoxDecoration(
             color: PdfColors.grey300,
             borderRadius: pw.BorderRadius.circular(20),
           ),
-          child: pw.Stack(
-            children: [
-              pw.Container(
-                width: 500 * safe,
-                decoration: pw.BoxDecoration(
-                  color: PdfColors.green,
-                  borderRadius: pw.BorderRadius.circular(20),
-                ),
+          child: filledWidth <= 0
+              ? pw.SizedBox()
+              : pw.Align(
+            alignment: pw.Alignment.centerLeft,
+            child: pw.Container(
+              width: filledWidth,
+              height: barHeight,
+              decoration: pw.BoxDecoration(
+                color: PdfColors.green,
+                borderRadius: pw.BorderRadius.circular(20),
               ),
-            ],
+            ),
           ),
         ),
 
@@ -649,6 +661,10 @@ class ReportService {
 
         pw.Text(
           '${(safe * 100).toStringAsFixed(1)}%',
+          style: pw.TextStyle(
+            font: font,
+            fontSize: 11,
+          ),
         ),
       ],
     );
@@ -666,7 +682,13 @@ class ReportService {
     final stats = <String, UserStats>{};
 
     for (final project in projects) {
+      final uniqueUsers = <String, ProjectParticipant>{};
+
       for (final user in project.participantsData) {
+        uniqueUsers[user.id] = user;
+      }
+
+      for (final user in uniqueUsers.values) {
         final name = _participantName(user);
 
         stats.putIfAbsent(
@@ -753,7 +775,8 @@ class ReportService {
   String _participantName(ProjectParticipant user) {
     final fullName = user.fullName.trim();
 
-    if (fullName.isNotEmpty) {
+    if (fullName.isNotEmpty &&
+        fullName.toLowerCase() != 'unknown') {
       return fullName;
     }
 
@@ -801,25 +824,35 @@ class ReportService {
       headerStyle: pw.TextStyle(
         font: bold,
         color: PdfColors.white,
-        fontSize: 11,
+        fontSize: 9,
       ),
       headerDecoration: const pw.BoxDecoration(
         color: PdfColors.blue,
       ),
       cellStyle: pw.TextStyle(
         font: font,
-        fontSize: 10,
+        fontSize: 9,
       ),
-      cellPadding: const pw.EdgeInsets.all(8),
+      cellPadding: const pw.EdgeInsets.symmetric(
+        horizontal: 5,
+        vertical: 7,
+      ),
       border: pw.TableBorder.all(
         color: PdfColors.grey400,
       ),
+      cellAlignments: {
+        0: pw.Alignment.centerLeft,
+        1: pw.Alignment.center,
+        2: pw.Alignment.center,
+        3: pw.Alignment.center,
+        4: pw.Alignment.center,
+      },
       columnWidths: {
-        0: const pw.FlexColumnWidth(3),
-        1: const pw.FlexColumnWidth(2),
-        2: const pw.FlexColumnWidth(2),
-        3: const pw.FlexColumnWidth(1.5),
-        4: const pw.FlexColumnWidth(1),
+        0: const pw.FlexColumnWidth(3.4),
+        1: const pw.FlexColumnWidth(1.7),
+        2: const pw.FlexColumnWidth(1.8),
+        3: const pw.FlexColumnWidth(1.2),
+        4: const pw.FlexColumnWidth(1.5),
       },
     );
   }
@@ -842,7 +875,7 @@ class ReportService {
       return '-';
     }
 
-    return grade.toStringAsFixed(1);
+    return grade.round().toString();
   }
 
   // =========================================================
@@ -856,6 +889,8 @@ class ReportService {
     required double progress,
     required pw.Font font,
   }) {
+    final safe = progress.clamp(0.0, 1.0);
+
     return pw.Container(
       padding: const pw.EdgeInsets.all(14),
       decoration: pw.BoxDecoration(
@@ -867,7 +902,7 @@ class ReportService {
             '${'report.completed_projects'.tr()}: $completed.\n'
             '${'report.overdue_projects'.tr()}: $overdue.\n'
             '${'report.total_progress'.tr()}: '
-            '${(progress * 100).toStringAsFixed(1)}%',
+            '${(safe * 100).toStringAsFixed(1)}%',
         style: pw.TextStyle(
           font: font,
           fontSize: 12,

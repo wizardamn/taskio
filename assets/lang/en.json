@@ -27,21 +27,20 @@
     "confirm": "Confirm",
     "back": "Back",
     "next": "Next",
+    "select": "Select",
+    "selected": "Selected",
     "select_all": "Select all"
   },
-
   "snackbar": {
     "success": "Success",
     "error": "Error",
     "warning": "Warning"
   },
-
   "app": {
     "about": "About",
     "description": "Project management app for students. Plan, execute and track progress together.",
     "copyright": "© 2026 Taskio"
   },
-
   "navigation": {
     "my_projects": "My Projects",
     "calendar": "Calendar",
@@ -50,7 +49,6 @@
     "management": "Management",
     "profile": "Profile"
   },
-
   "auth": {
     "login": "Login",
     "login_success": "Login successful",
@@ -80,7 +78,6 @@
     "email_not_provided": "Email not provided",
     "guest_login": "Signed in as guest"
   },
-
   "validation": {
     "empty_field": "This field cannot be empty",
     "invalid_email": "Enter a valid email",
@@ -94,7 +91,6 @@
     "invalid_username": "Username can contain only letters, numbers and underscore",
     "username_taken": "This username is already taken"
   },
-
   "roles": {
     "student": "Student",
     "teacher": "Teacher",
@@ -104,17 +100,16 @@
     "editor": "Editor",
     "viewer": "Viewer"
   },
-
   "project_roles": {
     "owner": "Owner",
     "editor": "Editor",
     "viewer": "Viewer"
   },
-
   "projects": {
     "create": "Create Project",
     "new_project": "New Project",
     "project": "Project",
+    "open": "Open project",
     "name": "Project Name",
     "name_hint": "Example: History Essay",
     "description": "Description",
@@ -137,7 +132,7 @@
     "operation_denied_guest": "Access denied for guests",
     "search": "Project Search",
     "empty": "No projects",
-    "completed": "Completed",
+    "completed": "Project {title} completed",
     "tasks_on_create": "Project Tasks",
     "add_task_before_save": "Add a task before saving",
     "no_draft_tasks": "No tasks added yet",
@@ -148,7 +143,6 @@
     "max_members_error": "Member limit exceeded",
     "max_attachments_error": "Attachment limit exceeded"
   },
-
   "project": {
     "open": "Open",
     "deadline": "Deadline",
@@ -161,12 +155,10 @@
       "creative": "Creative project"
     }
   },
-
   "project_category": {
     "educational": "Educational Project",
     "creative": "Creative Project"
   },
-
   "tasks": {
     "title": "Tasks",
     "hint": "New task...",
@@ -183,7 +175,6 @@
     "deleted": "Task deleted",
     "update_failed": "Failed to update task"
   },
-
   "attachments": {
     "title": "Attachments",
     "empty": "No attachments",
@@ -193,14 +184,12 @@
     "delete_error": "Delete error",
     "no_permission_delete": "No permission to delete attachments"
   },
-
   "status": {
     "planned": "Planned",
     "in_progress": "In Progress",
     "completed": "Completed",
     "archived": "Archived"
   },
-
   "sorting": {
     "nearest": "Nearest",
     "farthest": "Farthest",
@@ -208,26 +197,43 @@
     "by_status": "By Status",
     "title": "Sorting"
   },
-
   "filter": {
     "title": "Filters",
     "all": "All Statuses",
     "in_progress": "Only \"In Progress\"",
     "completed": "Only \"Completed\""
   },
-
   "search": {
     "hint": "Search..."
   },
-
   "deadline_filter": {
     "today": "Today",
     "week": "This Week",
     "overdue": "Overdue",
     "all": "All"
   },
-
   "notifications": {
+    "title": "Notifications",
+    "all": "All notifications",
+    "chat": "Chat notifications",
+    "project_updates": "Project updates",
+    "enabled": "Notifications enabled",
+    "disabled": "Notifications disabled",
+    "all_enabled": "All notifications enabled",
+    "all_disabled": "All notifications disabled",
+    "chat_enabled": "Chat notifications enabled",
+    "chat_disabled": "Chat notifications disabled",
+    "project_updates_enabled": "Project update notifications enabled",
+    "project_updates_disabled": "Project update notifications disabled",
+    "project_enabled": "Project notifications enabled",
+    "project_disabled": "Project notifications disabled",
+    "project_chat_enabled": "Project chat notifications enabled",
+    "project_chat_disabled": "Project chat notifications disabled",
+    "enable_project": "Enable project notifications",
+    "disable_project": "Disable project notifications",
+    "enable_chat": "Enable chat notifications",
+    "disable_chat": "Disable chat notifications",
+    "settings_change_error": "Failed to change notification settings",
     "no_notifications": "No new notifications",
     "project_created_title": "Project created",
     "project_created_body": "Project \"{project}\" created",
@@ -236,10 +242,11 @@
     "project_deleted_title": "Project deleted",
     "project_deleted_body": "Project \"{project}\" deleted",
     "file_uploaded_title": "File uploaded",
+    "file_added_title": "File added",
+    "file_added_body": "A file was added to the project",
     "deadline_title": "Deadline soon",
     "deadline_body": "Project is ending:"
   },
-
   "profile": {
     "choose_language": "Choose Language",
     "language_changed": "Language changed successfully",
@@ -266,7 +273,6 @@
     "change_avatar": "Change avatar",
     "load_failed": "Failed to load profile"
   },
-
   "reports": {
     "generate": "Generate Report",
     "not_implemented": "Feature will be implemented later",
@@ -274,7 +280,6 @@
     "generated_at": "Generated At",
     "total_projects": "Total Projects"
   },
-
   "report": {
     "generated": "Report generated",
     "saved": "File saved",
@@ -306,7 +311,6 @@
     "all_projects_report": "All projects report",
     "no_participants": "No participants specified"
   },
-
   "grades": {
     "title": "Project grade",
     "grade": "Grade",
@@ -324,7 +328,6 @@
     "delete_error": "Failed to delete grade",
     "invalid_grade": "Grade must be from 2 to 5"
   },
-
   "errors": {
     "fetch_failed": "Failed to load data",
     "invalid_credentials": "Invalid email or password",
@@ -351,7 +354,6 @@
     "invalid_files_bytes": "Invalid file bytes",
     "not_authenticated": "User not authenticated"
   },
-
   "chat": {
     "translate": "Translate",
     "translation": "Translation",
@@ -375,7 +377,6 @@
     "show_original": "Show original",
     "message_too_long": "Message is too long"
   },
-
   "members": {
     "title": "Members",
     "no_participants": "No participants selected",
@@ -384,23 +385,19 @@
     "empty": "No users found",
     "role": "Member role"
   },
-
   "users": {
     "no_name": "No name",
     "username": "Username",
     "full_name": "Full Name",
     "search_hint": "Enter name or username"
   },
-
   "language": {
     "changed": "Language changed successfully"
   },
-
   "calendar": {
     "select_date": "Select Date",
     "no_projects": "No projects"
   },
-
   "export": {
     "title": "Export",
     "no_preview": "No Preview",
@@ -409,9 +406,11 @@
     "current_project": "Current project",
     "selected_projects": "Selected projects",
     "all_projects": "All projects",
-    "selected_count": "Selected projects",
+    "selected_count": "Selected",
     "generate_preview": "Generate preview",
     "generate_preview_hint": "Choose a report type and generate a preview",
-    "no_projects_selected": "Select at least one project"
+    "no_projects_selected": "Select at least one project",
+    "change_report_settings": "Change report settings",
+    "available_projects_hint": "All projects available to the user"
   }
 }

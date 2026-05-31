@@ -23,15 +23,18 @@ class ChatService {
 
   static const int _pageSize = 30;
   static const int _maxUserCacheSize = 150;
+  static const int _maxProjectTitleCacheSize = 100;
 
   static const String _deletedMessageText = 'Message deleted';
   static const String _fallbackUserName = 'User';
+  static const String _fallbackProjectTitle = 'Chat';
   static const String _currentUserName = 'You';
 
   final Map<String, RealtimeChannel> _chatChannels = {};
   final Map<String, StreamController<List<MessageModel>>> _controllers = {};
   final Map<String, List<MessageModel>> _cache = {};
   final Map<String, String> _userCache = {};
+  final Map<String, String> _projectTitleCache = {};
 
   final Set<String> _activeChats = {};
   final Set<String> _loadingProjects = {};
@@ -211,6 +214,86 @@ class ChatService {
   }
 
   // =========================================================
+  // PROJECT TITLE CACHE
+  // =========================================================
+
+  Future<String> _getProjectTitle(String projectId) async {
+    if (_projectTitleCache.containsKey(projectId)) {
+      return _projectTitleCache[projectId]!;
+    }
+
+    try {
+      final res = await _client
+          .from('projects')
+          .select('title')
+          .eq('id', projectId)
+          .maybeSingle();
+
+      final title = res?['title']?.toString().trim();
+
+      final result = title != null && title.isNotEmpty
+          ? title
+          : _fallbackProjectTitle;
+
+      if (_projectTitleCache.length >= _maxProjectTitleCacheSize) {
+        _projectTitleCache.remove(
+          _projectTitleCache.keys.first,
+        );
+      }
+
+      _projectTitleCache[projectId] = result;
+
+      return result;
+    } catch (e, st) {
+      AppLogger.error(
+        'Get project title error',
+        error: e,
+        stackTrace: st,
+        tag: 'ChatService',
+      );
+
+      return _fallbackProjectTitle;
+    }
+  }
+
+  String _notificationBody(MessageModel message) {
+    switch (message.type) {
+      case MessageType.image:
+        return '📷 Image';
+
+      case MessageType.file:
+        final fileName = message.fileName?.trim();
+
+        if (fileName != null && fileName.isNotEmpty) {
+          return '📎 $fileName';
+        }
+
+        return '📎 File';
+
+      case MessageType.text:
+        return message.content;
+    }
+  }
+
+  Future<void> _showIncomingMessageNotification({
+    required String projectId,
+    required MessageModel message,
+  }) async {
+    final projectTitle = await _getProjectTitle(projectId);
+    final body = _notificationBody(message);
+
+    await _ensureNotifications();
+
+    await _notifications.showChatNotification(
+      projectId: projectId,
+      projectTitle: projectTitle,
+      senderName: message.senderName,
+      message: body,
+      payload: projectId,
+    );
+  }
+
+  // =========================================================
   // CHAT STATE
   // =========================================================
 
@@ -272,7 +355,9 @@ class ChatService {
         if (reply != null) {
           row['reply'] = reply;
         }
-      } catch (_) {}
+      } catch (_) {
+        // ignore
+      }
     }
 
     final reads = row['message_reads'] is List
@@ -620,18 +705,9 @@ extension ChatServiceMessaging on ChatService {
       );
 
       if (!isMine && !_activeChats.contains(projectId)) {
-        await _ensureNotifications();
-
-        final body = switch (message.type) {
-          MessageType.image => '📷 Image',
-          MessageType.file => '📎 File',
-          MessageType.text => message.content,
-        };
-
-        await _notifications.showSimple(
-          message.senderName,
-          body,
-          payload: projectId,
+        await _showIncomingMessageNotification(
+          projectId: projectId,
+          message: message,
         );
       }
     } catch (e, st) {
@@ -1036,8 +1112,8 @@ extension ChatServiceFinal on ChatService {
     }
 
     try {
-      final rawName = fileName ??
-          (file != null ? file.path.split('/').last : 'file');
+      final rawName =
+          fileName ?? (file != null ? file.path.split('/').last : 'file');
 
       final safeName = rawName.replaceAll(
         RegExp(r'[^a-zA-Z0-9._-]'),
@@ -1422,6 +1498,7 @@ extension ChatServiceFinal on ChatService {
       _activeChats.remove(projectId);
       _loadingProjects.remove(projectId);
       _loadingMoreProjects.remove(projectId);
+      _projectTitleCache.remove(projectId);
 
       _cacheService.clearProject(projectId);
     } finally {
@@ -1447,6 +1524,7 @@ extension ChatServiceFinal on ChatService {
     _activeChats.clear();
     _lastUnread = {};
     _userCache.clear();
+    _projectTitleCache.clear();
 
     _cacheService.clearAll();
   }

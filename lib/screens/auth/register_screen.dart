@@ -4,10 +4,12 @@ import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
 
 import '../../providers/auth_provider.dart';
+
 import '../../utils/snackbar_manager.dart';
-import '../../utils/loading_overlay.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/error_mapper.dart';
+
+import '../../widgets/project_list_skeleton.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({
@@ -93,7 +95,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _isSubmitting = true;
       });
 
-      LoadingOverlay.show();
+      // Важно:
+      // Глобальный LoadingOverlay здесь не используем.
+      // Пока идёт регистрация, экран заменяется на ProjectListSkeleton.
 
       if (authProvider.isGuest) {
         await authProvider.signOut();
@@ -131,8 +135,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ErrorMapper.map(e),
       );
     } finally {
-      LoadingOverlay.hide();
-
       if (mounted) {
         setState(() {
           _isSubmitting = false;
@@ -202,11 +204,30 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   // =========================================================
+  // LOADING SKELETON
+  // =========================================================
+
+  Widget _buildLoadingSkeleton() {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'navigation.my_projects'.tr(),
+        ),
+      ),
+      body: const ProjectListSkeleton(),
+    );
+  }
+
+  // =========================================================
   // BUILD
   // =========================================================
 
   @override
   Widget build(BuildContext context) {
+    if (_isSubmitting) {
+      return _buildLoadingSkeleton();
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -214,11 +235,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ),
       ),
       body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
         onTap: () {
           FocusScope.of(context).unfocus();
         },
         child: Center(
           child: SingleChildScrollView(
+            keyboardDismissBehavior:
+            ScrollViewKeyboardDismissBehavior.onDrag,
             padding: const EdgeInsets.all(24),
             child: Form(
               key: _formKey,
@@ -249,15 +273,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                         if (value != normalized &&
                             value.isNotEmpty) {
-                          final selection =
-                              _usernameController.selection;
-
                           _usernameController.value =
                               TextEditingValue(
                                 text: normalized,
-                                selection: selection.copyWith(
-                                  baseOffset: normalized.length,
-                                  extentOffset: normalized.length,
+                                selection:
+                                TextSelection.collapsed(
+                                  offset: normalized.length,
                                 ),
                               );
                         }
@@ -409,24 +430,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                   _animated(
                     ElevatedButton(
-                      onPressed:
-                      _isSubmitting ? null : _register,
+                      onPressed: _register,
                       style: ElevatedButton.styleFrom(
                         minimumSize: const Size(
                           double.infinity,
                           50,
                         ),
                       ),
-                      child: _isSubmitting
-                          ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                          : Text(
+                      child: Text(
                         'auth.sign_up'.tr(),
                       ),
                     ),

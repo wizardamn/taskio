@@ -1,17 +1,24 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Интернет для Supabase/API -->
+    <!-- Интернет для Supabase, Realtime, Storage и API -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- Уведомления -->
+    <!-- Уведомления Android 13+ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Локальные уведомления, вибрация и восстановление после перезагрузки -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
-    <!-- Android 12 и ниже -->
+    <!-- Точные уведомления для дедлайнов проектов -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission
+        android:name="android.permission.USE_EXACT_ALARM"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- Доступ к файлам для Android 12 и ниже -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
@@ -21,7 +28,7 @@
         android:maxSdkVersion="32"
         tools:ignore="ScopedStorage" />
 
-    <!-- Android 13+ -->
+    <!-- Доступ к медиафайлам для Android 13+ -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
@@ -29,7 +36,10 @@
     <application
         android:name="${applicationName}"
         android:label="taskio"
-        android:icon="@mipmap/launcher_icon">
+        android:icon="@mipmap/launcher_icon"
+        android:requestLegacyExternalStorage="true"
+        android:enableOnBackInvokedCallback="true"
+        tools:targetApi="tiramisu">
 
         <activity
             android:name=".MainActivity"
@@ -39,7 +49,6 @@
             android:theme="@style/LaunchTheme"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize"
-            android:enableOnBackInvokedCallback="true"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode">
 
             <meta-data
@@ -53,20 +62,23 @@
             </intent-filter>
         </activity>
 
-        <!-- Flutter local notifications -->
+        <!-- Foreground service для flutter_local_notifications -->
         <service
             android:name="com.dexterous.flutterlocalnotifications.ForegroundService"
             android:exported="false"
             android:stopWithTask="false" />
 
+        <!-- Получатель действий уведомлений -->
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
             android:exported="false" />
 
+        <!-- Получатель запланированных уведомлений -->
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
             android:exported="false" />
 
+        <!-- Восстановление уведомлений после перезагрузки телефона -->
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
             android:exported="false">
@@ -79,11 +91,14 @@
             </intent-filter>
         </receiver>
 
+        <!-- Flutter embedding -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
     </application>
 
+    <!-- Разрешаем приложению видеть программы для выбора и открытия файлов -->
     <queries>
 
         <!-- File picker -->
@@ -147,6 +162,11 @@
             <data android:mimeType="application/x-rar-compressed" />
         </intent>
 
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/x-zip-compressed" />
+        </intent>
+
         <!-- Медиа -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
@@ -169,6 +189,7 @@
             <data android:mimeType="text/plain" />
         </intent>
 
+        <!-- Обработка текста -->
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />
             <data android:mimeType="text/plain" />

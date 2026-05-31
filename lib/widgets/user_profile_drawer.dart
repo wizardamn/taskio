@@ -12,17 +12,476 @@ import '../screens/calendar/calendar_screen.dart';
 import '../screens/auth/login_screen.dart';
 import '../screens/export/export_screen.dart';
 
+import '../services/notification_service.dart';
+import '../services/supabase_service.dart';
+
 import '../utils/app_logger.dart';
 import '../utils/snackbar_manager.dart';
 import '../utils/localization_helper.dart';
 import '../utils/loading_overlay.dart';
 import '../utils/error_mapper.dart';
 
-class UserProfileDrawer extends StatelessWidget {
+class UserProfileDrawer extends StatefulWidget {
   const UserProfileDrawer({super.key});
 
+  @override
+  State<UserProfileDrawer> createState() => _UserProfileDrawerState();
+}
+
+class _UserProfileDrawerState extends State<UserProfileDrawer> {
+  final NotificationService _notificationService = NotificationService();
+
+  String? _avatarUrl;
+  String? _loadedUserId;
+  bool _isAvatarLoading = false;
+
+  String? _notificationUserId;
+  bool _isNotificationSettingsLoading = false;
+  bool _allNotificationsEnabled = true;
+  bool _chatNotificationsEnabled = true;
+  bool _projectUpdatesEnabled = true;
+
   // ======================================================
-  // DRAWER ITEM
+  // COMMON TEXT
+  // ======================================================
+
+  String _text({
+    required String ru,
+    required String en,
+  }) {
+    return context.locale.languageCode == 'ru' ? ru : en;
+  }
+
+  // ======================================================
+  // DRAWER NAVIGATION
+  // ======================================================
+
+  Future<void> _closeDrawerAndWait(BuildContext context) async {
+    final scaffoldState = Scaffold.maybeOf(context);
+
+    if (scaffoldState?.isDrawerOpen ?? false) {
+      scaffoldState!.closeDrawer();
+
+      await Future<void>.delayed(
+        const Duration(milliseconds: 160),
+      );
+
+      return;
+    }
+
+    final drawerNavigator = Navigator.maybeOf(context);
+
+    if (drawerNavigator != null && drawerNavigator.canPop()) {
+      drawerNavigator.pop();
+
+      await Future<void>.delayed(
+        const Duration(milliseconds: 160),
+      );
+    }
+  }
+
+  Future<void> _openProfileScreen({
+    required BuildContext context,
+    required String? userId,
+  }) async {
+    final navigator = Navigator.of(
+      context,
+      rootNavigator: true,
+    );
+
+    await _closeDrawerAndWait(context);
+
+    if (!navigator.mounted) {
+      return;
+    }
+
+    await navigator.push(
+      MaterialPageRoute(
+        builder: (_) => const ProfileScreen(),
+      ),
+    );
+
+    if (!mounted || userId == null) {
+      return;
+    }
+
+    await _reloadAvatar(userId);
+  }
+
+  Future<void> _openCalendarScreen(BuildContext context) async {
+    final navigator = Navigator.of(
+      context,
+      rootNavigator: true,
+    );
+
+    await _closeDrawerAndWait(context);
+
+    if (!navigator.mounted) {
+      return;
+    }
+
+    await navigator.push(
+      MaterialPageRoute(
+        builder: (_) => const CalendarScreen(),
+      ),
+    );
+  }
+
+  Future<void> _openAboutAppDialog(BuildContext context) async {
+    final navigator = Navigator.of(
+      context,
+      rootNavigator: true,
+    );
+
+    await _closeDrawerAndWait(context);
+
+    if (!navigator.mounted) {
+      return;
+    }
+
+    _showAboutDialog(navigator.context);
+  }
+
+  // ======================================================
+  // AVATAR LOADING
+  // ======================================================
+
+  Future<void> _loadAvatar(String userId) async {
+    if (_isAvatarLoading || _loadedUserId == userId) {
+      return;
+    }
+
+    _isAvatarLoading = true;
+    _loadedUserId = userId;
+
+    try {
+      final response = await SupabaseService.client
+          .from('profiles')
+          .select('avatar_url')
+          .eq('id', userId)
+          .maybeSingle();
+
+      final rawAvatar = response?['avatar_url']?.toString().trim();
+
+      final normalizedAvatar = _normalizeAvatarUrl(
+        rawAvatar,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _avatarUrl = normalizedAvatar;
+      });
+    } catch (e, st) {
+      AppLogger.error(
+        'Avatar loading failed',
+        error: e,
+        stackTrace: st,
+        tag: 'Drawer',
+      );
+    } finally {
+      _isAvatarLoading = false;
+    }
+  }
+
+  Future<void> _reloadAvatar(String userId) async {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _avatarUrl = null;
+      _loadedUserId = null;
+    });
+
+    await _loadAvatar(userId);
+  }
+
+  String? _normalizeAvatarUrl(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return null;
+    }
+
+    final raw = value.trim();
+
+    const oldAvatarBucketMarker =
+        '/storage/v1/object/public/avatars/';
+
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      if (raw.contains(oldAvatarBucketMarker)) {
+        return raw.replaceFirst(
+          oldAvatarBucketMarker,
+          '/storage/v1/object/public/${SupabaseService.bucket}/',
+        );
+      }
+
+      return raw;
+    }
+
+    var path = raw.replaceAll('\\', '/');
+
+    while (path.startsWith('/')) {
+      path = path.substring(1);
+    }
+
+    if (path.startsWith('avatars/')) {
+      path = path.substring('avatars/'.length);
+    }
+
+    if (path.startsWith('${SupabaseService.bucket}/')) {
+      path = path.substring(
+        '${SupabaseService.bucket}/'.length,
+      );
+    }
+
+    return SupabaseService.client.storage
+        .from(SupabaseService.bucket)
+        .getPublicUrl(path);
+  }
+
+  // ======================================================
+  // NOTIFICATION SETTINGS
+  // ======================================================
+
+  Future<void> _loadNotificationSettings(String userId) async {
+    if (_isNotificationSettingsLoading ||
+        _notificationUserId == userId) {
+      return;
+    }
+
+    _isNotificationSettingsLoading = true;
+    _notificationUserId = userId;
+
+    try {
+      final settings =
+      await _notificationService.getGlobalSettings(
+        forceRefresh: true,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _allNotificationsEnabled = settings.allEnabled;
+        _chatNotificationsEnabled = settings.chatEnabled;
+        _projectUpdatesEnabled =
+            settings.projectUpdatesEnabled;
+      });
+    } catch (e, st) {
+      AppLogger.error(
+        'Notification settings loading failed',
+        error: e,
+        stackTrace: st,
+        tag: 'Drawer',
+      );
+    } finally {
+      _isNotificationSettingsLoading = false;
+    }
+  }
+
+  Future<void> _toggleAllNotifications(bool value) async {
+    try {
+      setState(() {
+        _allNotificationsEnabled = value;
+      });
+
+      await _notificationService.setGlobalAllEnabled(value);
+
+      if (!mounted) {
+        return;
+      }
+
+      SnackbarManager.showSuccess(
+        value
+            ? _text(
+          ru: 'Все уведомления включены',
+          en: 'All notifications enabled',
+        )
+            : _text(
+          ru: 'Все уведомления отключены',
+          en: 'All notifications disabled',
+        ),
+      );
+    } catch (e, st) {
+      AppLogger.error(
+        'Toggle all notifications failed',
+        error: e,
+        stackTrace: st,
+        tag: 'Drawer',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _allNotificationsEnabled = !value;
+      });
+
+      SnackbarManager.showError(
+        ErrorMapper.map(e),
+      );
+    }
+  }
+
+  Future<void> _toggleChatNotifications(bool value) async {
+    try {
+      setState(() {
+        _chatNotificationsEnabled = value;
+      });
+
+      await _notificationService.setGlobalChatEnabled(value);
+
+      if (!mounted) {
+        return;
+      }
+
+      SnackbarManager.showSuccess(
+        value
+            ? _text(
+          ru: 'Уведомления чата включены',
+          en: 'Chat notifications enabled',
+        )
+            : _text(
+          ru: 'Уведомления чата отключены',
+          en: 'Chat notifications disabled',
+        ),
+      );
+    } catch (e, st) {
+      AppLogger.error(
+        'Toggle chat notifications failed',
+        error: e,
+        stackTrace: st,
+        tag: 'Drawer',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _chatNotificationsEnabled = !value;
+      });
+
+      SnackbarManager.showError(
+        ErrorMapper.map(e),
+      );
+    }
+  }
+
+  Future<void> _toggleProjectUpdates(bool value) async {
+    try {
+      setState(() {
+        _projectUpdatesEnabled = value;
+      });
+
+      await _notificationService
+          .setGlobalProjectUpdatesEnabled(value);
+
+      if (!mounted) {
+        return;
+      }
+
+      SnackbarManager.showSuccess(
+        value
+            ? _text(
+          ru: 'Уведомления об изменениях проектов включены',
+          en: 'Project update notifications enabled',
+        )
+            : _text(
+          ru: 'Уведомления об изменениях проектов отключены',
+          en: 'Project update notifications disabled',
+        ),
+      );
+    } catch (e, st) {
+      AppLogger.error(
+        'Toggle project update notifications failed',
+        error: e,
+        stackTrace: st,
+        tag: 'Drawer',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _projectUpdatesEnabled = !value;
+      });
+
+      SnackbarManager.showError(
+        ErrorMapper.map(e),
+      );
+    }
+  }
+
+  // ======================================================
+  // AVATAR UI
+  // ======================================================
+
+  Widget _buildAvatar({
+    required BuildContext context,
+    required bool isGuest,
+    required String? avatarUrl,
+  }) {
+    final theme = Theme.of(context);
+
+    final fallbackIcon = Icon(
+      isGuest ? Icons.person_off_rounded : Icons.person_rounded,
+      color: theme.colorScheme.primary,
+      size: 34,
+    );
+
+    if (isGuest || avatarUrl == null || avatarUrl.trim().isEmpty) {
+      return CircleAvatar(
+        radius: 36,
+        backgroundColor: theme.colorScheme.surface,
+        child: fallbackIcon,
+      );
+    }
+
+    return Container(
+      width: 72,
+      height: 72,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: theme.colorScheme.surface,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Image.network(
+        avatarUrl,
+        key: ValueKey(avatarUrl),
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) {
+          return Center(
+            child: fallbackIcon,
+          );
+        },
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) {
+            return child;
+          }
+
+          return Center(
+            child: SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // ======================================================
+  // DRAWER ITEMS
   // ======================================================
 
   Widget _buildDrawerItem({
@@ -35,6 +494,8 @@ class UserProfileDrawer extends StatelessWidget {
     Widget? trailing,
   }) {
     final theme = Theme.of(context);
+
+    final itemColor = color ?? theme.colorScheme.onSurfaceVariant;
 
     return Padding(
       padding: const EdgeInsets.symmetric(
@@ -53,17 +514,81 @@ class UserProfileDrawer extends StatelessWidget {
             children: [
               Icon(
                 icon,
-                color: color ??
-                    theme.colorScheme.onSurfaceVariant,
+                color: itemColor,
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: Text(
                   title,
-                  style: theme.textTheme.titleMedium,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: color,
+                  ),
                 ),
               ),
               if (trailing != null) trailing,
+            ],
+          ),
+        ),
+      ),
+    )
+        .animate()
+        .fadeIn(
+      delay: (50 * index).ms,
+    )
+        .slideX(begin: 0.05);
+  }
+
+  Widget _buildSwitchItem({
+    required BuildContext context,
+    required IconData icon,
+    required String title,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+    required int index,
+    bool enabled = true,
+  }) {
+    final theme = Theme.of(context);
+
+    final iconColor = enabled
+        ? theme.colorScheme.onSurfaceVariant
+        : theme.disabledColor;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: 4,
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: enabled
+            ? () {
+          onChanged(!value);
+        }
+            : null,
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 10,
+          ),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                color: iconColor,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  title,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: enabled ? null : theme.disabledColor,
+                  ),
+                ),
+              ),
+              Switch.adaptive(
+                value: value,
+                onChanged: enabled ? onChanged : null,
+              ),
             ],
           ),
         ),
@@ -86,6 +611,50 @@ class UserProfileDrawer extends StatelessWidget {
     return Consumer2<ProjectProvider, AuthProvider>(
       builder: (_, projectProv, authProv, __) {
         final isGuest = authProv.isGuest;
+        final user = authProv.user;
+        final userId = user?.id;
+
+        if (!isGuest && userId != null) {
+          if (_loadedUserId != userId) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                _loadAvatar(userId);
+              }
+            });
+          }
+
+          if (_notificationUserId != userId) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                _loadNotificationSettings(userId);
+              }
+            });
+          }
+        }
+
+        if (isGuest &&
+            (_avatarUrl != null || _notificationUserId != null)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) {
+              return;
+            }
+
+            setState(() {
+              _avatarUrl = null;
+              _loadedUserId = null;
+              _notificationUserId = null;
+              _allNotificationsEnabled = true;
+              _chatNotificationsEnabled = true;
+              _projectUpdatesEnabled = true;
+            });
+          });
+        }
+
+        final metadataAvatar =
+        user?.userMetadata?['avatar_url']?.toString();
+
+        final displayAvatar =
+            _avatarUrl ?? _normalizeAvatarUrl(metadataAvatar);
 
         final displayName = isGuest
             ? 'profile.guest'.tr()
@@ -95,20 +664,15 @@ class UserProfileDrawer extends StatelessWidget {
 
         final displayEmail = isGuest
             ? 'profile.guest_email'.tr()
-            : authProv.user?.email ??
-            'auth.email_not_provided'.tr();
+            : user?.email ?? 'auth.email_not_provided'.tr();
 
         return InkWell(
           onTap: isGuest
               ? null
               : () {
-            Navigator.of(context).pop();
-
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) =>
-                const ProfileScreen(),
-              ),
+            _openProfileScreen(
+              context: context,
+              userId: userId,
             );
           },
           child: Container(
@@ -128,37 +692,29 @@ class UserProfileDrawer extends StatelessWidget {
               ),
             ),
             child: Column(
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CircleAvatar(
-                  radius: 36,
-                  backgroundColor:
-                  theme.colorScheme.surface,
-                  child: Icon(
-                    isGuest
-                        ? Icons.person_off_rounded
-                        : Icons.person_rounded,
-                    color: theme.colorScheme.primary,
-                  ),
+                _buildAvatar(
+                  context: context,
+                  isGuest: isGuest,
+                  avatarUrl: displayAvatar,
                 ),
                 const SizedBox(height: 16),
                 Text(
                   displayName,
-                  style: theme.textTheme.headlineSmall
-                      ?.copyWith(
-                    color:
-                    theme.colorScheme.onPrimary,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    color: theme.colorScheme.onPrimary,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   displayEmail,
-                  style:
-                  theme.textTheme.bodyMedium
-                      ?.copyWith(
-                    color:
-                    theme.colorScheme.onPrimary,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onPrimary,
                   ),
                 ),
               ],
@@ -170,23 +726,84 @@ class UserProfileDrawer extends StatelessWidget {
   }
 
   // ======================================================
+  // EXPORT
+  // ======================================================
+
+  Future<void> _openExportScreen({
+    required BuildContext context,
+    required ProjectProvider projectProv,
+  }) async {
+    final navigator = Navigator.of(
+      context,
+      rootNavigator: true,
+    );
+
+    await _closeDrawerAndWait(context);
+
+    try {
+      LoadingOverlay.show();
+
+      await projectProv.fetchProjects();
+    } catch (e, st) {
+      AppLogger.error(
+        'Refresh before export failed',
+        error: e,
+        stackTrace: st,
+        tag: 'Drawer',
+      );
+
+      SnackbarManager.showError(
+        ErrorMapper.map(e),
+      );
+    } finally {
+      LoadingOverlay.hide();
+    }
+
+    if (!navigator.mounted) {
+      return;
+    }
+
+    final projects = projectProv.projects;
+
+    if (projects.isEmpty) {
+      SnackbarManager.showError(
+        'projects.no_projects'.tr(),
+      );
+      return;
+    }
+
+    final previousCurrentProject = projectProv.currentProject;
+
+    final currentProject = previousCurrentProject != null &&
+        projects.any(
+              (project) => project.id == previousCurrentProject.id,
+        )
+        ? previousCurrentProject
+        : projects.first;
+
+    projectProv.setCurrentProject(currentProject.id);
+
+    await navigator.push(
+      MaterialPageRoute(
+        builder: (_) => ExportScreen(
+          projectId: currentProject.id,
+        ),
+      ),
+    );
+  }
+
+  // ======================================================
   // BUILD
   // ======================================================
 
   @override
   Widget build(BuildContext context) {
-    final authProv =
-    context.watch<AuthProvider>();
-
-    final themeProv =
-    context.watch<ThemeProvider>();
-
-    final projectProv =
-    context.read<ProjectProvider>();
+    final authProv = context.watch<AuthProvider>();
+    final themeProv = context.watch<ThemeProvider>();
+    final projectProv = context.read<ProjectProvider>();
 
     final isGuest = authProv.isGuest;
-    final colorScheme =
-        Theme.of(context).colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Drawer(
       child: Column(
@@ -201,12 +818,11 @@ class UserProfileDrawer extends StatelessWidget {
                   'navigation.settings'.tr(),
                 ),
 
-                // THEME
                 _buildDrawerItem(
                   context: context,
                   icon: themeProv.isDark
-                      ? Icons.wb_sunny
-                      : Icons.dark_mode,
+                      ? Icons.wb_sunny_outlined
+                      : Icons.dark_mode_outlined,
                   title: themeProv.isDark
                       ? 'profile.light_theme'.tr()
                       : 'profile.dark_theme'.tr(),
@@ -214,16 +830,65 @@ class UserProfileDrawer extends StatelessWidget {
                   onTap: themeProv.toggleTheme,
                 ),
 
-                // LANGUAGE
                 _buildDrawerItem(
                   context: context,
-                  icon: Icons.language,
-                  title:
-                  'profile.choose_language'.tr(),
+                  icon: Icons.language_outlined,
+                  title: 'profile.choose_language'.tr(),
                   index: 1,
-                  onTap: () =>
-                      _showLanguageDialog(context),
+                  onTap: () => _showLanguageDialog(context),
                 ),
+
+                if (!isGuest) ...[
+                  const Divider(),
+
+                  _sectionTitle(
+                    context,
+                    _text(
+                      ru: 'Уведомления',
+                      en: 'Notifications',
+                    ),
+                  ),
+
+                  _buildSwitchItem(
+                    context: context,
+                    icon: _allNotificationsEnabled
+                        ? Icons.notifications_none_outlined
+                        : Icons.notifications_off_outlined,
+                    title: _text(
+                      ru: 'Все уведомления',
+                      en: 'All notifications',
+                    ),
+                    value: _allNotificationsEnabled,
+                    onChanged: _toggleAllNotifications,
+                    index: 2,
+                  ),
+
+                  _buildSwitchItem(
+                    context: context,
+                    icon: Icons.chat_bubble_outline,
+                    title: _text(
+                      ru: 'Уведомления чата',
+                      en: 'Chat notifications',
+                    ),
+                    value: _chatNotificationsEnabled,
+                    onChanged: _toggleChatNotifications,
+                    index: 3,
+                    enabled: _allNotificationsEnabled,
+                  ),
+
+                  _buildSwitchItem(
+                    context: context,
+                    icon: Icons.update_outlined,
+                    title: _text(
+                      ru: 'Изменения проектов',
+                      en: 'Project updates',
+                    ),
+                    value: _projectUpdatesEnabled,
+                    onChanged: _toggleProjectUpdates,
+                    index: 4,
+                    enabled: _allNotificationsEnabled,
+                  ),
+                ],
 
                 const Divider(),
 
@@ -232,72 +897,42 @@ class UserProfileDrawer extends StatelessWidget {
                   'navigation.management'.tr(),
                 ),
 
-                // EXPORT
                 _buildDrawerItem(
                   context: context,
-                  icon: Icons.picture_as_pdf,
+                  icon: Icons.picture_as_pdf_outlined,
                   title: 'export.title'.tr(),
-                  index: 2,
+                  index: 5,
                   onTap: () {
-                    Navigator.of(context).pop();
-
-                    final projects =
-                        projectProv.projects;
-
-                    if (projects.isEmpty) {
-                      SnackbarManager.showError(
-                        'projects.no_projects'.tr(),
-                      );
-                      return;
-                    }
-
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            ExportScreen(
-                              projectId:
-                              projects.first.id,
-                            ),
-                      ),
+                    _openExportScreen(
+                      context: context,
+                      projectProv: projectProv,
                     );
                   },
                 ),
 
-                // CALENDAR
                 _buildDrawerItem(
                   context: context,
-                  icon: Icons.calendar_month,
-                  title:
-                  'navigation.calendar'.tr(),
-                  index: 3,
+                  icon: Icons.calendar_month_outlined,
+                  title: 'navigation.calendar'.tr(),
+                  index: 6,
                   onTap: () {
-                    Navigator.of(context).pop();
-
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                        const CalendarScreen(),
-                      ),
-                    );
+                    _openCalendarScreen(context);
                   },
                 ),
 
-                // REFRESH
                 if (!isGuest)
                   _buildDrawerItem(
                     context: context,
-                    icon: Icons.sync,
-                    title:
-                    'projects.refresh'.tr(),
-                    index: 4,
+                    icon: Icons.sync_outlined,
+                    title: 'projects.refresh'.tr(),
+                    index: 7,
                     onTap: () async {
-                      Navigator.of(context).pop();
+                      await _closeDrawerAndWait(context);
 
                       try {
                         LoadingOverlay.show();
 
-                        await projectProv
-                            .fetchProjects();
+                        await projectProv.fetchProjects();
                       } catch (e, st) {
                         AppLogger.error(
                           'Refresh projects failed',
@@ -315,63 +950,74 @@ class UserProfileDrawer extends StatelessWidget {
                     },
                   ),
 
-                // ABOUT
                 _buildDrawerItem(
                   context: context,
                   icon: Icons.info_outline,
                   title: 'app.about'.tr(),
-                  index: 5,
-                  onTap: () =>
-                      _showAboutDialog(context),
+                  index: 8,
+                  onTap: () {
+                    _openAboutAppDialog(context);
+                  },
                 ),
               ],
             ),
           ),
 
-          // LOGIN / LOGOUT
-
           Padding(
             padding: const EdgeInsets.all(12),
             child: _buildDrawerItem(
               context: context,
-              icon:
-              isGuest
-                  ? Icons.login
-                  : Icons.logout,
-              title:
-              isGuest
+              icon: isGuest
+                  ? Icons.login_outlined
+                  : Icons.logout_outlined,
+              title: isGuest
                   ? 'auth.login'.tr()
                   : 'auth.logout'.tr(),
-              index: 6,
-              color:
-              isGuest
-                  ? colorScheme.primary
-                  : colorScheme.error,
+              index: 9,
+              color: isGuest ? colorScheme.primary : colorScheme.error,
               onTap: () async {
-                Navigator.of(context).pop();
+                final navigator = Navigator.of(
+                  context,
+                  rootNavigator: true,
+                );
 
                 try {
+                  await _closeDrawerAndWait(context);
+
                   if (isGuest) {
-                    /// FIX guest mode bug
                     await authProv.signOut();
 
-                    if (!context.mounted) {
+                    if (!navigator.mounted) {
                       return;
                     }
 
-                    Navigator.of(context).push(
+                    await navigator.push(
                       MaterialPageRoute(
-                        builder: (_) =>
-                        const LoginScreen(),
+                        builder: (_) => const LoginScreen(),
                       ),
                     );
-                  } else {
-                    await authProv.signOut();
 
-                    SnackbarManager.showSuccess(
-                      'auth.logout_success'.tr(),
-                    );
+                    return;
                   }
+
+                  await authProv.signOut();
+
+                  _notificationService.clearSettingsCache();
+
+                  if (mounted) {
+                    setState(() {
+                      _avatarUrl = null;
+                      _loadedUserId = null;
+                      _notificationUserId = null;
+                      _allNotificationsEnabled = true;
+                      _chatNotificationsEnabled = true;
+                      _projectUpdatesEnabled = true;
+                    });
+                  }
+
+                  SnackbarManager.showSuccess(
+                    'auth.logout_success'.tr(),
+                  );
                 } catch (e, st) {
                   AppLogger.error(
                     'Logout failed',
@@ -400,8 +1046,7 @@ class UserProfileDrawer extends StatelessWidget {
       BuildContext context,
       String text,
       ) {
-    final colorScheme =
-        Theme.of(context).colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -425,17 +1070,16 @@ class UserProfileDrawer extends StatelessWidget {
   // LANGUAGE
   // ======================================================
 
-  void _showLanguageDialog(
-      BuildContext context) {
+  void _showLanguageDialog(BuildContext context) {
     showDialog(
       context: context,
       builder: (_) {
-        final current =
-            context.locale.languageCode;
+        final current = context.locale.languageCode;
 
         return AlertDialog(
-          title:
-          Text('profile.choose_language'.tr()),
+          title: Text(
+            'profile.choose_language'.tr(),
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -466,10 +1110,7 @@ class UserProfileDrawer extends StatelessWidget {
       }) {
     return ListTile(
       title: Text(label),
-      trailing:
-      selected
-          ? const Icon(Icons.check)
-          : null,
+      trailing: selected ? const Icon(Icons.check) : null,
       onTap: () async {
         try {
           LoadingOverlay.show();
@@ -504,16 +1145,19 @@ class UserProfileDrawer extends StatelessWidget {
   // ABOUT
   // ======================================================
 
-  void _showAboutDialog(
-      BuildContext context) {
+  void _showAboutDialog(BuildContext context) {
     showAboutDialog(
       context: context,
       applicationName: 'Taskio',
       applicationVersion: '1.0.0',
       children: [
-        Text('app.description'.tr()),
+        Text(
+          'app.description'.tr(),
+        ),
         const SizedBox(height: 8),
-        Text('app.copyright'.tr()),
+        Text(
+          'app.copyright'.tr(),
+        ),
       ],
     );
   }

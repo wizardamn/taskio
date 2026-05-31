@@ -32,6 +32,8 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  static const String _avatarFolder = 'profiles';
+
   final AuthService _authService = AuthService();
   final SupabaseClient _supabase = SupabaseService.client;
 
@@ -165,6 +167,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
       });
 
+      try {
+        await context.read<ProjectProvider>().fetchProjects();
+      } catch (e, st) {
+        AppLogger.error(
+          'Projects refresh after avatar upload failed',
+          error: e,
+          stackTrace: st,
+          tag: 'ProfileScreen',
+        );
+      }
+
       SnackbarManager.showSuccess(
         'profile.avatar_updated'.tr(),
       );
@@ -203,10 +216,53 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final extension = _safeExtension(file.name);
 
     final path =
-        'profiles/$userId/avatar_${DateTime.now().millisecondsSinceEpoch}.$extension';
+        '$_avatarFolder/$userId/avatar_${DateTime.now().millisecondsSinceEpoch}.$extension';
 
     final contentType = _mimeTypeFromExtension(extension);
 
+    await _uploadAvatarToStorage(
+      path: path,
+      file: file,
+      contentType: contentType,
+    );
+
+    final avatarUrl = _supabase.storage
+        .from(SupabaseService.bucket)
+        .getPublicUrl(path);
+
+    await _authService.updateProfile(
+      fullName: profile.fullName,
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      username: profile.username,
+      bio: profile.bio,
+      avatarUrl: avatarUrl,
+      role: _selectedRole ?? profile.role,
+      language: profile.language,
+    );
+
+    try {
+      await _supabase.from('profiles').update({
+        'avatar_url': avatarUrl,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', userId);
+    } catch (e, st) {
+      AppLogger.error(
+        'Direct avatar_url update skipped',
+        error: e,
+        stackTrace: st,
+        tag: 'ProfileScreen',
+      );
+    }
+
+    return avatarUrl;
+  }
+
+  Future<void> _uploadAvatarToStorage({
+    required String path,
+    required PlatformFile file,
+    required String contentType,
+  }) async {
     if (kIsWeb) {
       final bytes = file.bytes;
 
@@ -224,41 +280,69 @@ class _ProfileScreenState extends State<ProfileScreen> {
           contentType: contentType,
         ),
       );
-    } else {
-      final filePath = file.path;
 
-      if (filePath == null || filePath.isEmpty) {
-        throw Exception('errors.invalid_files');
+      return;
+    }
+
+    final filePath = file.path;
+
+    if (filePath == null || filePath.isEmpty) {
+      throw Exception('errors.invalid_files');
+    }
+
+    await _supabase.storage
+        .from(SupabaseService.bucket)
+        .upload(
+      path,
+      File(filePath),
+      fileOptions: FileOptions(
+        upsert: true,
+        contentType: contentType,
+      ),
+    );
+  }
+
+  String? _normalizeAvatarUrl(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return null;
+    }
+
+    final raw = value.trim();
+
+    final oldAvatarBucketMarker =
+        '/storage/v1/object/public/avatars/';
+
+    if (raw.startsWith('http://') ||
+        raw.startsWith('https://')) {
+      if (raw.contains(oldAvatarBucketMarker)) {
+        return raw.replaceFirst(
+          oldAvatarBucketMarker,
+          '/storage/v1/object/public/${SupabaseService.bucket}/',
+        );
       }
 
-      await _supabase.storage
-          .from(SupabaseService.bucket)
-          .upload(
-        path,
-        File(filePath),
-        fileOptions: FileOptions(
-          upsert: true,
-          contentType: contentType,
-        ),
+      return raw;
+    }
+
+    var path = raw.replaceAll('\\', '/');
+
+    while (path.startsWith('/')) {
+      path = path.substring(1);
+    }
+
+    if (path.startsWith('avatars/')) {
+      path = path.substring('avatars/'.length);
+    }
+
+    if (path.startsWith('${SupabaseService.bucket}/')) {
+      path = path.substring(
+        '${SupabaseService.bucket}/'.length,
       );
     }
 
-    final avatarUrl = _supabase.storage
+    return _supabase.storage
         .from(SupabaseService.bucket)
         .getPublicUrl(path);
-
-    await _authService.updateProfile(
-      fullName: profile.fullName,
-      firstName: profile.firstName,
-      lastName: profile.lastName,
-      username: profile.username,
-      bio: profile.bio,
-      avatarUrl: avatarUrl,
-      role: _selectedRole ?? profile.role,
-      language: profile.language,
-    );
-
-    return avatarUrl;
   }
 
   String _safeExtension(String fileName) {
@@ -555,25 +639,55 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildAvatar(ProfileModel profile) {
     final theme = Theme.of(context);
-    final avatarUrl = profile.avatarUrl?.trim();
+    final avatarUrl = _normalizeAvatarUrl(profile.avatarUrl);
+
+    final fallbackIcon = Icon(
+      Icons.person,
+      size: 52,
+      color: theme.colorScheme.onPrimaryContainer,
+    );
 
     return Stack(
       alignment: Alignment.bottomRight,
       children: [
-        CircleAvatar(
-          radius: 52,
-          backgroundColor: theme.colorScheme.primaryContainer,
-          backgroundImage:
-          avatarUrl != null && avatarUrl.isNotEmpty
-              ? NetworkImage(avatarUrl)
-              : null,
-          child: avatarUrl == null || avatarUrl.isEmpty
-              ? Icon(
-            Icons.person,
-            size: 52,
-            color: theme.colorScheme.onPrimaryContainer,
+        Container(
+          width: 104,
+          height: 104,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: theme.colorScheme.primaryContainer,
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: avatarUrl == null
+              ? Center(
+            child: fallbackIcon,
           )
-              : null,
+              : Image.network(
+            avatarUrl,
+            key: ValueKey(avatarUrl),
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) {
+              return Center(
+                child: fallbackIcon,
+              );
+            },
+            loadingBuilder: (context, child, progress) {
+              if (progress == null) {
+                return child;
+              }
+
+              return Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              );
+            },
+          ),
         )
             .animate()
             .fadeIn()

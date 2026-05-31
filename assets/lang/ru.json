@@ -27,21 +27,20 @@
     "confirm": "Подтвердить",
     "back": "Назад",
     "next": "Далее",
+    "select": "Выбрать",
+    "selected": "Выбрано",
     "select_all": "Выбрать все"
   },
-
   "snackbar": {
     "success": "Успех",
     "error": "Ошибка",
     "warning": "Предупреждение"
   },
-
   "app": {
     "about": "О приложении",
     "description": "Приложение для управления учебными проектами. Планируйте, выполняйте и отслеживайте прогресс вместе с командой.",
     "copyright": "© 2026 Taskio"
   },
-
   "navigation": {
     "my_projects": "Мои проекты",
     "calendar": "Календарь",
@@ -50,7 +49,6 @@
     "management": "Управление",
     "profile": "Профиль"
   },
-
   "auth": {
     "login": "Вход",
     "login_success": "Успешный вход",
@@ -80,7 +78,6 @@
     "email_not_provided": "Email не указан",
     "guest_login": "Вы вошли как гость"
   },
-
   "validation": {
     "empty_field": "Поле не может быть пустым",
     "invalid_email": "Введите корректный email",
@@ -94,7 +91,6 @@
     "invalid_username": "Username может содержать только латинские буквы, цифры и подчёркивание",
     "username_taken": "Это имя пользователя уже занято"
   },
-
   "roles": {
     "student": "Студент",
     "teacher": "Учитель",
@@ -104,17 +100,16 @@
     "editor": "Редактор",
     "viewer": "Наблюдатель"
   },
-
   "project_roles": {
     "owner": "Владелец",
     "editor": "Редактор",
     "viewer": "Наблюдатель"
   },
-
   "projects": {
     "create": "Создать проект",
     "new_project": "Новый проект",
     "project": "Проект",
+    "open": "Открыть проект",
     "name": "Название",
     "name_hint": "Например: Реферат по истории",
     "description": "Описание",
@@ -137,7 +132,7 @@
     "operation_denied_guest": "Доступ запрещён для гостей",
     "search": "Поиск проектов",
     "empty": "Нет проектов",
-    "completed": "Завершён",
+    "completed": "Проект {title} завершён",
     "tasks_on_create": "Задачи проекта",
     "add_task_before_save": "Добавить задачу перед сохранением",
     "no_draft_tasks": "Задачи ещё не добавлены",
@@ -148,21 +143,22 @@
     "max_members_error": "Превышен лимит участников",
     "max_attachments_error": "Превышен лимит вложений"
   },
-
   "project": {
     "open": "Открыть",
     "deadline": "Срок",
     "status": "Статус",
     "participants": "Участники",
     "select_participants": "Выберите участников",
-    "owner": "Владелец"
+    "owner": "Владелец",
+    "category": {
+      "educational": "Учебный проект",
+      "creative": "Творческий проект"
+    }
   },
-
   "project_category": {
     "educational": "Учебный проект",
     "creative": "Творческий проект"
   },
-
   "tasks": {
     "title": "Задачи",
     "hint": "Новая задача...",
@@ -179,7 +175,6 @@
     "deleted": "Задача удалена",
     "update_failed": "Не удалось обновить задачу"
   },
-
   "attachments": {
     "title": "Вложения",
     "empty": "Нет вложений",
@@ -189,14 +184,12 @@
     "delete_error": "Ошибка удаления",
     "no_permission_delete": "Нет прав для удаления"
   },
-
   "status": {
     "planned": "Запланирован",
     "in_progress": "В работе",
     "completed": "Завершён",
     "archived": "Архив"
   },
-
   "sorting": {
     "nearest": "Ближайшие",
     "farthest": "Дальние",
@@ -204,26 +197,43 @@
     "by_status": "По статусу",
     "title": "Сортировка"
   },
-
   "filter": {
     "title": "Фильтры",
     "all": "Все статусы",
     "in_progress": "Только \"В работе\"",
     "completed": "Только \"Завершённые\""
   },
-
   "search": {
     "hint": "Поиск..."
   },
-
   "deadline_filter": {
     "today": "Сегодня",
     "week": "Неделя",
     "overdue": "Просрочено",
     "all": "Все"
   },
-
   "notifications": {
+    "title": "Уведомления",
+    "all": "Все уведомления",
+    "chat": "Уведомления чата",
+    "project_updates": "Изменения проектов",
+    "enabled": "Уведомления включены",
+    "disabled": "Уведомления отключены",
+    "all_enabled": "Все уведомления включены",
+    "all_disabled": "Все уведомления отключены",
+    "chat_enabled": "Уведомления чата включены",
+    "chat_disabled": "Уведомления чата отключены",
+    "project_updates_enabled": "Уведомления об изменениях проектов включены",
+    "project_updates_disabled": "Уведомления об изменениях проектов отключены",
+    "project_enabled": "Уведомления проекта включены",
+    "project_disabled": "Уведомления проекта отключены",
+    "project_chat_enabled": "Уведомления чата проекта включены",
+    "project_chat_disabled": "Уведомления чата проекта отключены",
+    "enable_project": "Включить уведомления проекта",
+    "disable_project": "Отключить уведомления проекта",
+    "enable_chat": "Включить уведомления чата",
+    "disable_chat": "Отключить уведомления чата",
+    "settings_change_error": "Не удалось изменить настройки уведомлений",
     "no_notifications": "Нет новых уведомлений",
     "project_created_title": "Проект создан",
     "project_created_body": "Проект \"{project}\" создан",
@@ -232,10 +242,11 @@
     "project_deleted_title": "Проект удалён",
     "project_deleted_body": "Проект \"{project}\" удалён",
     "file_uploaded_title": "Файл загружен",
+    "file_added_title": "Файл добавлен",
+    "file_added_body": "В проект был добавлен файл",
     "deadline_title": "Скоро дедлайн",
     "deadline_body": "Проект заканчивается:"
   },
-
   "profile": {
     "choose_language": "Выберите язык",
     "language_changed": "Язык успешно изменён",
@@ -262,7 +273,6 @@
     "change_avatar": "Сменить аватар",
     "load_failed": "Не удалось загрузить профиль"
   },
-
   "reports": {
     "generate": "Сформировать отчёт",
     "not_implemented": "Функция будет реализована позже",
@@ -270,7 +280,6 @@
     "generated_at": "Дата формирования",
     "total_projects": "Всего проектов"
   },
-
   "report": {
     "generated": "Отчёт создан",
     "saved": "Файл сохранён",
@@ -302,7 +311,6 @@
     "all_projects_report": "Отчёт по всем проектам",
     "no_participants": "Участники не указаны"
   },
-
   "grades": {
     "title": "Оценка проекта",
     "grade": "Оценка",
@@ -320,7 +328,6 @@
     "delete_error": "Ошибка удаления оценки",
     "invalid_grade": "Оценка должна быть от 2 до 5"
   },
-
   "errors": {
     "fetch_failed": "Не удалось загрузить данные",
     "invalid_credentials": "Неверный email или пароль",
@@ -347,7 +354,6 @@
     "invalid_files_bytes": "Некорректные данные файлов",
     "not_authenticated": "Пользователь не авторизован"
   },
-
   "chat": {
     "translate": "Перевести",
     "translation": "Перевод",
@@ -371,7 +377,6 @@
     "translated": "Переведено",
     "message_too_long": "Сообщение слишком длинное"
   },
-
   "members": {
     "title": "Участники",
     "no_participants": "Участники не выбраны",
@@ -380,23 +385,19 @@
     "empty": "Пользователи не найдены",
     "role": "Роль участника"
   },
-
   "users": {
     "no_name": "Без имени",
     "username": "Имя пользователя",
     "full_name": "Имя",
     "search_hint": "Введите имя или username"
   },
-
   "language": {
     "changed": "Язык успешно изменён"
   },
-
   "calendar": {
     "select_date": "Выберите дату",
     "no_projects": "Нет проектов"
   },
-
   "export": {
     "title": "Экспорт",
     "no_preview": "Нет предпросмотра",
@@ -405,9 +406,11 @@
     "current_project": "Текущий проект",
     "selected_projects": "Выбранные проекты",
     "all_projects": "Все проекты",
-    "selected_count": "Выбрано проектов",
+    "selected_count": "Выбрано",
     "generate_preview": "Сформировать предпросмотр",
     "generate_preview_hint": "Выберите тип отчёта и сформируйте предпросмотр",
-    "no_projects_selected": "Выберите хотя бы один проект"
+    "no_projects_selected": "Выберите хотя бы один проект",
+    "change_report_settings": "Изменить параметры отчёта",
+    "available_projects_hint": "Все доступные пользователю проекты"
   }
 }

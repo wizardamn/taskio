@@ -13,8 +13,7 @@ class ProjectService {
 
   final String bucketName = SupabaseService.bucket;
 
-  final NotificationService _notifications =
-  NotificationService();
+  final NotificationService _notifications = NotificationService();
 
   String? _currentUserId;
 
@@ -42,6 +41,73 @@ class ProjectService {
     Error.throwWithStackTrace(
       Exception('$operation: $e'),
       st,
+    );
+  }
+
+  // =========================================================
+  // NOTIFICATIONS
+  // =========================================================
+
+  Future<void> _notifyProjectCreated({
+    required String projectId,
+    required String projectTitle,
+  }) async {
+    await _notifications.showProjectUpdateNotification(
+      projectId: projectId,
+      title: 'Проект создан',
+      body: projectTitle,
+      payload: projectId,
+    );
+  }
+
+  Future<void> _notifyProjectUpdated({
+    required String projectId,
+    required String projectTitle,
+  }) async {
+    await _notifications.showProjectUpdateNotification(
+      projectId: projectId,
+      title: 'Проект обновлён',
+      body: projectTitle,
+      payload: projectId,
+    );
+  }
+
+  Future<void> _notifyProjectDeleted({
+    required String projectId,
+    required String projectTitle,
+  }) async {
+    await _notifications.showProjectUpdateNotification(
+      projectId: projectId,
+      title: 'Проект удалён',
+      body: projectTitle,
+      payload: projectId,
+    );
+  }
+
+  Future<void> _notifyAttachmentAdded({
+    required String projectId,
+    required String projectTitle,
+    required int count,
+  }) async {
+    await _notifications.showProjectUpdateNotification(
+      projectId: projectId,
+      title: 'Файлы добавлены',
+      body: count == 1
+          ? 'В проект "$projectTitle" добавлен файл'
+          : 'В проект "$projectTitle" добавлено файлов: $count',
+      payload: projectId,
+    );
+  }
+
+  Future<void> _notifyAttachmentDeleted({
+    required String projectId,
+    required String projectTitle,
+  }) async {
+    await _notifications.showProjectUpdateNotification(
+      projectId: projectId,
+      title: 'Файл удалён',
+      body: 'Из проекта "$projectTitle" удалён файл',
+      payload: projectId,
     );
   }
 
@@ -76,6 +142,9 @@ class ProjectService {
       final username =
       user?.userMetadata?['username']?.toString().trim();
 
+      final avatarUrl =
+      user?.userMetadata?['avatar_url']?.toString().trim();
+
       final fallbackName = email.contains('@')
           ? email.split('@').first
           : 'User';
@@ -84,19 +153,25 @@ class ProjectService {
           .toLowerCase()
           .replaceAll(RegExp(r'[^a-z0-9_]+'), '_');
 
+      final data = <String, dynamic>{
+        'id': userId,
+        'username': username != null && username.isNotEmpty
+            ? username
+            : fallbackUsername,
+        'full_name': fullName != null && fullName.isNotEmpty
+            ? fullName
+            : fallbackName,
+        'role': 'student',
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
+
+      if (avatarUrl != null && avatarUrl.isNotEmpty) {
+        data['avatar_url'] = avatarUrl;
+      }
+
       await client.from('profiles').upsert(
-        {
-          'id': userId,
-          'username': username != null && username.isNotEmpty
-              ? username
-              : fallbackUsername,
-          'full_name': fullName != null && fullName.isNotEmpty
-              ? fullName
-              : fallbackName,
-          'role': 'student',
-          'created_at': DateTime.now().toUtc().toIso8601String(),
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
-        },
+        data,
         onConflict: 'id',
       );
     } catch (e, st) {
@@ -257,6 +332,203 @@ class ProjectService {
   }
 
   // =========================================================
+  // PROFILE ENRICHMENT FOR AVATARS
+  // =========================================================
+
+  Future<List<ProjectModel>> _enrichProjectsWithProfiles(
+      List<ProjectModel> projects,
+      ) async {
+    if (projects.isEmpty) {
+      return projects;
+    }
+
+    final memberIds = <String>{};
+
+    for (final project in projects) {
+      if (project.ownerId.trim().isNotEmpty) {
+        memberIds.add(project.ownerId.trim());
+      }
+
+      for (final participant in project.participantsData) {
+        final id = participant.id.trim();
+
+        if (id.isNotEmpty) {
+          memberIds.add(id);
+        }
+      }
+    }
+
+    if (memberIds.isEmpty) {
+      return projects;
+    }
+
+    try {
+      final profilesRaw = await client
+          .from('profiles')
+          .select(
+        '''
+            id,
+            full_name,
+            username,
+            avatar_url
+            ''',
+      )
+          .inFilter(
+        'id',
+        memberIds.toList(),
+      );
+
+      final profiles = List<Map<String, dynamic>>.from(profilesRaw);
+
+      final profileById = <String, Map<String, dynamic>>{};
+
+      for (final profile in profiles) {
+        final id = profile['id']?.toString();
+
+        if (id != null && id.isNotEmpty) {
+          profileById[id] = profile;
+        }
+      }
+
+      return projects.map((project) {
+        return _enrichProjectWithProfileMap(
+          project,
+          profileById,
+        );
+      }).toList();
+    } catch (e) {
+      debugPrint('[ProjectService] profile enrichment skipped: $e');
+      return projects;
+    }
+  }
+
+  Future<ProjectModel> _enrichProjectWithProfiles(
+      ProjectModel project,
+      ) async {
+    final enriched = await _enrichProjectsWithProfiles([project]);
+
+    if (enriched.isEmpty) {
+      return project;
+    }
+
+    return enriched.first;
+  }
+
+  ProjectModel _enrichProjectWithProfileMap(
+      ProjectModel project,
+      Map<String, Map<String, dynamic>> profileById,
+      ) {
+    final participantsById = <String, ProjectParticipant>{};
+
+    for (final participant in project.participantsData) {
+      final id = participant.id.trim();
+
+      if (id.isEmpty) {
+        continue;
+      }
+
+      final profile = profileById[id];
+
+      participantsById[id] = _mergeParticipantWithProfile(
+        participant: participant,
+        profile: profile,
+      );
+    }
+
+    final ownerId = project.ownerId.trim();
+
+    if (ownerId.isNotEmpty) {
+      final existingOwner = participantsById[ownerId];
+      final ownerProfile = profileById[ownerId];
+
+      participantsById[ownerId] = _mergeParticipantWithProfile(
+        participant: existingOwner ??
+            ProjectParticipant(
+              id: ownerId,
+              fullName: _profileDisplayName(ownerProfile) ?? 'Owner',
+              username: ownerProfile?['username']?.toString(),
+              avatarUrl: ownerProfile?['avatar_url']?.toString(),
+              role: ProjectRole.owner,
+            ),
+        profile: ownerProfile,
+        forcedRole: ProjectRole.owner,
+      );
+    }
+
+    final participants = participantsById.values.toList();
+
+    participants.sort((a, b) {
+      if (a.id == ownerId) {
+        return -1;
+      }
+
+      if (b.id == ownerId) {
+        return 1;
+      }
+
+      return a.fullName.toLowerCase().compareTo(
+        b.fullName.toLowerCase(),
+      );
+    });
+
+    return project.copyWith(
+      participantsData: participants,
+    );
+  }
+
+  ProjectParticipant _mergeParticipantWithProfile({
+    required ProjectParticipant participant,
+    required Map<String, dynamic>? profile,
+    ProjectRole? forcedRole,
+  }) {
+    final profileName = _profileDisplayName(profile);
+
+    final currentName = participant.fullName.trim();
+
+    final fullName = profileName != null && profileName.isNotEmpty
+        ? profileName
+        : currentName.isNotEmpty
+        ? currentName
+        : 'User';
+
+    final username = profile?['username']?.toString().trim();
+
+    final avatarUrl = profile?['avatar_url']?.toString().trim();
+
+    return ProjectParticipant(
+      id: participant.id,
+      fullName: fullName,
+      username: username != null && username.isNotEmpty
+          ? username
+          : participant.username,
+      avatarUrl: avatarUrl != null && avatarUrl.isNotEmpty
+          ? avatarUrl
+          : participant.avatarUrl,
+      role: forcedRole ?? participant.role,
+    );
+  }
+
+  String? _profileDisplayName(Map<String, dynamic>? profile) {
+    if (profile == null) {
+      return null;
+    }
+
+    final fullName = profile['full_name']?.toString().trim();
+
+    if (fullName != null && fullName.isNotEmpty) {
+      return fullName;
+    }
+
+    final username = profile['username']?.toString().trim();
+
+    if (username != null && username.isNotEmpty) {
+      return username;
+    }
+
+    return null;
+  }
+
+  // =========================================================
   // GET ALL
   // =========================================================
 
@@ -272,7 +544,7 @@ class ProjectService {
         'get_my_project_ids',
       );
 
-      final ids = List<String>.from(idsRaw ?? []);
+      final ids = _extractProjectIds(idsRaw);
 
       if (ids.isEmpty) {
         return [];
@@ -287,13 +559,13 @@ class ProjectService {
         ascending: false,
       );
 
-      return response
-          .map<ProjectModel>(
-            (raw) => ProjectModel.fromJson(
+      final projects = response.map<ProjectModel>((raw) {
+        return ProjectModel.fromJson(
           Map<String, dynamic>.from(raw),
-        ),
-      )
-          .toList();
+        );
+      }).toList();
+
+      return _enrichProjectsWithProfiles(projects);
     } catch (e, st) {
       _handleError(
         e,
@@ -301,6 +573,40 @@ class ProjectService {
         'load projects failed',
       );
     }
+  }
+
+  List<String> _extractProjectIds(dynamic raw) {
+    if (raw == null) {
+      return [];
+    }
+
+    if (raw is! List) {
+      return [];
+    }
+
+    return raw
+        .map<String?>((item) {
+      if (item == null) {
+        return null;
+      }
+
+      if (item is String) {
+        return item;
+      }
+
+      if (item is Map) {
+        final id = item['id'] ?? item['project_id'];
+
+        return id?.toString();
+      }
+
+      return item.toString();
+    })
+        .whereType<String>()
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
   }
 
   // =========================================================
@@ -323,9 +629,11 @@ class ProjectService {
         return null;
       }
 
-      return ProjectModel.fromJson(
+      final project = ProjectModel.fromJson(
         Map<String, dynamic>.from(data),
       );
+
+      return _enrichProjectWithProfiles(project);
     } catch (e, st) {
       _handleError(
         e,
@@ -429,8 +737,7 @@ class ProjectService {
           .select('member_id, role')
           .eq('project_id', projectId);
 
-      final existingRows =
-      List<Map<String, dynamic>>.from(existing);
+      final existingRows = List<Map<String, dynamic>>.from(existing);
 
       final existingIds = existingRows
           .map<String>((row) => row['member_id'].toString())
@@ -543,6 +850,11 @@ class ProjectService {
       })
           .eq('project_id', projectId)
           .eq('member_id', memberId);
+
+      await _notifyProjectUpdated(
+        projectId: project.id,
+        projectTitle: project.title,
+      );
     } catch (e, st) {
       _handleError(
         e,
@@ -593,16 +905,16 @@ class ProjectService {
         participants: participants,
       );
 
-      await _notifications.showSimple(
-        'project_created',
-        project.title,
-      );
-
       final created = await getById(createdId);
 
       if (created == null) {
         throw Exception('errors.project_not_found');
       }
+
+      await _notifyProjectCreated(
+        projectId: created.id,
+        projectTitle: created.title,
+      );
 
       return created;
     } catch (e, st) {
@@ -657,9 +969,9 @@ class ProjectService {
         participants: participants,
       );
 
-      await _notifications.showSimple(
-        'project_updated',
-        project.title,
+      await _notifyProjectUpdated(
+        projectId: project.id,
+        projectTitle: project.title,
       );
     } catch (e, st) {
       _handleError(
@@ -804,15 +1116,15 @@ class ProjectService {
         projectId: id,
       );
 
+      await _notifyProjectDeleted(
+        projectId: project.id,
+        projectTitle: project.title,
+      );
+
       await client
           .from('projects')
           .delete()
           .eq('id', id);
-
-      await _notifications.showSimple(
-        'project_deleted',
-        project.title,
-      );
     } catch (e, st) {
       _handleError(
         e,
@@ -827,7 +1139,10 @@ class ProjectService {
     required String projectId,
   }) async {
     try {
-      await client.from(table).delete().eq('project_id', projectId);
+      await client
+          .from(table)
+          .delete()
+          .eq('project_id', projectId);
     } catch (e) {
       debugPrint(
         '[ProjectService] delete from $table skipped: $e',
@@ -932,6 +1247,8 @@ class ProjectService {
 
         final attachmentId = const Uuid().v4();
 
+        final now = DateTime.now();
+
         final attachment = Attachment(
           id: attachmentId,
           projectId: projectId,
@@ -939,7 +1256,7 @@ class ProjectService {
           filePath: path,
           mimeType: mimeType,
           fileSize: fileSize,
-          uploadedAt: DateTime.now(),
+          uploadedAt: now,
           uploaderId: userId,
         );
 
@@ -953,14 +1270,17 @@ class ProjectService {
           'file_path': path,
           'mime_type': mimeType,
           'file_size': fileSize,
-          'created_at': DateTime.now().toUtc().toIso8601String(),
+          'created_at': now.toUtc().toIso8601String(),
         });
       }
 
-      await _notifications.showSimple(
-        'file_added',
-        '',
-      );
+      if (uploaded.isNotEmpty) {
+        await _notifyAttachmentAdded(
+          projectId: project.id,
+          projectTitle: project.title,
+          count: uploaded.length,
+        );
+      }
 
       return project.copyWith(
         attachments: [
@@ -1096,6 +1416,11 @@ class ProjectService {
           .delete()
           .eq('project_id', projectId)
           .eq('file_path', filePath);
+
+      await _notifyAttachmentDeleted(
+        projectId: project.id,
+        projectTitle: project.title,
+      );
     } catch (e, st) {
       _handleError(
         e,

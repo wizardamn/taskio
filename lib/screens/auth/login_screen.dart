@@ -4,11 +4,14 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:easy_localization/easy_localization.dart';
 
 import '../../providers/auth_provider.dart';
+
 import '../../utils/snackbar_manager.dart';
 import '../../utils/loading_overlay.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/error_mapper.dart';
 import '../../utils/localization_helper.dart';
+
+import '../../widgets/project_list_skeleton.dart';
 
 import 'register_screen.dart';
 
@@ -39,11 +42,9 @@ class _LoginScreenState extends State<LoginScreen>
   bool _isPasswordVisible = false;
   bool _isSubmitting = false;
 
-  late final AnimationController
-  _animationController;
+  late final AnimationController _animationController;
 
-  static final RegExp _emailRegex =
-  RegExp(
+  static final RegExp _emailRegex = RegExp(
     r'^[\w\-.]+@([\w-]+\.)+[\w-]{2,}$',
   );
 
@@ -51,13 +52,12 @@ class _LoginScreenState extends State<LoginScreen>
   void initState() {
     super.initState();
 
-    _animationController =
-        AnimationController(
-          vsync: this,
-          duration: const Duration(
-            milliseconds: 600,
-          ),
-        );
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(
+        milliseconds: 600,
+      ),
+    );
 
     _animationController.forward();
 
@@ -97,25 +97,23 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
-    final form =
-        _formKey.currentState;
+    final form = _formKey.currentState;
 
-    if (form == null ||
-        !form.validate()) {
+    if (form == null || !form.validate()) {
       return;
     }
 
-    final authProvider =
-    context.read<AuthProvider>();
+    final authProvider = context.read<AuthProvider>();
 
     try {
       setState(() {
         _isSubmitting = true;
       });
 
-      LoadingOverlay.show();
+      // Важно:
+      // Глобальный LoadingOverlay здесь не используем.
+      // Пока идёт вход, экран заменяется на ProjectListSkeleton.
 
-      /// FIX guest mode bug
       if (authProvider.isGuest) {
         await authProvider.signOut();
       }
@@ -148,8 +146,6 @@ class _LoginScreenState extends State<LoginScreen>
         ErrorMapper.map(e),
       );
     } finally {
-      LoadingOverlay.hide();
-
       if (mounted) {
         setState(() {
           _isSubmitting = false;
@@ -169,17 +165,17 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
-    final authProvider =
-    context.read<AuthProvider>();
+    final authProvider = context.read<AuthProvider>();
 
     try {
       setState(() {
         _isSubmitting = true;
       });
 
-      LoadingOverlay.show();
+      // Важно:
+      // Глобальный LoadingOverlay здесь не используем.
+      // Skeleton показывается сразу после нажатия на кнопку.
 
-      /// на случай если был обычный юзер
       if (authProvider.isAuthenticated &&
           !authProvider.isGuest) {
         await authProvider.signOut();
@@ -210,8 +206,6 @@ class _LoginScreenState extends State<LoginScreen>
         ErrorMapper.map(e),
       );
     } finally {
-      LoadingOverlay.hide();
-
       if (mounted) {
         setState(() {
           _isSubmitting = false;
@@ -272,8 +266,7 @@ class _LoginScreenState extends State<LoginScreen>
       ) {
     return child
         .animate(
-      controller:
-      _animationController,
+      controller: _animationController,
     )
         .fade(
       duration: 400.ms,
@@ -290,11 +283,30 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   // =========================================================
+  // LOADING SKELETON
+  // =========================================================
+
+  Widget _buildLoadingSkeleton() {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'navigation.my_projects'.tr(),
+        ),
+      ),
+      body: const ProjectListSkeleton(),
+    );
+  }
+
+  // =========================================================
   // BUILD
   // =========================================================
 
   @override
   Widget build(BuildContext context) {
+    if (_isSubmitting) {
+      return _buildLoadingSkeleton();
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -305,18 +317,19 @@ class _LoginScreenState extends State<LoginScreen>
             icon: const Icon(
               Icons.language,
             ),
-            onSelected:
-            _changeLanguage,
+            onSelected: _changeLanguage,
             itemBuilder: (_) => const [
               PopupMenuItem(
                 value: Locale('ru'),
-                child:
-                Text('🇷🇺 Русский'),
+                child: Text(
+                  '🇷🇺 Русский',
+                ),
               ),
               PopupMenuItem(
                 value: Locale('en'),
-                child:
-                Text('🇬🇧 English'),
+                child: Text(
+                  '🇬🇧 English',
+                ),
               ),
             ],
           ),
@@ -324,72 +337,52 @@ class _LoginScreenState extends State<LoginScreen>
       ),
       resizeToAvoidBottomInset: true,
       body: GestureDetector(
-        behavior:
-        HitTestBehavior.translucent,
+        behavior: HitTestBehavior.translucent,
         onTap: () {
-          FocusScope.of(context)
-              .unfocus();
+          FocusScope.of(context).unfocus();
         },
         child: Center(
           child: SingleChildScrollView(
             keyboardDismissBehavior:
-            ScrollViewKeyboardDismissBehavior
-                .onDrag,
-            padding:
-            const EdgeInsets.all(24),
+            ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: const EdgeInsets.all(24),
             child: Form(
               key: _formKey,
               autovalidateMode:
-              AutovalidateMode
-                  .onUserInteraction,
+              AutovalidateMode.onUserInteraction,
               child: Column(
                 children: [
                   _animated(
                     TextFormField(
-                      controller:
-                      _emailController,
-                      focusNode:
-                      _emailFocus,
+                      controller: _emailController,
+                      focusNode: _emailFocus,
                       keyboardType:
-                      TextInputType
-                          .emailAddress,
+                      TextInputType.emailAddress,
                       autofillHints: const [
                         AutofillHints.email,
                       ],
                       textInputAction:
-                      TextInputAction
-                          .next,
-                      onFieldSubmitted:
-                          (_) {
-                        _passwordFocus
-                            .requestFocus();
+                      TextInputAction.next,
+                      onFieldSubmitted: (_) {
+                        _passwordFocus.requestFocus();
                       },
-                      decoration:
-                      InputDecoration(
+                      decoration: InputDecoration(
                         labelText:
                         'auth.email_label'.tr(),
                         hintText:
                         'auth.email_hint'.tr(),
-                        prefixIcon:
-                        const Icon(
-                          Icons
-                              .email_outlined,
+                        prefixIcon: const Icon(
+                          Icons.email_outlined,
                         ),
                       ),
                       validator: (v) {
-                        final value =
-                            v?.trim() ??
-                                '';
+                        final value = v?.trim() ?? '';
 
-                        if (value
-                            .isEmpty) {
+                        if (value.isEmpty) {
                           return 'validation.empty_email'.tr();
                         }
 
-                        if (!_emailRegex
-                            .hasMatch(
-                          value,
-                        )) {
+                        if (!_emailRegex.hasMatch(value)) {
                           return 'validation.invalid_email'.tr();
                         }
 
@@ -405,61 +398,43 @@ class _LoginScreenState extends State<LoginScreen>
 
                   _animated(
                     TextFormField(
-                      controller:
-                      _passwordController,
-                      focusNode:
-                      _passwordFocus,
+                      controller: _passwordController,
+                      focusNode: _passwordFocus,
                       autofillHints: const [
-                        AutofillHints
-                            .password,
+                        AutofillHints.password,
                       ],
-                      obscureText:
-                      !_isPasswordVisible,
+                      obscureText: !_isPasswordVisible,
                       textInputAction:
-                      TextInputAction
-                          .done,
-                      onFieldSubmitted:
-                          (_) =>
-                          _login(),
-                      decoration:
-                      InputDecoration(
+                      TextInputAction.done,
+                      onFieldSubmitted: (_) => _login(),
+                      decoration: InputDecoration(
                         labelText:
                         'auth.password_label'.tr(),
                         hintText:
                         'auth.password_hint'.tr(),
-                        prefixIcon:
-                        const Icon(
-                          Icons
-                              .lock_outline,
+                        prefixIcon: const Icon(
+                          Icons.lock_outline,
                         ),
-                        suffixIcon:
-                        IconButton(
+                        suffixIcon: IconButton(
                           icon: Icon(
                             _isPasswordVisible
-                                ? Icons
-                                .visibility
-                                : Icons
-                                .visibility_off,
+                                ? Icons.visibility
+                                : Icons.visibility_off,
                           ),
-                          onPressed:
-                              () {
-                            setState(
-                                  () {
-                                _isPasswordVisible =
-                                !_isPasswordVisible;
-                              },
-                            );
+                          onPressed: () {
+                            setState(() {
+                              _isPasswordVisible =
+                              !_isPasswordVisible;
+                            });
                           },
                         ),
                       ),
                       validator: (v) {
-                        if (v == null ||
-                            v.isEmpty) {
+                        if (v == null || v.isEmpty) {
                           return 'validation.empty_password'.tr();
                         }
 
-                        if (v.length <
-                            6) {
+                        if (v.length < 6) {
                           return 'validation.short_password'.tr();
                         }
 
@@ -475,35 +450,14 @@ class _LoginScreenState extends State<LoginScreen>
 
                   _animated(
                     ElevatedButton(
-                      onPressed:
-                      _isSubmitting
-                          ? null
-                          : _login,
-                      style:
-                      ElevatedButton
-                          .styleFrom(
-                        minimumSize:
-                        const Size(
+                      onPressed: _login,
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(
                           double.infinity,
                           50,
                         ),
                       ),
-                      child:
-                      _isSubmitting
-                          ? const SizedBox(
-                        width:
-                        20,
-                        height:
-                        20,
-                        child:
-                        CircularProgressIndicator(
-                          strokeWidth:
-                          2,
-                          color: Colors
-                              .white,
-                        ),
-                      )
-                          : Text(
+                      child: Text(
                         'auth.sign_in'.tr(),
                       ),
                     ),
@@ -516,15 +470,9 @@ class _LoginScreenState extends State<LoginScreen>
 
                   _animated(
                     OutlinedButton(
-                      onPressed:
-                      _isSubmitting
-                          ? null
-                          : _signInAsGuest,
-                      style:
-                      OutlinedButton
-                          .styleFrom(
-                        minimumSize:
-                        const Size(
+                      onPressed: _signInAsGuest,
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(
                           double.infinity,
                           50,
                         ),
@@ -543,31 +491,23 @@ class _LoginScreenState extends State<LoginScreen>
                   _animated(
                     Row(
                       mainAxisAlignment:
-                      MainAxisAlignment
-                          .center,
+                      MainAxisAlignment.center,
                       children: [
                         Text(
                           'auth.no_account'.tr(),
                         ),
                         TextButton(
-                          onPressed:
-                          _isSubmitting
-                              ? null
-                              : () {
-                            Navigator.of(
-                              context,
-                            ).push(
+                          onPressed: () {
+                            Navigator.of(context).push(
                               MaterialPageRoute(
-                                builder:
-                                    (_) =>
+                                builder: (_) =>
                                 const RegisterScreen(),
                               ),
                             );
                           },
                           child: Text(
                             'auth.sign_up'.tr(),
-                            style:
-                            const TextStyle(
+                            style: const TextStyle(
                               fontWeight:
                               FontWeight.bold,
                             ),

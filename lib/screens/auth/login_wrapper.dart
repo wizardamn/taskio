@@ -11,6 +11,8 @@ import '../../utils/error_mapper.dart';
 import '../../utils/snackbar_manager.dart';
 import '../../utils/localization_helper.dart';
 
+import '../../widgets/project_list_skeleton.dart';
+
 import '../home/project_list_screen.dart';
 import 'login_screen.dart';
 
@@ -18,14 +20,11 @@ class LoginWrapper extends StatefulWidget {
   const LoginWrapper({super.key});
 
   @override
-  State<LoginWrapper> createState() =>
-      _LoginWrapperState();
+  State<LoginWrapper> createState() => _LoginWrapperState();
 }
 
-class _LoginWrapperState
-    extends State<LoginWrapper> {
-  final AuthService _authService =
-  AuthService();
+class _LoginWrapperState extends State<LoginWrapper> {
+  final AuthService _authService = AuthService();
 
   Future<void>? _profileFuture;
   String? _loadedUserId;
@@ -33,8 +32,7 @@ class _LoginWrapperState
 
   @override
   Widget build(BuildContext context) {
-    final authProvider =
-    context.watch<AuthProvider>();
+    final authProvider = context.watch<AuthProvider>();
 
     // =====================================================
     // GUEST MODE
@@ -43,11 +41,9 @@ class _LoginWrapperState
     if (authProvider.isGuest) {
       _resetState();
 
-      final projectProvider =
-      context.read<ProjectProvider>();
+      final projectProvider = context.read<ProjectProvider>();
 
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) async {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) {
           return;
         }
@@ -68,15 +64,12 @@ class _LoginWrapperState
     if (!authProvider.isAuthenticated) {
       _resetState();
 
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) {
           return;
         }
 
-        context
-            .read<ProjectProvider>()
-            .clear(
+        context.read<ProjectProvider>().clear(
           keepProjects: false,
         );
       });
@@ -84,12 +77,11 @@ class _LoginWrapperState
       return const LoginScreen();
     }
 
-    final currentUserId =
-        authProvider.userId;
+    final currentUserId = authProvider.userId;
 
-    if (currentUserId == null ||
-        currentUserId.isEmpty) {
+    if (currentUserId == null || currentUserId.isEmpty) {
       _resetState();
+
       return const LoginScreen();
     }
 
@@ -97,18 +89,15 @@ class _LoginWrapperState
     // LOAD PROFILE
     // =====================================================
 
-    if (_loadedUserId != currentUserId ||
-        _profileFuture == null) {
+    if (_loadedUserId != currentUserId || _profileFuture == null) {
       _loadedUserId = currentUserId;
-      _profileFuture =
-          _loadProfile(currentUserId);
+      _profileFuture = _loadProfile(currentUserId);
     }
 
     return FutureBuilder<void>(
       future: _profileFuture,
       builder: (context, snapshot) {
-        if (snapshot.connectionState ==
-            ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return _buildLoading();
         }
 
@@ -141,14 +130,9 @@ class _LoginWrapperState
   // LOAD PROFILE
   // =====================================================
 
-  Future<void> _loadProfile(
-      String userId,
-      ) async {
-    final authProvider =
-    context.read<AuthProvider>();
-
-    final projectProvider =
-    context.read<ProjectProvider>();
+  Future<void> _loadProfile(String userId) async {
+    final authProvider = context.read<AuthProvider>();
+    final projectProvider = context.read<ProjectProvider>();
 
     try {
       AppLogger.info(
@@ -156,8 +140,7 @@ class _LoginWrapperState
         tag: 'LoginWrapper',
       );
 
-      final profile =
-      await _authService.getProfile();
+      final profile = await _authService.getProfile();
 
       if (!mounted) {
         return;
@@ -173,13 +156,10 @@ class _LoginWrapperState
         );
       }
 
-      // language может быть nullable
-      final language =
-          profile.language?.trim() ?? '';
+      final language = profile.language?.trim() ?? '';
 
       if (language.isNotEmpty) {
-        await LocalizationHelper
-            .applySavedLanguage(
+        await LocalizationHelper.applySavedLanguage(
           context,
           language,
         );
@@ -189,22 +169,16 @@ class _LoginWrapperState
         return;
       }
 
-      String displayName =
-      profile.fullName.trim();
+      String displayName = profile.fullName.trim();
 
-      // username у тебя nullable
-      final username =
-          profile.username.trim();
+      final username = profile.username.trim();
 
-      if (displayName.isEmpty &&
-          username.isNotEmpty) {
+      if (displayName.isEmpty && username.isNotEmpty) {
         displayName = username;
       }
 
       if (displayName.isEmpty) {
-        displayName =
-            authProvider.user?.email ??
-                'common.user'.tr();
+        displayName = authProvider.user?.email ?? 'common.user'.tr();
       }
 
       await projectProvider.setUser(
@@ -230,8 +204,7 @@ class _LoginWrapperState
 
       _isSigningOut = true;
 
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) {
           return;
         }
@@ -257,19 +230,12 @@ class _LoginWrapperState
 
   Widget _buildLoading() {
     return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment:
-          MainAxisAlignment.center,
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 16),
-            Text(
-              'common.loading'.tr(),
-            ),
-          ],
+      appBar: AppBar(
+        title: Text(
+          'navigation.my_projects'.tr(),
         ),
       ),
+      body: const ProjectListSkeleton(),
     );
   }
 
