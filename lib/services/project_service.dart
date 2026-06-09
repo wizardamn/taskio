@@ -15,6 +15,8 @@ class ProjectService {
 
   final NotificationService _notifications = NotificationService();
 
+  static const String _invitationsTable = 'project_invitations';
+
   String? _currentUserId;
 
   // =========================================================
@@ -41,73 +43,6 @@ class ProjectService {
     Error.throwWithStackTrace(
       Exception('$operation: $e'),
       st,
-    );
-  }
-
-  // =========================================================
-  // NOTIFICATIONS
-  // =========================================================
-
-  Future<void> _notifyProjectCreated({
-    required String projectId,
-    required String projectTitle,
-  }) async {
-    await _notifications.showProjectUpdateNotification(
-      projectId: projectId,
-      title: 'Проект создан',
-      body: projectTitle,
-      payload: projectId,
-    );
-  }
-
-  Future<void> _notifyProjectUpdated({
-    required String projectId,
-    required String projectTitle,
-  }) async {
-    await _notifications.showProjectUpdateNotification(
-      projectId: projectId,
-      title: 'Проект обновлён',
-      body: projectTitle,
-      payload: projectId,
-    );
-  }
-
-  Future<void> _notifyProjectDeleted({
-    required String projectId,
-    required String projectTitle,
-  }) async {
-    await _notifications.showProjectUpdateNotification(
-      projectId: projectId,
-      title: 'Проект удалён',
-      body: projectTitle,
-      payload: projectId,
-    );
-  }
-
-  Future<void> _notifyAttachmentAdded({
-    required String projectId,
-    required String projectTitle,
-    required int count,
-  }) async {
-    await _notifications.showProjectUpdateNotification(
-      projectId: projectId,
-      title: 'Файлы добавлены',
-      body: count == 1
-          ? 'В проект "$projectTitle" добавлен файл'
-          : 'В проект "$projectTitle" добавлено файлов: $count',
-      payload: projectId,
-    );
-  }
-
-  Future<void> _notifyAttachmentDeleted({
-    required String projectId,
-    required String projectTitle,
-  }) async {
-    await _notifications.showProjectUpdateNotification(
-      projectId: projectId,
-      title: 'Файл удалён',
-      body: 'Из проекта "$projectTitle" удалён файл',
-      payload: projectId,
     );
   }
 
@@ -218,30 +153,17 @@ class ProjectService {
   }
 
   bool canEditProject(ProjectModel project) {
-    final userId = _currentUserId;
+    final role = _currentUserRole(project);
 
-    if (userId == null || userId.isEmpty) {
-      return false;
-    }
-
-    if (project.ownerId == userId) {
-      return true;
-    }
-
-    for (final participant in project.participantsData) {
-      if (participant.id != userId) {
-        continue;
-      }
-
-      return participant.role == ProjectRole.owner ||
-          participant.role == ProjectRole.editor;
-    }
-
-    return false;
+    return role == ProjectRole.owner ||
+        role == ProjectRole.editor;
   }
 
   bool canManageProjectContent(ProjectModel project) {
-    return isProjectMember(project);
+    final role = _currentUserRole(project);
+
+    return role == ProjectRole.owner ||
+        role == ProjectRole.editor;
   }
 
   bool canManageMembers(ProjectModel project) {
@@ -249,7 +171,7 @@ class ProjectService {
   }
 
   bool canGradeProject(ProjectModel project) {
-    return isOwner(project) || canEditProject(project);
+    return isOwner(project);
   }
 
   Future<bool> canEditProjectById(String projectId) async {
@@ -260,6 +182,26 @@ class ProjectService {
     }
 
     return canEditProject(project);
+  }
+
+  ProjectRole? _currentUserRole(ProjectModel project) {
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      return null;
+    }
+
+    if (project.ownerId == userId) {
+      return ProjectRole.owner;
+    }
+
+    for (final participant in project.participantsData) {
+      if (participant.id == userId) {
+        return participant.role;
+      }
+    }
+
+    return null;
   }
 
   // =========================================================
@@ -332,7 +274,7 @@ class ProjectService {
   }
 
   // =========================================================
-  // PROFILE ENRICHMENT FOR AVATARS
+  // PROFILE ENRICHMENT
   // =========================================================
 
   Future<List<ProjectModel>> _enrichProjectsWithProfiles(
@@ -650,6 +592,7 @@ class ProjectService {
   Map<String, dynamic> _projectJsonForDb(
       ProjectModel project, {
         String? ownerId,
+        bool includeOwnerSettings = true,
       }) {
     final source = Map<String, dynamic>.from(
       project.toJson(),
@@ -662,12 +605,17 @@ class ProjectService {
       'deadline',
       'status',
       'color',
-      'category',
-      'max_members',
-      'max_attachments',
-      'grading_enabled',
-      'grade',
     };
+
+    if (includeOwnerSettings) {
+      allowed.addAll({
+        'category',
+        'max_members',
+        'max_attachments',
+        'grading_enabled',
+        'grade',
+      });
+    }
 
     final json = <String, dynamic>{};
 
@@ -681,13 +629,22 @@ class ProjectService {
       json['owner_id'] = ownerId;
     }
 
+    if (!includeOwnerSettings) {
+      json.remove('owner_id');
+      json.remove('category');
+      json.remove('max_members');
+      json.remove('max_attachments');
+      json.remove('grading_enabled');
+      json.remove('grade');
+    }
+
     json.removeWhere((key, value) => value == null);
 
     return json;
   }
 
   // =========================================================
-  // SYNC PARTICIPANTS
+  // PARTICIPANTS / INVITATIONS
   // =========================================================
 
   Future<void> syncParticipants({
@@ -702,6 +659,10 @@ class ProjectService {
 
     try {
       final project = await getById(projectId);
+
+      if (project != null && !isOwner(project)) {
+        throw Exception('errors.no_permission');
+      }
 
       final roleById = <String, ProjectRole>{};
 
@@ -773,23 +734,39 @@ class ProjectService {
         );
       }
 
+      await _deletePendingInvitationsNotInTarget(
+        projectId: projectId,
+        targetIds: targetIds,
+      );
+
       final rowsToUpsert = <Map<String, dynamic>>[];
+      final idsToInvite = <String>{};
 
       for (final id in targetIds) {
-        final role = id == ownerId
-            ? ProjectRole.owner
-            : roleById[id] ??
+        if (id == ownerId) {
+          rowsToUpsert.add({
+            'project_id': projectId,
+            'member_id': id,
+            'role': ProjectRole.owner.value,
+          });
+
+          continue;
+        }
+
+        final role = roleById[id] ??
             ProjectRoleExtension.fromString(
               existingRoles[id],
             );
 
-        rowsToUpsert.add({
-          'project_id': projectId,
-          'member_id': id,
-          'role': id == ownerId
-              ? ProjectRole.owner.value
-              : _normalizeEditableRole(role).value,
-        });
+        if (existingIds.contains(id)) {
+          rowsToUpsert.add({
+            'project_id': projectId,
+            'member_id': id,
+            'role': _normalizeEditableRole(role).value,
+          });
+        } else {
+          idsToInvite.add(id);
+        }
       }
 
       if (rowsToUpsert.isNotEmpty) {
@@ -798,11 +775,374 @@ class ProjectService {
           onConflict: 'project_id,member_id',
         );
       }
+
+      if (project != null && idsToInvite.isNotEmpty) {
+        for (final invitedUserId in idsToInvite) {
+          final role = roleById[invitedUserId] ?? ProjectRole.viewer;
+
+          await inviteProjectMember(
+            projectId: projectId,
+            invitedUserId: invitedUserId,
+            role: _normalizeEditableRole(role),
+            project: project,
+          );
+        }
+      }
     } catch (e, st) {
       _handleError(
         e,
         st,
         'sync participants failed',
+      );
+    }
+  }
+
+  Future<void> _deletePendingInvitationsNotInTarget({
+    required String projectId,
+    required Set<String> targetIds,
+  }) async {
+    try {
+      final pendingRaw = await client
+          .from(_invitationsTable)
+          .select('invited_user_id')
+          .eq('project_id', projectId)
+          .eq('status', 'pending');
+
+      final pendingIds = List<Map<String, dynamic>>.from(pendingRaw)
+          .map((row) => row['invited_user_id']?.toString())
+          .whereType<String>()
+          .where((id) => id.isNotEmpty)
+          .toSet();
+
+      final toDelete = pendingIds.difference(targetIds);
+
+      if (toDelete.isEmpty) {
+        return;
+      }
+
+      await client
+          .from(_invitationsTable)
+          .delete()
+          .eq('project_id', projectId)
+          .eq('status', 'pending')
+          .inFilter(
+        'invited_user_id',
+        toDelete.toList(),
+      );
+    } catch (e) {
+      debugPrint(
+        '[ProjectService] pending invitations cleanup skipped: $e',
+      );
+    }
+  }
+
+  Future<void> inviteProjectMember({
+    required String projectId,
+    required String invitedUserId,
+    required ProjectRole role,
+    ProjectModel? project,
+  }) async {
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      throw Exception('errors.not_authenticated');
+    }
+
+    try {
+      final currentProject = project ?? await getById(projectId);
+
+      if (currentProject == null) {
+        throw Exception('errors.project_not_found');
+      }
+
+      if (!isOwner(currentProject)) {
+        throw Exception('errors.no_permission');
+      }
+
+      final normalizedRole = _normalizeEditableRole(role);
+
+      if (normalizedRole == ProjectRole.owner) {
+        throw Exception('errors.no_permission');
+      }
+
+      final normalizedInvitedUserId = invitedUserId.trim();
+
+      if (normalizedInvitedUserId.isEmpty ||
+          normalizedInvitedUserId == currentProject.ownerId) {
+        return;
+      }
+
+      final alreadyMember = currentProject.participantsData.any(
+            (participant) => participant.id == normalizedInvitedUserId,
+      );
+
+      if (alreadyMember) {
+        return;
+      }
+
+      final now = DateTime.now().toUtc().toIso8601String();
+
+      await client.from(_invitationsTable).upsert(
+        {
+          'project_id': currentProject.id,
+          'invited_user_id': normalizedInvitedUserId,
+          'invited_by': userId,
+          'role': normalizedRole.value,
+          'status': 'pending',
+          'created_at': now,
+          'responded_at': null,
+        },
+        onConflict: 'project_id,invited_user_id',
+      );
+
+      await _notifications.notifyProjectInvitation(
+        projectId: currentProject.id,
+        projectTitle: currentProject.title,
+        invitedUserId: normalizedInvitedUserId,
+        invitedBy: userId,
+      );
+    } catch (e, st) {
+      _handleError(
+        e,
+        st,
+        'invite project member failed',
+      );
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getMyPendingInvitations() async {
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      return [];
+    }
+
+    try {
+      final response = await client
+          .from(_invitationsTable)
+          .select(
+        '''
+            id,
+            project_id,
+            invited_user_id,
+            invited_by,
+            role,
+            status,
+            created_at,
+            responded_at,
+            projects:project_id (
+              id,
+              title,
+              description,
+              owner_id
+            )
+            ''',
+      )
+          .eq('invited_user_id', userId)
+          .eq('status', 'pending')
+          .order('created_at', ascending: false);
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e, st) {
+      _handleError(
+        e,
+        st,
+        'load pending invitations failed',
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>?> _getInvitationForCurrentUser(
+      String invitationId,
+      ) async {
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      throw Exception('errors.not_authenticated');
+    }
+
+    if (invitationId.trim().isEmpty) {
+      return null;
+    }
+
+    final invitation = await client
+        .from(_invitationsTable)
+        .select(
+      '''
+          id,
+          project_id,
+          invited_user_id,
+          invited_by,
+          role,
+          status,
+          created_at,
+          responded_at,
+          projects:project_id (
+            id,
+            title,
+            owner_id
+          )
+          ''',
+    )
+        .eq('id', invitationId)
+        .maybeSingle();
+
+    if (invitation == null) {
+      return null;
+    }
+
+    final data = Map<String, dynamic>.from(invitation);
+
+    final invitedUserId =
+        data['invited_user_id']?.toString().trim() ?? '';
+
+    if (invitedUserId != userId) {
+      throw Exception('errors.no_permission');
+    }
+
+    return data;
+  }
+
+  String _projectTitleFromInvitation(
+      Map<String, dynamic> invitation,
+      ) {
+    final projectRaw = invitation['projects'];
+
+    if (projectRaw is Map) {
+      final title = projectRaw['title']?.toString().trim();
+
+      if (title != null && title.isNotEmpty) {
+        return title;
+      }
+    }
+
+    return 'Проект';
+  }
+
+  Future<void> acceptInvitation(String invitationId) async {
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      throw Exception('errors.not_authenticated');
+    }
+
+    if (invitationId.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      final invitation = await _getInvitationForCurrentUser(
+        invitationId,
+      );
+
+      if (invitation == null) {
+        throw Exception('errors.project_not_found');
+      }
+
+      final status = invitation['status']?.toString() ?? '';
+
+      if (status != 'pending') {
+        return;
+      }
+
+      final projectId =
+          invitation['project_id']?.toString().trim() ?? '';
+
+      final invitedBy =
+      invitation['invited_by']?.toString().trim();
+
+      final projectTitle = _projectTitleFromInvitation(
+        invitation,
+      );
+
+      await client.rpc(
+        'accept_project_invitation',
+        params: {
+          'p_invitation_id': invitationId,
+        },
+      );
+
+      if (invitedBy != null && invitedBy.isNotEmpty) {
+        await _notifications.createProjectNotification(
+          recipientId: invitedBy,
+          senderId: userId,
+          projectId: projectId,
+          projectTitle: projectTitle,
+          type: 'member_invite_accepted',
+          title: 'Приглашение принято',
+          body:
+          'Пользователь принял приглашение в проект "$projectTitle"',
+        );
+      }
+    } catch (e, st) {
+      _handleError(
+        e,
+        st,
+        'accept invitation failed',
+      );
+    }
+  }
+
+  Future<void> declineInvitation(String invitationId) async {
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      throw Exception('errors.not_authenticated');
+    }
+
+    if (invitationId.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      final invitation = await _getInvitationForCurrentUser(
+        invitationId,
+      );
+
+      if (invitation == null) {
+        return;
+      }
+
+      final status = invitation['status']?.toString() ?? '';
+
+      if (status != 'pending') {
+        return;
+      }
+
+      final projectId =
+          invitation['project_id']?.toString().trim() ?? '';
+
+      final invitedBy =
+      invitation['invited_by']?.toString().trim();
+
+      final projectTitle = _projectTitleFromInvitation(
+        invitation,
+      );
+
+      await client.rpc(
+        'decline_project_invitation',
+        params: {
+          'p_invitation_id': invitationId,
+        },
+      );
+
+      if (invitedBy != null && invitedBy.isNotEmpty) {
+        await _notifications.createProjectNotification(
+          recipientId: invitedBy,
+          senderId: userId,
+          projectId: projectId,
+          projectTitle: projectTitle,
+          type: 'member_invite_declined',
+          title: 'Приглашение отклонено',
+          body:
+          'Пользователь отклонил приглашение в проект "$projectTitle"',
+        );
+      }
+    } catch (e, st) {
+      _handleError(
+        e,
+        st,
+        'decline invitation failed',
       );
     }
   }
@@ -851,9 +1191,11 @@ class ProjectService {
           .eq('project_id', projectId)
           .eq('member_id', memberId);
 
-      await _notifyProjectUpdated(
-        projectId: project.id,
-        projectTitle: project.title,
+      final fresh = await getById(projectId) ?? project;
+
+      await _notifications.notifyProjectUpdatedForMembers(
+        project: fresh,
+        senderId: userId,
       );
     } catch (e, st) {
       _handleError(
@@ -881,6 +1223,7 @@ class ProjectService {
       final json = _projectJsonForDb(
         project,
         ownerId: userId,
+        includeOwnerSettings: true,
       );
 
       final response = await client
@@ -911,9 +1254,11 @@ class ProjectService {
         throw Exception('errors.project_not_found');
       }
 
-      await _notifyProjectCreated(
+      await _notifications.showProjectUpdateNotification(
         projectId: created.id,
-        projectTitle: created.title,
+        title: 'Проект создан',
+        body: created.title,
+        payload: created.id,
       );
 
       return created;
@@ -948,31 +1293,77 @@ class ProjectService {
         throw Exception('errors.no_permission');
       }
 
-      final json = _projectJsonForDb(project);
+      final ownerUpdate = isOwner(dbProject);
+
+      final safeProject = ownerUpdate
+          ? project
+          : ProjectModel(
+        id: dbProject.id,
+        ownerId: dbProject.ownerId,
+        title: project.title,
+        description: project.description,
+        deadline: project.deadline,
+        createdAt: dbProject.createdAt,
+        status: project.status,
+        color: project.color,
+        category: dbProject.category,
+        maxMembers: dbProject.maxMembers,
+        maxAttachments: dbProject.maxAttachments,
+        gradingEnabled: dbProject.gradingEnabled,
+        participantsData: dbProject.participantsData,
+        attachments: dbProject.attachments,
+        totalTasks: dbProject.totalTasks,
+        completedTasks: dbProject.completedTasks,
+        lastMessage: dbProject.lastMessage,
+        lastMessageAt: dbProject.lastMessageAt,
+        unreadCount: dbProject.unreadCount,
+      );
+
+      final wasCompleted =
+          dbProject.statusEnum == ProjectStatus.completed;
+
+      final becameCompleted =
+          safeProject.statusEnum == ProjectStatus.completed;
+
+      final json = _projectJsonForDb(
+        safeProject,
+        includeOwnerSettings: ownerUpdate,
+      );
 
       await client
           .from('projects')
           .update(json)
-          .eq('id', project.id);
+          .eq('id', safeProject.id);
 
-      final participants = _normalizeProjectParticipants(
-        ownerId: dbProject.ownerId,
-        participants: project.participantsData,
-      );
+      if (ownerUpdate) {
+        final participants = _normalizeProjectParticipants(
+          ownerId: dbProject.ownerId,
+          participants: safeProject.participantsData,
+        );
 
-      await syncParticipants(
-        projectId: project.id,
-        ownerId: dbProject.ownerId,
-        participantIds: participants
-            .map((participant) => participant.id)
-            .toList(),
-        participants: participants,
-      );
+        await syncParticipants(
+          projectId: safeProject.id,
+          ownerId: dbProject.ownerId,
+          participantIds: participants
+              .map((participant) => participant.id)
+              .toList(),
+          participants: participants,
+        );
+      }
 
-      await _notifyProjectUpdated(
-        projectId: project.id,
-        projectTitle: project.title,
-      );
+      final fresh = await getById(safeProject.id) ?? safeProject;
+
+      if (!wasCompleted && becameCompleted) {
+        await _notifications.notifyProjectCompletedForMembers(
+          project: fresh,
+          senderId: userId,
+        );
+      } else {
+        await _notifications.notifyProjectUpdatedForMembers(
+          project: fresh,
+          senderId: userId,
+        );
+      }
     } catch (e, st) {
       _handleError(
         e,
@@ -1059,6 +1450,11 @@ class ProjectService {
         throw Exception('errors.no_permission');
       }
 
+      await _notifications.notifyProjectDeletedForMembers(
+        project: project,
+        senderId: userId,
+      );
+
       if (project.attachments.isNotEmpty) {
         final paths = project.attachments
             .map((attachment) => attachment.filePath)
@@ -1116,15 +1512,12 @@ class ProjectService {
         projectId: id,
       );
 
-      await _notifyProjectDeleted(
-        projectId: project.id,
-        projectTitle: project.title,
+      await _safeDeleteByProjectId(
+        table: _invitationsTable,
+        projectId: id,
       );
 
-      await client
-          .from('projects')
-          .delete()
-          .eq('id', id);
+      await client.from('projects').delete().eq('id', id);
     } catch (e, st) {
       _handleError(
         e,
@@ -1139,10 +1532,7 @@ class ProjectService {
     required String projectId,
   }) async {
     try {
-      await client
-          .from(table)
-          .delete()
-          .eq('project_id', projectId);
+      await client.from(table).delete().eq('project_id', projectId);
     } catch (e) {
       debugPrint(
         '[ProjectService] delete from $table skipped: $e',
@@ -1275,10 +1665,9 @@ class ProjectService {
       }
 
       if (uploaded.isNotEmpty) {
-        await _notifyAttachmentAdded(
-          projectId: project.id,
-          projectTitle: project.title,
-          count: uploaded.length,
+        await _notifications.notifyProjectUpdatedForMembers(
+          project: project,
+          senderId: userId,
         );
       }
 
@@ -1417,9 +1806,9 @@ class ProjectService {
           .eq('project_id', projectId)
           .eq('file_path', filePath);
 
-      await _notifyAttachmentDeleted(
-        projectId: project.id,
-        projectTitle: project.title,
+      await _notifications.notifyProjectUpdatedForMembers(
+        project: project,
+        senderId: userId,
       );
     } catch (e, st) {
       _handleError(

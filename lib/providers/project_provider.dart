@@ -44,6 +44,7 @@ class ProjectProvider extends ChangeNotifier {
   bool _isLoading = false;
   bool _disposed = false;
   bool _fetchQueued = false;
+  bool _isInvitationsLoading = false;
 
   String? _errorMessage;
   String? _currentProjectId;
@@ -54,6 +55,8 @@ class ProjectProvider extends ChangeNotifier {
   final Set<String> _completedShown = {};
 
   final List<ProjectModel> _projects = [];
+  final List<Map<String, dynamic>> _pendingInvitations = [];
+
   List<ProjectModel> _lastEmitted = [];
 
   SortBy _sortBy = SortBy.deadlineAsc;
@@ -66,10 +69,12 @@ class ProjectProvider extends ChangeNotifier {
   Timer? _messagesRefreshDebounce;
   Timer? _projectsRefreshDebounce;
   Timer? _tasksRefreshDebounce;
+  Timer? _invitationsRefreshDebounce;
 
   RealtimeChannel? _projectsChannel;
   RealtimeChannel? _messagesChannel;
   RealtimeChannel? _tasksChannel;
+  RealtimeChannel? _invitationsChannel;
 
   String? get currentProjectId => _currentProjectId;
 
@@ -79,9 +84,20 @@ class ProjectProvider extends ChangeNotifier {
 
   String get searchQuery => _searchQuery;
   bool get isLoading => _isLoading;
+  bool get isInvitationsLoading => _isInvitationsLoading;
   String? get errorMessage => _errorMessage;
 
   bool get isGuest => _userId == null;
+
+  List<Map<String, dynamic>> get pendingInvitations {
+    return List<Map<String, dynamic>>.unmodifiable(
+      _pendingInvitations,
+    );
+  }
+
+  int get pendingInvitationsCount {
+    return _pendingInvitations.length;
+  }
 
   String get currentUserName {
     return _currentUserName.isEmpty
@@ -158,9 +174,7 @@ class ProjectProvider extends ChangeNotifier {
         });
 
         final inFiles = project.attachments.any((attachment) {
-          return attachment.fileName
-              .toLowerCase()
-              .contains(query);
+          return attachment.fileName.toLowerCase().contains(query);
         });
 
         return inTitle ||
@@ -175,8 +189,7 @@ class ProjectProvider extends ChangeNotifier {
         result = result
             .where(
               (project) =>
-          project.statusEnum ==
-              ProjectStatus.inProgress,
+          project.statusEnum == ProjectStatus.inProgress,
         )
             .toList();
         break;
@@ -185,8 +198,7 @@ class ProjectProvider extends ChangeNotifier {
         result = result
             .where(
               (project) =>
-          project.statusEnum ==
-              ProjectStatus.completed,
+          project.statusEnum == ProjectStatus.completed,
         )
             .toList();
         break;
@@ -217,6 +229,7 @@ class ProjectProvider extends ChangeNotifier {
     _notifications.clearSettingsCache();
 
     _projects.clear();
+    _pendingInvitations.clear();
     _lastEmitted.clear();
     _completedShown.clear();
 
@@ -230,10 +243,12 @@ class ProjectProvider extends ChangeNotifier {
     _service.updateOwner(userId);
 
     await fetchProjects();
+    await fetchPendingInvitations();
 
     _subscribeRealtime();
     _subscribeMessagesRealtime();
     _subscribeTasksRealtime();
+    _subscribeInvitationsRealtime();
 
     _safeNotify();
   }
@@ -249,16 +264,19 @@ class ProjectProvider extends ChangeNotifier {
     _lastEmittedCurrentProjectId = null;
 
     _completedShown.clear();
+    _pendingInvitations.clear();
 
     _searchDebounce?.cancel();
     _messagesRefreshDebounce?.cancel();
     _projectsRefreshDebounce?.cancel();
     _tasksRefreshDebounce?.cancel();
+    _invitationsRefreshDebounce?.cancel();
 
     _searchDebounce = null;
     _messagesRefreshDebounce = null;
     _projectsRefreshDebounce = null;
     _tasksRefreshDebounce = null;
+    _invitationsRefreshDebounce = null;
 
     if (!keepProjects) {
       _projects.clear();
@@ -322,6 +340,125 @@ class ProjectProvider extends ChangeNotifier {
 
   Future<List<Map<String, dynamic>>> getAllUsers() {
     return getUsersForSelection();
+  }
+
+  // =========================================================
+  // INVITATIONS
+  // =========================================================
+
+  Future<void> fetchPendingInvitations() async {
+    if (_disposed || isGuest) {
+      return;
+    }
+
+    try {
+      _setInvitationsLoading(true);
+
+      final invitations =
+      await _service.getMyPendingInvitations();
+
+      _pendingInvitations
+        ..clear()
+        ..addAll(invitations);
+
+      _safeNotify();
+    } catch (e, st) {
+      _handleError(
+        e,
+        st,
+        'fetchPendingInvitations',
+      );
+    } finally {
+      _setInvitationsLoading(false);
+    }
+  }
+
+  Future<void> acceptInvitation(String invitationId) async {
+    if (isGuest) {
+      _denyGuest();
+      return;
+    }
+
+    if (invitationId.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      _setLoading(true);
+
+      await _service.acceptInvitation(invitationId);
+
+      _pendingInvitations.removeWhere(
+            (invitation) =>
+        invitation['id']?.toString() == invitationId,
+      );
+
+      await fetchProjects();
+      await fetchPendingInvitations();
+
+      SnackbarManager.showSuccess(
+        _localizedText(
+          ru: 'Приглашение принято',
+          en: 'Invitation accepted',
+        ),
+      );
+    } catch (e, st) {
+      _handleError(
+        e,
+        st,
+        'acceptInvitation',
+      );
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<void> declineInvitation(String invitationId) async {
+    if (isGuest) {
+      _denyGuest();
+      return;
+    }
+
+    if (invitationId.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      _setInvitationsLoading(true);
+
+      await _service.declineInvitation(invitationId);
+
+      _pendingInvitations.removeWhere(
+            (invitation) =>
+        invitation['id']?.toString() == invitationId,
+      );
+
+      await fetchPendingInvitations();
+
+      SnackbarManager.showSuccess(
+        _localizedText(
+          ru: 'Приглашение отклонено',
+          en: 'Invitation declined',
+        ),
+      );
+    } catch (e, st) {
+      _handleError(
+        e,
+        st,
+        'declineInvitation',
+      );
+    } finally {
+      _setInvitationsLoading(false);
+    }
+  }
+
+  String _localizedText({
+    required String ru,
+    required String en,
+  }) {
+    final locale = Intl.getCurrentLocale().toLowerCase();
+
+    return locale.startsWith('ru') ? ru : en;
   }
 
   // =========================================================
@@ -542,12 +679,17 @@ class ProjectProvider extends ChangeNotifier {
       return;
     }
 
+    final projectForUpdate = _prepareProjectForUpdate(
+      incoming: project,
+      current: current,
+    );
+
     try {
       _setLoading(true);
 
-      await _service.update(project);
+      await _service.update(projectForUpdate);
 
-      final fresh = await _service.getById(project.id);
+      final fresh = await _service.getById(projectForUpdate.id);
 
       if (fresh == null) {
         await fetchProjects();
@@ -555,7 +697,7 @@ class ProjectProvider extends ChangeNotifier {
       }
 
       final index = _projects.indexWhere(
-            (item) => item.id == project.id,
+            (item) => item.id == projectForUpdate.id,
       );
 
       if (index != -1) {
@@ -570,6 +712,8 @@ class ProjectProvider extends ChangeNotifier {
 
       await _syncProjectDeadlineNotification(fresh);
 
+      await fetchPendingInvitations();
+
       _emitIfChanged();
     } catch (e, st) {
       _handleError(
@@ -580,6 +724,37 @@ class ProjectProvider extends ChangeNotifier {
     } finally {
       _setLoading(false);
     }
+  }
+
+  ProjectModel _prepareProjectForUpdate({
+    required ProjectModel incoming,
+    required ProjectModel current,
+  }) {
+    if (isOwner(current)) {
+      return incoming;
+    }
+
+    return ProjectModel(
+      id: current.id,
+      ownerId: current.ownerId,
+      title: incoming.title,
+      description: incoming.description,
+      deadline: incoming.deadline,
+      createdAt: current.createdAt,
+      status: incoming.status,
+      color: incoming.color,
+      category: current.category,
+      maxMembers: current.maxMembers,
+      maxAttachments: current.maxAttachments,
+      gradingEnabled: current.gradingEnabled,
+      participantsData: current.participantsData,
+      attachments: current.attachments,
+      totalTasks: current.totalTasks,
+      completedTasks: current.completedTasks,
+      lastMessage: current.lastMessage,
+      lastMessageAt: current.lastMessageAt,
+      unreadCount: current.unreadCount,
+    );
   }
 
   // =========================================================
@@ -661,6 +836,8 @@ class ProjectProvider extends ChangeNotifier {
         projectId,
         makeCurrent: _currentProjectId == projectId,
       );
+
+      await fetchPendingInvitations();
     } catch (e, st) {
       _handleError(
         e,
@@ -804,8 +981,7 @@ class ProjectProvider extends ChangeNotifier {
         _projects[index] = current.copyWith(
           attachments: current.attachments
               .where(
-                (attachment) =>
-            attachment.filePath != filePath,
+                (attachment) => attachment.filePath != filePath,
           )
               .toList(),
         );
@@ -848,30 +1024,21 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   bool canEditProject(ProjectModel project) {
-    final userId = _userId;
+    final role = _currentUserRole(project);
 
-    if (userId == null || userId.isEmpty) {
-      return false;
-    }
-
-    if (project.ownerId == userId) {
-      return true;
-    }
-
-    for (final participant in project.participantsData) {
-      if (participant.id != userId) {
-        continue;
-      }
-
-      return participant.role == ProjectRole.owner ||
-          participant.role == ProjectRole.editor;
-    }
-
-    return false;
+    return role == ProjectRole.owner ||
+        role == ProjectRole.editor;
   }
 
   bool canManageProjectContent(ProjectModel project) {
-    return isProjectMember(project);
+    final role = _currentUserRole(project);
+
+    return role == ProjectRole.owner ||
+        role == ProjectRole.editor;
+  }
+
+  bool canEditOwnerSettings(ProjectModel project) {
+    return isOwner(project);
   }
 
   bool isOwner(ProjectModel project) {
@@ -893,7 +1060,27 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   bool canGradeProject(ProjectModel project) {
-    return isOwner(project) || canEditProject(project);
+    return isOwner(project);
+  }
+
+  ProjectRole? _currentUserRole(ProjectModel project) {
+    final userId = _userId;
+
+    if (userId == null || userId.isEmpty) {
+      return null;
+    }
+
+    if (project.ownerId == userId) {
+      return ProjectRole.owner;
+    }
+
+    for (final participant in project.participantsData) {
+      if (participant.id == userId) {
+        return participant.role;
+      }
+    }
+
+    return null;
   }
 
   ProjectModel? _findProject(String id) {
@@ -923,9 +1110,7 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   List<ProjectModel> _activeDeadlineProjects() {
-    return _projects
-        .where(_shouldScheduleDeadline)
-        .toList();
+    return _projects.where(_shouldScheduleDeadline).toList();
   }
 
   Future<void> _rescheduleProjectDeadlines() async {
@@ -1208,14 +1393,64 @@ class ProjectProvider extends ChangeNotifier {
     );
   }
 
+  void _subscribeInvitationsRealtime() {
+    if (_userId == null || _disposed) {
+      return;
+    }
+
+    _invitationsChannel = SupabaseService.client.channel(
+      'project_invitations_user_$_userId',
+    );
+
+    void scheduleRefresh() {
+      _invitationsRefreshDebounce?.cancel();
+
+      _invitationsRefreshDebounce = Timer(
+        const Duration(milliseconds: 400),
+            () async {
+          if (_disposed) {
+            return;
+          }
+
+          await fetchPendingInvitations();
+          await fetchProjects();
+        },
+      );
+    }
+
+    _invitationsChannel!.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'project_invitations',
+      callback: (_) {
+        scheduleRefresh();
+      },
+    );
+
+    _invitationsChannel!.subscribe(
+          (status, [error]) {
+        if (status == RealtimeSubscribeStatus.channelError ||
+            status == RealtimeSubscribeStatus.timedOut) {
+          AppLogger.error(
+            'Invitations realtime error',
+            error: error,
+            tag: 'ProjectProvider',
+          );
+        }
+      },
+    );
+  }
+
   void _removeRealtime() {
     final projectsChannel = _projectsChannel;
     final messagesChannel = _messagesChannel;
     final tasksChannel = _tasksChannel;
+    final invitationsChannel = _invitationsChannel;
 
     _projectsChannel = null;
     _messagesChannel = null;
     _tasksChannel = null;
+    _invitationsChannel = null;
 
     if (projectsChannel != null) {
       unawaited(
@@ -1240,6 +1475,14 @@ class ProjectProvider extends ChangeNotifier {
         ),
       );
     }
+
+    if (invitationsChannel != null) {
+      unawaited(
+        SupabaseService.client.removeChannel(
+          invitationsChannel,
+        ),
+      );
+    }
   }
 
   // =========================================================
@@ -1251,8 +1494,7 @@ class ProjectProvider extends ChangeNotifier {
       final completed = project.totalTasks > 0 &&
           project.completedTasks == project.totalTasks;
 
-      if (!completed ||
-          _completedShown.contains(project.id)) {
+      if (!completed || _completedShown.contains(project.id)) {
         continue;
       }
 
@@ -1382,6 +1624,16 @@ class ProjectProvider extends ChangeNotifier {
     _safeNotify();
   }
 
+  void _setInvitationsLoading(bool value) {
+    if (_isInvitationsLoading == value) {
+      return;
+    }
+
+    _isInvitationsLoading = value;
+
+    _safeNotify();
+  }
+
   void _denyGuest() {
     SnackbarManager.showError(
       'projects.operation_denied_guest'.tr(),
@@ -1431,13 +1683,16 @@ class ProjectProvider extends ChangeNotifier {
     _messagesRefreshDebounce?.cancel();
     _projectsRefreshDebounce?.cancel();
     _tasksRefreshDebounce?.cancel();
+    _invitationsRefreshDebounce?.cancel();
 
     _searchDebounce = null;
     _messagesRefreshDebounce = null;
     _projectsRefreshDebounce = null;
     _tasksRefreshDebounce = null;
+    _invitationsRefreshDebounce = null;
 
     _completedShown.clear();
+    _pendingInvitations.clear();
 
     _removeRealtime();
 

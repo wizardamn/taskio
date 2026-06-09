@@ -19,6 +19,8 @@ import '../../widgets/project_card.dart';
 import '../../widgets/project_list_skeleton.dart';
 import '../../widgets/user_profile_drawer.dart';
 
+import '../notifications/notifications_screen.dart';
+
 import 'project_chat_screen.dart';
 import 'project_form_screen.dart';
 
@@ -46,13 +48,19 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   void initState() {
     super.initState();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) {
         return;
       }
 
       final authProv = context.read<AuthProvider>();
+      final projectProv = context.read<ProjectProvider>();
+
       _syncUnreadStream(authProv);
+
+      if (!authProv.isGuest) {
+        await projectProv.fetchPendingInvitations();
+      }
     });
   }
 
@@ -67,9 +75,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   // =========================================================
 
   void _syncUnreadStream(AuthProvider authProv) {
-    final requestedUserId = authProv.isGuest
-        ? null
-        : authProv.userId;
+    final requestedUserId = authProv.isGuest ? null : authProv.userId;
 
     if (_unreadUserId == requestedUserId) {
       return;
@@ -90,9 +96,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
 
       final currentAuth = context.read<AuthProvider>();
 
-      final currentUserId = currentAuth.isGuest
-          ? null
-          : currentAuth.userId;
+      final currentUserId = currentAuth.isGuest ? null : currentAuth.userId;
 
       if (_unreadUserId == currentUserId) {
         return;
@@ -143,6 +147,32 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   // =========================================================
   // NAVIGATION
   // =========================================================
+
+  Future<void> _openNotifications() async {
+    final authProv = context.read<AuthProvider>();
+
+    if (authProv.isGuest) {
+      SnackbarManager.showWarning(
+        'projects.operation_denied_guest'.tr(),
+      );
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const NotificationsScreen(),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    final provider = context.read<ProjectProvider>();
+
+    await provider.fetchPendingInvitations();
+    await provider.fetchProjects();
+  }
 
   Future<void> _openProject(ProjectModel project) async {
     final provider = context.read<ProjectProvider>();
@@ -238,6 +268,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
 
       if (created == true) {
         await prov.fetchProjects();
+        await prov.fetchPendingInvitations();
 
         final currentProject = prov.currentProject;
 
@@ -289,18 +320,13 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                   controller: controller,
                   padding: const EdgeInsets.all(16),
                   child: Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         'filter.title'.tr(),
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge,
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
-
                       const SizedBox(height: 16),
-
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
@@ -309,9 +335,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                             label: Text(
                               'filter.all'.tr(),
                             ),
-                            selected:
-                            prov.filter ==
-                                ProjectFilter.all,
+                            selected: prov.filter == ProjectFilter.all,
                             onSelected: (_) {
                               prov.setFilter(
                                 ProjectFilter.all,
@@ -320,37 +344,29 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                               setModalState(() {});
                             },
                           ),
-
                           ChoiceChip(
                             label: Text(
                               'filter.in_progress'.tr(),
                             ),
-                            selected:
-                            prov.filter ==
-                                ProjectFilter
-                                    .inProgressOnly,
+                            selected: prov.filter ==
+                                ProjectFilter.inProgressOnly,
                             onSelected: (_) {
                               prov.setFilter(
-                                ProjectFilter
-                                    .inProgressOnly,
+                                ProjectFilter.inProgressOnly,
                               );
 
                               setModalState(() {});
                             },
                           ),
-
                           ChoiceChip(
                             label: Text(
                               'filter.completed'.tr(),
                             ),
-                            selected:
-                            prov.filter ==
-                                ProjectFilter
-                                    .completedOnly,
+                            selected: prov.filter ==
+                                ProjectFilter.completedOnly,
                             onSelected: (_) {
                               prov.setFilter(
-                                ProjectFilter
-                                    .completedOnly,
+                                ProjectFilter.completedOnly,
                               );
 
                               setModalState(() {});
@@ -358,18 +374,12 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                           ),
                         ],
                       ),
-
                       const SizedBox(height: 32),
-
                       Text(
                         'projects.deadline'.tr(),
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium,
+                        style: Theme.of(context).textTheme.titleMedium,
                       ),
-
                       const SizedBox(height: 12),
-
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
@@ -378,8 +388,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                             label: Text(
                               'deadline_filter.all'.tr(),
                             ),
-                            selected:
-                            prov.deadlineFilter ==
+                            selected: prov.deadlineFilter ==
                                 DeadlineFilter.all,
                             onSelected: (_) {
                               prov.setDeadlineFilter(
@@ -389,13 +398,11 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                               setModalState(() {});
                             },
                           ),
-
                           ChoiceChip(
                             label: Text(
                               'deadline_filter.today'.tr(),
                             ),
-                            selected:
-                            prov.deadlineFilter ==
+                            selected: prov.deadlineFilter ==
                                 DeadlineFilter.today,
                             onSelected: (_) {
                               prov.setDeadlineFilter(
@@ -405,13 +412,11 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                               setModalState(() {});
                             },
                           ),
-
                           ChoiceChip(
                             label: Text(
                               'deadline_filter.week'.tr(),
                             ),
-                            selected:
-                            prov.deadlineFilter ==
+                            selected: prov.deadlineFilter ==
                                 DeadlineFilter.week,
                             onSelected: (_) {
                               prov.setDeadlineFilter(
@@ -421,13 +426,11 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                               setModalState(() {});
                             },
                           ),
-
                           ChoiceChip(
                             label: Text(
                               'deadline_filter.overdue'.tr(),
                             ),
-                            selected:
-                            prov.deadlineFilter ==
+                            selected: prov.deadlineFilter ==
                                 DeadlineFilter.overdue,
                             onSelected: (_) {
                               prov.setDeadlineFilter(
@@ -439,18 +442,12 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                           ),
                         ],
                       ),
-
                       const SizedBox(height: 32),
-
                       Text(
                         'sorting.title'.tr(),
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium,
+                        style: Theme.of(context).textTheme.titleMedium,
                       ),
-
                       const SizedBox(height: 12),
-
                       Card(
                         child: Column(
                           children: [
@@ -461,9 +458,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                               title: Text(
                                 'sorting.nearest'.tr(),
                               ),
-                              trailing:
-                              prov.sortBy ==
-                                  SortBy.deadlineAsc
+                              trailing: prov.sortBy == SortBy.deadlineAsc
                                   ? const Icon(
                                 Icons.check,
                               )
@@ -476,7 +471,6 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                                 Navigator.pop(context);
                               },
                             ),
-
                             ListTile(
                               leading: const Icon(
                                 Icons.schedule_send,
@@ -484,9 +478,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                               title: Text(
                                 'sorting.farthest'.tr(),
                               ),
-                              trailing:
-                              prov.sortBy ==
-                                  SortBy.deadlineDesc
+                              trailing: prov.sortBy == SortBy.deadlineDesc
                                   ? const Icon(
                                 Icons.check,
                               )
@@ -499,7 +491,6 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                                 Navigator.pop(context);
                               },
                             ),
-
                             ListTile(
                               leading: const Icon(
                                 Icons.sort_by_alpha,
@@ -507,8 +498,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                               title: Text(
                                 'sorting.by_title'.tr(),
                               ),
-                              trailing:
-                              prov.sortBy == SortBy.title
+                              trailing: prov.sortBy == SortBy.title
                                   ? const Icon(
                                 Icons.check,
                               )
@@ -521,7 +511,6 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                                 Navigator.pop(context);
                               },
                             ),
-
                             ListTile(
                               leading: const Icon(
                                 Icons.flag,
@@ -529,8 +518,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                               title: Text(
                                 'sorting.by_status'.tr(),
                               ),
-                              trailing:
-                              prov.sortBy == SortBy.status
+                              trailing: prov.sortBy == SortBy.status
                                   ? const Icon(
                                 Icons.check,
                               )
@@ -546,9 +534,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                           ],
                         ),
                       ),
-
                       const SizedBox(height: 24),
-
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton.icon(
@@ -564,7 +550,6 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                           ),
                         ),
                       ),
-
                       const SizedBox(height: 24),
                     ],
                   ),
@@ -619,7 +604,6 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
             );
           },
         ),
-
         title: AnimatedSwitcher(
           duration: const Duration(
             milliseconds: 250,
@@ -640,7 +624,6 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
             key: const ValueKey('title'),
           ),
         ),
-
         actions: [
           if (!_isSearching)
             IconButton(
@@ -653,7 +636,6 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                 });
               },
             ),
-
           if (!_isSearching)
             IconButton(
               icon: const Icon(
@@ -666,17 +648,21 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                 );
               },
             ),
+          if (!_isSearching && !isGuest)
+            _NotificationsIconButton(
+              count: prov.pendingInvitationsCount,
+              onPressed: _openNotifications,
+            ),
         ],
       ),
-
       drawer: const UserProfileDrawer(),
-
       body: prov.isLoading && projects.isEmpty
           ? const ProjectListSkeleton()
           : RefreshIndicator(
         onRefresh: () async {
           if (!isGuest) {
             await prov.fetchProjects();
+            await prov.fetchPendingInvitations();
           }
         },
         child: projects.isEmpty
@@ -686,7 +672,6 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
           authProv,
         ),
       ),
-
       floatingActionButton: isGuest
           ? null
           : FloatingActionButton(
@@ -730,8 +715,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
     return StreamBuilder<Map<String, int>>(
       stream: _unreadStream,
       builder: (context, snapshot) {
-        final unreadMap =
-            snapshot.data ?? const <String, int>{};
+        final unreadMap = snapshot.data ?? const <String, int>{};
 
         final totalUnread = unreadMap.values.fold<int>(
           0,
@@ -769,17 +753,13 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
       itemBuilder: (context, index) {
         final project = projects[index];
 
-        final isOwner =
-            project.ownerId == authProv.userId;
+        final isOwner = project.ownerId == authProv.userId;
 
-        final canOpen =
-        provider.canOpenProject(project);
+        final canOpen = provider.canOpenProject(project);
 
-        final canEdit =
-        provider.canEditProject(project);
+        final canEdit = provider.canEditProject(project);
 
-        final unreadCount =
-            unreadMap[project.id] ?? 0;
+        final unreadCount = unreadMap[project.id] ?? 0;
 
         if (!canOpen) {
           return const SizedBox.shrink();
@@ -830,6 +810,68 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
         )
             .slideX(begin: 0.1);
       },
+    );
+  }
+}
+
+// =========================================================
+// NOTIFICATIONS ICON BUTTON
+// =========================================================
+
+class _NotificationsIconButton extends StatelessWidget {
+  final int count;
+  final VoidCallback onPressed;
+
+  const _NotificationsIconButton({
+    required this.count,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        IconButton(
+          tooltip: context.locale.languageCode == 'ru'
+              ? 'Уведомления'
+              : 'Notifications',
+          onPressed: onPressed,
+          icon: const Icon(
+            Icons.notifications_none_outlined,
+          ),
+        ),
+        if (count > 0)
+          Positioned(
+            right: 6,
+            top: 6,
+            child: Container(
+              constraints: const BoxConstraints(
+                minWidth: 18,
+                minHeight: 18,
+              ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 5,
+                vertical: 2,
+              ),
+              decoration: BoxDecoration(
+                color: colorScheme.error,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                count > 99 ? '99+' : count.toString(),
+                style: TextStyle(
+                  color: colorScheme.onError,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

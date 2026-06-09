@@ -14,7 +14,7 @@ enum MessageStatus {
 
 extension MessageStatusExtension on MessageStatus {
   static MessageStatus fromString(String? value) {
-    switch (value) {
+    switch (value?.trim()) {
       case 'sending':
         return MessageStatus.sending;
       case 'failed':
@@ -33,6 +33,9 @@ class MessageModel {
   final String projectId;
   final String senderId;
   final String senderName;
+
+  /// Sender avatar from profiles.avatar_url.
+  final String? senderAvatarUrl;
 
   final String content;
   final DateTime createdAt;
@@ -75,6 +78,7 @@ class MessageModel {
     required this.projectId,
     required this.senderId,
     required this.senderName,
+    this.senderAvatarUrl,
     required this.content,
     required this.createdAt,
     this.type = MessageType.text,
@@ -107,18 +111,65 @@ class MessageModel {
   bool get isText => type == MessageType.text;
   bool get isEdited => editedAt != null;
 
-  bool get hasReply => replyToMessageId != null;
+  bool get hasReply {
+    final id = replyToMessageId?.trim();
+
+    return id != null && id.isNotEmpty;
+  }
+
+  bool get hasSenderAvatar {
+    final avatar = senderAvatarUrl?.trim();
+
+    return avatar != null && avatar.isNotEmpty;
+  }
 
   bool get isReplyImage {
+    if (replyType == MessageType.file) {
+      return false;
+    }
+
     if (replyType == MessageType.image) {
       return true;
     }
 
-    final value = replyPreviewUrl ?? replyPreview ?? '';
-    return _looksLikeImageUrl(value);
+    final mime = replyMimeType?.trim().toLowerCase();
+
+    if (mime != null && mime.isNotEmpty) {
+      return mime.startsWith('image/');
+    }
+
+    final name = replyFileName?.trim();
+
+    if (name != null && name.isNotEmpty) {
+      return _looksLikeImageFileName(name);
+    }
+
+    return false;
   }
 
-  bool get isReplyFile => replyType == MessageType.file;
+  bool get isReplyFile {
+    if (replyType == MessageType.file) {
+      return true;
+    }
+
+    if (replyType == MessageType.image) {
+      return false;
+    }
+
+    final name = replyFileName?.trim();
+
+    if (name != null && name.isNotEmpty) {
+      return !_looksLikeImageFileName(name);
+    }
+
+    final mime = replyMimeType?.trim().toLowerCase();
+
+    if (mime != null && mime.isNotEmpty) {
+      return !mime.startsWith('image/') && mime != 'text/plain';
+    }
+
+    return false;
+  }
 
   String get displayContent {
     if (isDeleted) {
@@ -128,8 +179,9 @@ class MessageModel {
     return content;
   }
 
-  String get dateKey =>
-      '${createdAt.year}-${createdAt.month}-${createdAt.day}';
+  String get dateKey {
+    return '${createdAt.year}-${createdAt.month}-${createdAt.day}';
+  }
 
   String get previewText {
     if (isDeleted) {
@@ -141,8 +193,10 @@ class MessageModel {
         return 'chat.photo'.tr();
 
       case MessageType.file:
-        return fileName != null && fileName!.isNotEmpty
-            ? '📎 $fileName'
+        final name = fileName?.trim();
+
+        return name != null && name.isNotEmpty
+            ? '📎 $name'
             : 'chat.file'.tr();
 
       case MessageType.text:
@@ -156,11 +210,11 @@ class MessageModel {
     }
 
     if (replyType == MessageType.file) {
-      if (replyFileName != null && replyFileName!.trim().isNotEmpty) {
-        return '📎 $replyFileName';
-      }
+      final name = replyFileName?.trim();
 
-      return 'chat.file'.tr();
+      return name != null && name.isNotEmpty
+          ? '📎 $name'
+          : 'chat.file'.tr();
     }
 
     final text = replyPreview?.trim() ?? '';
@@ -172,9 +226,15 @@ class MessageModel {
     return _shorten(text);
   }
 
-  String get replyRawContent => replyPreview?.trim() ?? '';
+  String get replyRawContent {
+    return replyPreview?.trim() ?? '';
+  }
 
   String get replyImageUrl {
+    if (!isReplyImage) {
+      return '';
+    }
+
     final url = replyPreviewUrl?.trim();
 
     if (url != null && url.isNotEmpty) {
@@ -189,7 +249,7 @@ class MessageModel {
       return '';
     }
 
-    final name = replySenderName ?? '';
+    final name = replySenderName?.trim() ?? '';
 
     if (name.isEmpty) {
       return replyText;
@@ -217,27 +277,31 @@ class MessageModel {
         json,
         profile,
       ),
+      senderAvatarUrl: _extractSenderAvatarUrl(
+        json,
+        profile,
+      ),
       content: json['content']?.toString() ?? '',
       createdAt: _parseDate(json['created_at']),
       type: _parseType(json['type']),
       isRead: isRead,
-      originalLanguage: json['original_language']?.toString(),
-      translatedContent: json['translated_content']?.toString(),
+      originalLanguage: _emptyToNull(json['original_language']),
+      translatedContent: _emptyToNull(json['translated_content']),
       editedAt: _parseDateNullable(
         json['edited_at'],
       ),
       isDeleted: json['is_deleted'] == true,
-      replyToMessageId: json['reply_to_message_id']?.toString(),
+      replyToMessageId: _emptyToNull(json['reply_to_message_id']),
       replyPreview: _extractReplyPreview(replyData),
       replySenderName: _extractReplySender(replyData),
       replyType: _extractReplyType(replyData),
       replyFileName: _extractReplyFileName(replyData),
       replyPreviewUrl: _extractReplyPreviewUrl(replyData),
       replyMimeType: _extractReplyMimeType(replyData),
-      fileName: json['file_name']?.toString(),
+      fileName: _emptyToNull(json['file_name']),
       fileSize: _parseInt(json['file_size']),
-      mimeType: json['mime_type']?.toString(),
-      previewUrl: json['preview_url']?.toString(),
+      mimeType: _emptyToNull(json['mime_type']),
+      previewUrl: _emptyToNull(json['preview_url']),
       status: MessageStatusExtension.fromString(
         json['status']?.toString(),
       ),
@@ -273,6 +337,8 @@ class MessageModel {
   // =====================================================
 
   MessageModel copyWith({
+    String? senderName,
+    String? senderAvatarUrl,
     String? content,
     bool? isRead,
     DateTime? editedAt,
@@ -291,7 +357,8 @@ class MessageModel {
       id: id,
       projectId: projectId,
       senderId: senderId,
-      senderName: senderName,
+      senderName: senderName ?? this.senderName,
+      senderAvatarUrl: senderAvatarUrl ?? this.senderAvatarUrl,
       content: content ?? this.content,
       createdAt: createdAt,
       type: type,
@@ -324,10 +391,44 @@ class MessageModel {
       Map<String, dynamic> json,
       Map<String, dynamic>? profile,
       ) {
-    return profile?['full_name']?.toString() ??
-        profile?['username']?.toString() ??
-        json['sender_name']?.toString() ??
-        'Unknown';
+    final fullName = profile?['full_name']?.toString().trim();
+
+    if (fullName != null && fullName.isNotEmpty) {
+      return fullName;
+    }
+
+    final username = profile?['username']?.toString().trim();
+
+    if (username != null && username.isNotEmpty) {
+      return username;
+    }
+
+    final senderName = json['sender_name']?.toString().trim();
+
+    if (senderName != null && senderName.isNotEmpty) {
+      return senderName;
+    }
+
+    return 'Unknown';
+  }
+
+  static String? _extractSenderAvatarUrl(
+      Map<String, dynamic> json,
+      Map<String, dynamic>? profile,
+      ) {
+    final profileAvatar = profile?['avatar_url']?.toString().trim();
+
+    if (profileAvatar != null && profileAvatar.isNotEmpty) {
+      return profileAvatar;
+    }
+
+    final avatar = json['sender_avatar_url']?.toString().trim();
+
+    if (avatar != null && avatar.isNotEmpty) {
+      return avatar;
+    }
+
+    return null;
   }
 
   static Map<String, dynamic>? _extractReplyData(
@@ -339,11 +440,19 @@ class MessageModel {
       return reply;
     }
 
+    if (reply is Map) {
+      return Map<String, dynamic>.from(reply);
+    }
+
     if (reply is List && reply.isNotEmpty) {
       final first = reply.first;
 
       if (first is Map<String, dynamic>) {
         return first;
+      }
+
+      if (first is Map) {
+        return Map<String, dynamic>.from(first);
       }
     }
 
@@ -360,16 +469,16 @@ class MessageModel {
     final type = _parseType(replyData['type']);
 
     if (type == MessageType.image) {
-      return replyData['preview_url']?.toString() ??
-          replyData['content']?.toString();
+      return _emptyToNull(replyData['preview_url']) ??
+          _emptyToNull(replyData['content']);
     }
 
     if (type == MessageType.file) {
-      return replyData['file_name']?.toString() ??
-          replyData['content']?.toString();
+      return _emptyToNull(replyData['file_name']) ??
+          _emptyToNull(replyData['content']);
     }
 
-    return replyData['content']?.toString();
+    return _emptyToNull(replyData['content']);
   }
 
   static String? _extractReplySender(
@@ -382,17 +491,43 @@ class MessageModel {
     final profile = replyData['profiles'];
 
     if (profile is Map<String, dynamic>) {
-      return profile['full_name']?.toString() ??
-          profile['username']?.toString();
+      return _profileName(profile);
+    }
+
+    if (profile is Map) {
+      return _profileName(
+        Map<String, dynamic>.from(profile),
+      );
     }
 
     if (profile is List && profile.isNotEmpty) {
       final first = profile.first;
 
       if (first is Map<String, dynamic>) {
-        return first['full_name']?.toString() ??
-            first['username']?.toString();
+        return _profileName(first);
       }
+
+      if (first is Map) {
+        return _profileName(
+          Map<String, dynamic>.from(first),
+        );
+      }
+    }
+
+    return null;
+  }
+
+  static String? _profileName(Map<String, dynamic> profile) {
+    final fullName = profile['full_name']?.toString().trim();
+
+    if (fullName != null && fullName.isNotEmpty) {
+      return fullName;
+    }
+
+    final username = profile['username']?.toString().trim();
+
+    if (username != null && username.isNotEmpty) {
+      return username;
     }
 
     return null;
@@ -415,7 +550,7 @@ class MessageModel {
       return null;
     }
 
-    return replyData['file_name']?.toString();
+    return _emptyToNull(replyData['file_name']);
   }
 
   static String? _extractReplyPreviewUrl(
@@ -425,8 +560,14 @@ class MessageModel {
       return null;
     }
 
-    return replyData['preview_url']?.toString() ??
-        replyData['content']?.toString();
+    final type = _parseType(replyData['type']);
+
+    if (type != MessageType.image) {
+      return null;
+    }
+
+    return _emptyToNull(replyData['preview_url']) ??
+        _emptyToNull(replyData['content']);
   }
 
   static String? _extractReplyMimeType(
@@ -436,7 +577,7 @@ class MessageModel {
       return null;
     }
 
-    return replyData['mime_type']?.toString();
+    return _emptyToNull(replyData['mime_type']);
   }
 
   static Map<String, dynamic>? _extractProfile(
@@ -448,11 +589,19 @@ class MessageModel {
       return raw;
     }
 
+    if (raw is Map) {
+      return Map<String, dynamic>.from(raw);
+    }
+
     if (raw is List && raw.isNotEmpty) {
       final first = raw.first;
 
       if (first is Map<String, dynamic>) {
         return first;
+      }
+
+      if (first is Map) {
+        return Map<String, dynamic>.from(first);
       }
     }
 
@@ -507,7 +656,7 @@ class MessageModel {
   }
 
   static MessageType _parseType(dynamic value) {
-    switch (value?.toString()) {
+    switch (value?.toString().trim()) {
       case 'image':
         return MessageType.image;
       case 'file':
@@ -516,6 +665,16 @@ class MessageModel {
       default:
         return MessageType.text;
     }
+  }
+
+  static String? _emptyToNull(dynamic value) {
+    final text = value?.toString().trim();
+
+    if (text == null || text.isEmpty) {
+      return null;
+    }
+
+    return text;
   }
 
   static String _shorten(String value) {
@@ -528,20 +687,16 @@ class MessageModel {
     return '${text.substring(0, 40)}...';
   }
 
-  static bool _looksLikeImageUrl(String value) {
-    final lower = value.toLowerCase();
+  static bool _looksLikeImageFileName(String value) {
+    final lower = value.toLowerCase().trim();
 
-    if (lower.isEmpty) {
-      return false;
-    }
-
-    return lower.startsWith('http') &&
-        (lower.contains('.jpg') ||
-            lower.contains('.jpeg') ||
-            lower.contains('.png') ||
-            lower.contains('.gif') ||
-            lower.contains('.webp') ||
-            lower.contains('/storage/') ||
-            lower.contains('supabase'));
+    return lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg') ||
+        lower.endsWith('.png') ||
+        lower.endsWith('.gif') ||
+        lower.endsWith('.webp') ||
+        lower.endsWith('.bmp') ||
+        lower.endsWith('.heic') ||
+        lower.endsWith('.heif');
   }
 }

@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../models/project_model.dart';
+import 'notification_service.dart';
 import 'supabase_service.dart';
 
 class ProjectGrade {
@@ -95,6 +97,8 @@ class ProjectGrade {
 class GradeService {
   final SupabaseClient _client = SupabaseService.client;
 
+  final NotificationService _notifications = NotificationService();
+
   // =========================================================
   // ERROR
   // =========================================================
@@ -113,11 +117,75 @@ class GradeService {
   }
 
   // =========================================================
+  // CURRENT USER
+  // =========================================================
+
+  String? get _currentUserId {
+    return _client.auth.currentUser?.id;
+  }
+
+  // =========================================================
+  // PROJECT
+  // =========================================================
+
+  Future<ProjectModel?> _getProject(String projectId) async {
+    final normalizedProjectId = projectId.trim();
+
+    if (normalizedProjectId.isEmpty) {
+      return null;
+    }
+
+    try {
+      final data = await _client
+          .from('projects_view')
+          .select()
+          .eq('id', normalizedProjectId)
+          .maybeSingle();
+
+      if (data == null) {
+        return null;
+      }
+
+      return ProjectModel.fromJson(
+        Map<String, dynamic>.from(data),
+      );
+    } catch (e, st) {
+      _handleError(
+        e,
+        st,
+        'project.load_error',
+      );
+    }
+  }
+
+  Future<ProjectModel> _requireProjectOwner(String projectId) async {
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      throw Exception('errors.not_authenticated');
+    }
+
+    final project = await _getProject(projectId);
+
+    if (project == null) {
+      throw Exception('errors.project_not_found');
+    }
+
+    if (project.ownerId != userId) {
+      throw Exception('errors.no_permission');
+    }
+
+    return project;
+  }
+
+  // =========================================================
   // GET GRADE
   // =========================================================
 
   Future<ProjectGrade?> getGrade(String projectId) async {
-    if (projectId.trim().isEmpty) {
+    final normalizedProjectId = projectId.trim();
+
+    if (normalizedProjectId.isEmpty) {
       return null;
     }
 
@@ -135,7 +203,7 @@ class GradeService {
             updated_at
             ''',
       )
-          .eq('project_id', projectId)
+          .eq('project_id', normalizedProjectId)
           .order(
         'updated_at',
         ascending: false,
@@ -168,13 +236,15 @@ class GradeService {
     required int grade,
     String? comment,
   }) async {
-    final userId = _client.auth.currentUser?.id;
+    final userId = _currentUserId;
 
     if (userId == null || userId.isEmpty) {
       throw Exception('errors.not_authenticated');
     }
 
-    if (projectId.trim().isEmpty) {
+    final normalizedProjectId = projectId.trim();
+
+    if (normalizedProjectId.isEmpty) {
       throw Exception('errors.project_not_found');
     }
 
@@ -183,21 +253,29 @@ class GradeService {
     }
 
     try {
-      final existing = await getGrade(projectId);
+      final project = await _requireProjectOwner(
+        normalizedProjectId,
+      );
+
+      final existing = await getGrade(
+        normalizedProjectId,
+      );
 
       final now = DateTime.now().toUtc();
+
       final cleanComment = comment?.trim();
+
+      ProjectGrade savedGrade;
 
       if (existing == null) {
         final id = const Uuid().v4();
 
         final row = {
           'id': id,
-          'project_id': projectId,
+          'project_id': normalizedProjectId,
           'graded_by': userId,
           'grade': grade,
-          'comment':
-          cleanComment == null || cleanComment.isEmpty
+          'comment': cleanComment == null || cleanComment.isEmpty
               ? null
               : cleanComment,
           'created_at': now.toIso8601String(),
@@ -210,29 +288,36 @@ class GradeService {
             .select()
             .single();
 
-        return ProjectGrade.fromJson(
+        savedGrade = ProjectGrade.fromJson(
+          Map<String, dynamic>.from(data),
+        );
+      } else {
+        final data = await _client
+            .from('project_grades')
+            .update({
+          'graded_by': userId,
+          'grade': grade,
+          'comment': cleanComment == null || cleanComment.isEmpty
+              ? null
+              : cleanComment,
+          'updated_at': now.toIso8601String(),
+        })
+            .eq('id', existing.id)
+            .select()
+            .single();
+
+        savedGrade = ProjectGrade.fromJson(
           Map<String, dynamic>.from(data),
         );
       }
 
-      final data = await _client
-          .from('project_grades')
-          .update({
-        'graded_by': userId,
-        'grade': grade,
-        'comment':
-        cleanComment == null || cleanComment.isEmpty
-            ? null
-            : cleanComment,
-        'updated_at': now.toIso8601String(),
-      })
-          .eq('id', existing.id)
-          .select()
-          .single();
-
-      return ProjectGrade.fromJson(
-        Map<String, dynamic>.from(data),
+      await _notifications.notifyProjectGradedForMembers(
+        project: project,
+        grade: savedGrade.grade,
+        senderId: userId,
       );
+
+      return savedGrade;
     } catch (e, st) {
       _handleError(
         e,
@@ -247,21 +332,27 @@ class GradeService {
   // =========================================================
 
   Future<void> deleteGrade(String projectId) async {
-    final userId = _client.auth.currentUser?.id;
+    final userId = _currentUserId;
 
     if (userId == null || userId.isEmpty) {
       throw Exception('errors.not_authenticated');
     }
 
-    if (projectId.trim().isEmpty) {
+    final normalizedProjectId = projectId.trim();
+
+    if (normalizedProjectId.isEmpty) {
       return;
     }
 
     try {
+      await _requireProjectOwner(
+        normalizedProjectId,
+      );
+
       await _client
           .from('project_grades')
           .delete()
-          .eq('project_id', projectId);
+          .eq('project_id', normalizedProjectId);
     } catch (e, st) {
       _handleError(
         e,

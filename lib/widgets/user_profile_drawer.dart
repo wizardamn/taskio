@@ -22,7 +22,9 @@ import '../utils/loading_overlay.dart';
 import '../utils/error_mapper.dart';
 
 class UserProfileDrawer extends StatefulWidget {
-  const UserProfileDrawer({super.key});
+  const UserProfileDrawer({
+    super.key,
+  });
 
   @override
   State<UserProfileDrawer> createState() => _UserProfileDrawerState();
@@ -33,24 +35,16 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
 
   String? _avatarUrl;
   String? _loadedUserId;
+
   bool _isAvatarLoading = false;
 
   String? _notificationUserId;
   bool _isNotificationSettingsLoading = false;
+
   bool _allNotificationsEnabled = true;
   bool _chatNotificationsEnabled = true;
   bool _projectUpdatesEnabled = true;
 
-  // ======================================================
-  // COMMON TEXT
-  // ======================================================
-
-  String _text({
-    required String ru,
-    required String en,
-  }) {
-    return context.locale.languageCode == 'ru' ? ru : en;
-  }
 
   // ======================================================
   // DRAWER NAVIGATION
@@ -63,19 +57,19 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
       scaffoldState!.closeDrawer();
 
       await Future<void>.delayed(
-        const Duration(milliseconds: 160),
+        const Duration(milliseconds: 180),
       );
 
       return;
     }
 
-    final drawerNavigator = Navigator.maybeOf(context);
+    final navigator = Navigator.maybeOf(context);
 
-    if (drawerNavigator != null && drawerNavigator.canPop()) {
-      drawerNavigator.pop();
+    if (navigator != null && navigator.canPop()) {
+      navigator.pop();
 
       await Future<void>.delayed(
-        const Duration(milliseconds: 160),
+        const Duration(milliseconds: 180),
       );
     }
   }
@@ -101,7 +95,7 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
       ),
     );
 
-    if (!mounted || userId == null) {
+    if (!mounted || userId == null || userId.isEmpty) {
       return;
     }
 
@@ -227,7 +221,9 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
     }
 
     if (path.startsWith('avatars/')) {
-      path = path.substring('avatars/'.length);
+      path = path.substring(
+        'avatars/'.length,
+      );
     }
 
     if (path.startsWith('${SupabaseService.bucket}/')) {
@@ -283,11 +279,17 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
   }
 
   Future<void> _toggleAllNotifications(bool value) async {
-    try {
-      setState(() {
-        _allNotificationsEnabled = value;
-      });
+    if (!mounted) {
+      return;
+    }
 
+    final previous = _allNotificationsEnabled;
+
+    setState(() {
+      _allNotificationsEnabled = value;
+    });
+
+    try {
       await _notificationService.setGlobalAllEnabled(value);
 
       if (!mounted) {
@@ -296,14 +298,8 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
 
       SnackbarManager.showSuccess(
         value
-            ? _text(
-          ru: 'Все уведомления включены',
-          en: 'All notifications enabled',
-        )
-            : _text(
-          ru: 'Все уведомления отключены',
-          en: 'All notifications disabled',
-        ),
+            ? 'notifications.all_enabled'
+            : 'notifications.all_disabled',
       );
     } catch (e, st) {
       AppLogger.error(
@@ -318,7 +314,7 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
       }
 
       setState(() {
-        _allNotificationsEnabled = !value;
+        _allNotificationsEnabled = previous;
       });
 
       SnackbarManager.showError(
@@ -328,11 +324,17 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
   }
 
   Future<void> _toggleChatNotifications(bool value) async {
-    try {
-      setState(() {
-        _chatNotificationsEnabled = value;
-      });
+    if (!mounted) {
+      return;
+    }
 
+    final previous = _chatNotificationsEnabled;
+
+    setState(() {
+      _chatNotificationsEnabled = value;
+    });
+
+    try {
       await _notificationService.setGlobalChatEnabled(value);
 
       if (!mounted) {
@@ -341,14 +343,8 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
 
       SnackbarManager.showSuccess(
         value
-            ? _text(
-          ru: 'Уведомления чата включены',
-          en: 'Chat notifications enabled',
-        )
-            : _text(
-          ru: 'Уведомления чата отключены',
-          en: 'Chat notifications disabled',
-        ),
+            ? 'notifications.chat_enabled'
+            : 'notifications.chat_disabled',
       );
     } catch (e, st) {
       AppLogger.error(
@@ -363,7 +359,7 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
       }
 
       setState(() {
-        _chatNotificationsEnabled = !value;
+        _chatNotificationsEnabled = previous;
       });
 
       SnackbarManager.showError(
@@ -373,11 +369,17 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
   }
 
   Future<void> _toggleProjectUpdates(bool value) async {
-    try {
-      setState(() {
-        _projectUpdatesEnabled = value;
-      });
+    if (!mounted) {
+      return;
+    }
 
+    final previous = _projectUpdatesEnabled;
+
+    setState(() {
+      _projectUpdatesEnabled = value;
+    });
+
+    try {
       await _notificationService
           .setGlobalProjectUpdatesEnabled(value);
 
@@ -387,14 +389,8 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
 
       SnackbarManager.showSuccess(
         value
-            ? _text(
-          ru: 'Уведомления об изменениях проектов включены',
-          en: 'Project update notifications enabled',
-        )
-            : _text(
-          ru: 'Уведомления об изменениях проектов отключены',
-          en: 'Project update notifications disabled',
-        ),
+            ? 'notifications.project_updates_enabled'
+            : 'notifications.project_updates_disabled',
       );
     } catch (e, st) {
       AppLogger.error(
@@ -409,7 +405,7 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
       }
 
       setState(() {
-        _projectUpdatesEnabled = !value;
+        _projectUpdatesEnabled = previous;
       });
 
       SnackbarManager.showError(
@@ -494,7 +490,6 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
     Widget? trailing,
   }) {
     final theme = Theme.of(context);
-
     final itemColor = color ?? theme.colorScheme.onSurfaceVariant;
 
     return Padding(
@@ -633,7 +628,9 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
         }
 
         if (isGuest &&
-            (_avatarUrl != null || _notificationUserId != null)) {
+            (_avatarUrl != null ||
+                _loadedUserId != null ||
+                _notificationUserId != null)) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted) {
               return;
@@ -658,9 +655,9 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
 
         final displayName = isGuest
             ? 'profile.guest'.tr()
-            : (projectProv.currentUserName.isNotEmpty
+            : projectProv.currentUserName.isNotEmpty
             ? projectProv.currentUserName
-            : 'common.user'.tr());
+            : 'common.user'.tr();
 
         final displayEmail = isGuest
             ? 'profile.guest_email'.tr()
@@ -767,7 +764,7 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
 
     if (projects.isEmpty) {
       SnackbarManager.showError(
-        'projects.no_projects'.tr(),
+        'projects.no_projects',
       );
       return;
     }
@@ -809,7 +806,6 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
       child: Column(
         children: [
           _buildHeader(context),
-
           Expanded(
             child: ListView(
               children: [
@@ -817,7 +813,6 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
                   context,
                   'navigation.settings'.tr(),
                 ),
-
                 _buildDrawerItem(
                   context: context,
                   icon: themeProv.isDark
@@ -829,7 +824,6 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
                   index: 0,
                   onTap: themeProv.toggleTheme,
                 ),
-
                 _buildDrawerItem(
                   context: context,
                   icon: Icons.language_outlined,
@@ -837,66 +831,46 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
                   index: 1,
                   onTap: () => _showLanguageDialog(context),
                 ),
-
                 if (!isGuest) ...[
                   const Divider(),
-
                   _sectionTitle(
                     context,
-                    _text(
-                      ru: 'Уведомления',
-                      en: 'Notifications',
-                    ),
+                    'notifications.title'.tr(),
                   ),
-
                   _buildSwitchItem(
                     context: context,
                     icon: _allNotificationsEnabled
                         ? Icons.notifications_none_outlined
                         : Icons.notifications_off_outlined,
-                    title: _text(
-                      ru: 'Все уведомления',
-                      en: 'All notifications',
-                    ),
+                    title: 'notifications.all'.tr(),
                     value: _allNotificationsEnabled,
                     onChanged: _toggleAllNotifications,
                     index: 2,
                   ),
-
                   _buildSwitchItem(
                     context: context,
                     icon: Icons.chat_bubble_outline,
-                    title: _text(
-                      ru: 'Уведомления чата',
-                      en: 'Chat notifications',
-                    ),
+                    title: 'notifications.chat'.tr(),
                     value: _chatNotificationsEnabled,
                     onChanged: _toggleChatNotifications,
                     index: 3,
                     enabled: _allNotificationsEnabled,
                   ),
-
                   _buildSwitchItem(
                     context: context,
                     icon: Icons.update_outlined,
-                    title: _text(
-                      ru: 'Изменения проектов',
-                      en: 'Project updates',
-                    ),
+                    title: 'notifications.project_updates'.tr(),
                     value: _projectUpdatesEnabled,
                     onChanged: _toggleProjectUpdates,
                     index: 4,
                     enabled: _allNotificationsEnabled,
                   ),
                 ],
-
                 const Divider(),
-
                 _sectionTitle(
                   context,
                   'navigation.management'.tr(),
                 ),
-
                 _buildDrawerItem(
                   context: context,
                   icon: Icons.picture_as_pdf_outlined,
@@ -909,7 +883,6 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
                     );
                   },
                 ),
-
                 _buildDrawerItem(
                   context: context,
                   icon: Icons.calendar_month_outlined,
@@ -919,7 +892,6 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
                     _openCalendarScreen(context);
                   },
                 ),
-
                 if (!isGuest)
                   _buildDrawerItem(
                     context: context,
@@ -933,6 +905,10 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
                         LoadingOverlay.show();
 
                         await projectProv.fetchProjects();
+
+                        SnackbarManager.showSuccess(
+                          'common.updated',
+                        );
                       } catch (e, st) {
                         AppLogger.error(
                           'Refresh projects failed',
@@ -949,7 +925,6 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
                       }
                     },
                   ),
-
                 _buildDrawerItem(
                   context: context,
                   icon: Icons.info_outline,
@@ -962,7 +937,6 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
               ],
             ),
           ),
-
           Padding(
             padding: const EdgeInsets.all(12),
             child: _buildDrawerItem(
@@ -1016,7 +990,7 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
                   }
 
                   SnackbarManager.showSuccess(
-                    'auth.logout_success'.tr(),
+                    'auth.logout_success',
                   );
                 } catch (e, st) {
                   AppLogger.error(
@@ -1073,8 +1047,8 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
   void _showLanguageDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (_) {
-        final current = context.locale.languageCode;
+      builder: (dialogContext) {
+        final current = dialogContext.locale.languageCode;
 
         return AlertDialog(
           title: Text(
@@ -1084,13 +1058,13 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _languageTile(
-                context,
+                dialogContext,
                 code: 'ru',
                 label: 'Русский',
                 selected: current == 'ru',
               ),
               _languageTile(
-                context,
+                dialogContext,
                 code: 'en',
                 label: 'English',
                 selected: current == 'en',
@@ -1132,7 +1106,18 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
           Navigator.of(context).pop();
 
           SnackbarManager.showSuccess(
-            'profile.language_changed'.tr(),
+            'profile.language_changed',
+          );
+        } catch (e, st) {
+          AppLogger.error(
+            'Language change failed',
+            error: e,
+            stackTrace: st,
+            tag: 'Drawer',
+          );
+
+          SnackbarManager.showError(
+            ErrorMapper.map(e),
           );
         } finally {
           LoadingOverlay.hide();

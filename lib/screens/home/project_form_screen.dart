@@ -86,6 +86,10 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     return widget.project.ownerId == _currentUserId;
   }
 
+  bool get _canEditOwnerSettings {
+    return _canEdit && _isOwner;
+  }
+
   bool get _canEditParticipants {
     return _canEdit && _isOwner;
   }
@@ -98,6 +102,14 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     return !widget.isNew &&
         _isEducationalProject &&
         _gradingEnabled;
+  }
+
+  bool get _canEditGrade {
+    return !widget.isNew && _isOwner;
+  }
+
+  bool get _showLimitsSection {
+    return _isOwner;
   }
 
   @override
@@ -113,6 +125,17 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   void dispose() {
     _draftTaskController.dispose();
     super.dispose();
+  }
+
+  // =========================================================
+  // COMMON TEXT
+  // =========================================================
+
+  String _text({
+    required String ru,
+    required String en,
+  }) {
+    return context.locale.languageCode == 'ru' ? ru : en;
   }
 
   // =========================================================
@@ -501,6 +524,10 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   }
 
   void _onCategoryChanged(ProjectCategory category) {
+    if (!_canEditOwnerSettings) {
+      return;
+    }
+
     setState(() {
       _category = category;
 
@@ -533,6 +560,10 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   // =========================================================
 
   void _addDraftTask() {
+    if (!_canEdit) {
+      return;
+    }
+
     final text = _draftTaskController.text.trim();
 
     if (text.isEmpty) {
@@ -554,6 +585,10 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   }
 
   void _removeDraftTask(int index) {
+    if (!_canEdit) {
+      return;
+    }
+
     if (index < 0 || index >= _draftTasks.length) {
       return;
     }
@@ -587,77 +622,63 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       return const SizedBox.shrink();
     }
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment:
-          CrossAxisAlignment.start,
-          children: [
-            Text(
-              'projects.tasks_on_create'.tr(),
-              style:
-              Theme.of(context).textTheme.titleMedium,
-            ),
-
-            const SizedBox(height: 12),
-
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _draftTaskController,
-                    enabled: _canEdit,
-                    textInputAction:
-                    TextInputAction.done,
-                    decoration: InputDecoration(
-                      labelText: 'tasks.hint'.tr(),
-                      border:
-                      const OutlineInputBorder(),
+    return _buildSectionCard(
+      title: 'tasks.title'.tr(),
+      subtitle: 'projects.tasks_on_create'.tr(),
+      icon: Icons.checklist_outlined,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _draftTaskController,
+                  enabled: _canEdit,
+                  textCapitalization: TextCapitalization.sentences,
+                  textInputAction: TextInputAction.done,
+                  decoration: InputDecoration(
+                    labelText: 'tasks.hint'.tr(),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    onSubmitted: (_) => _addDraftTask(),
                   ),
+                  onSubmitted: (_) => _addDraftTask(),
                 ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filled(
+                tooltip: 'common.add'.tr(),
+                onPressed: _canEdit ? _addDraftTask : null,
+                icon: const Icon(Icons.add),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_draftTasks.isEmpty)
+            _buildMutedText(
+              'projects.no_draft_tasks'.tr(),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _draftTasks.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                final task = _draftTasks[index];
 
-                const SizedBox(width: 8),
-
-                IconButton.filled(
-                  tooltip: 'common.add'.tr(),
-                  onPressed:
-                  _canEdit ? _addDraftTask : null,
-                  icon: const Icon(Icons.add),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-
-            if (_draftTasks.isEmpty)
-              Text(
-                'projects.no_draft_tasks'.tr(),
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .onSurfaceVariant,
-                ),
-              )
-            else
-              ListView.separated(
-                shrinkWrap: true,
-                physics:
-                const NeverScrollableScrollPhysics(),
-                itemCount: _draftTasks.length,
-                separatorBuilder: (_, __) =>
-                const Divider(height: 1),
-                itemBuilder: (context, index) {
-                  final task = _draftTasks[index];
-
-                  return ListTile(
+                return Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .outlineVariant,
+                    ),
+                  ),
+                  child: ListTile(
                     dense: true,
-                    contentPadding: EdgeInsets.zero,
                     leading: const Icon(
                       Icons.check_circle_outline,
                     ),
@@ -669,11 +690,11 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                           ? () => _removeDraftTask(index)
                           : null,
                     ),
-                  );
-                },
-              ),
-          ],
-        ),
+                  ),
+                );
+              },
+            ),
+        ],
       ),
     );
   }
@@ -847,32 +868,45 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
     final participantsData = _buildParticipantsData();
 
-    if (_maxMembers > 0 &&
-        participantsData.length > _maxMembers) {
+    final effectiveCategory = _canEditOwnerSettings
+        ? _category
+        : widget.project.category;
+
+    final effectiveMaxMembers = _canEditOwnerSettings
+        ? _maxMembers
+        : widget.project.maxMembers;
+
+    final effectiveMaxAttachments = _canEditOwnerSettings
+        ? _maxAttachments
+        : widget.project.maxAttachments;
+
+    final effectiveGradingEnabled =
+    effectiveCategory == ProjectCategory.educational
+        ? (_canEditOwnerSettings
+        ? _gradingEnabled
+        : widget.project.gradingEnabled)
+        : false;
+
+    if (effectiveMaxMembers > 0 &&
+        participantsData.length > effectiveMaxMembers) {
       SnackbarManager.showError(
         'projects.max_members_error'.tr(),
       );
       return;
     }
 
-    final effectiveGradingEnabled =
-    _category == ProjectCategory.educational
-        ? _gradingEnabled
-        : false;
-
     final project = ProjectModel(
       id: widget.project.id,
-      ownerId:
-      _ownerId.isNotEmpty ? _ownerId : _currentUserId,
+      ownerId: _ownerId.isNotEmpty ? _ownerId : _currentUserId,
       title: _title,
       description: _description,
       deadline: _deadline,
       createdAt: widget.project.createdAt,
       status: _status.index,
       color: _color,
-      category: _category,
-      maxMembers: _maxMembers,
-      maxAttachments: _maxAttachments,
+      category: effectiveCategory,
+      maxMembers: effectiveMaxMembers,
+      maxAttachments: effectiveMaxAttachments,
       gradingEnabled: effectiveGradingEnabled,
       participantsData: participantsData,
       attachments: _attachments,
@@ -889,8 +923,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       });
 
       if (widget.isNew) {
-        final created =
-        await provider.addProject(project);
+        final created = await provider.addProject(project);
 
         if (created == null) {
           return;
@@ -975,12 +1008,99 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     });
   }
 
+  Widget _buildSectionCard({
+    required String title,
+    required IconData icon,
+    required Widget child,
+    String? subtitle,
+  }) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Card(
+      elevation: 0,
+      color: colorScheme.surfaceContainerLowest,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: colorScheme.outlineVariant,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: colorScheme.onPrimaryContainer,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (subtitle != null &&
+                          subtitle.trim().isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMutedText(String text) {
+    return Text(
+      text,
+      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+    );
+  }
+
   Widget _buildCategoryDropdown() {
     return DropdownButtonFormField<ProjectCategory>(
       initialValue: _category,
       decoration: InputDecoration(
         labelText: 'projects.category'.tr(),
-        border: const OutlineInputBorder(),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+        prefixIcon: const Icon(
+          Icons.category_outlined,
+        ),
       ),
       items: ProjectCategory.values.map((category) {
         return DropdownMenuItem(
@@ -990,7 +1110,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
           ),
         );
       }).toList(),
-      onChanged: _canEdit
+      onChanged: _canEditOwnerSettings
           ? (value) {
         if (value != null) {
           _onCategoryChanged(value);
@@ -1000,93 +1120,316 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     );
   }
 
-  Widget _buildLimitsSection() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            if (_isEducationalProject) ...[
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                  'projects.grading_enabled'.tr(),
-                ),
-                subtitle: Text(
-                  'projects.grading_enabled_hint'.tr(),
-                ),
-                value: _gradingEnabled,
-                onChanged: _canEdit
-                    ? (value) {
-                  setState(() {
-                    _gradingEnabled = value;
-                  });
-                }
-                    : null,
+  Widget _buildBasicInfoSection() {
+    return _buildSectionCard(
+      title: _text(
+        ru: 'Основная информация',
+        en: 'Main information',
+      ),
+      icon: Icons.info_outline,
+      child: Column(
+        children: [
+          TextFormField(
+            initialValue: _title,
+            enabled: _canEdit,
+            decoration: InputDecoration(
+              labelText: 'projects.name'.tr(),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
               ),
-
-              const SizedBox(height: 12),
-            ],
-
-            TextFormField(
-              key: ValueKey(
-                'max_members_$_maxMembers',
+              prefixIcon: const Icon(
+                Icons.title_outlined,
               ),
-              initialValue: _maxMembers.toString(),
-              enabled: _canEdit,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: 'projects.max_members'.tr(),
-                border: const OutlineInputBorder(),
-              ),
-              validator: (value) {
-                final parsed =
-                int.tryParse(value ?? '');
-
-                if (parsed == null || parsed < 1) {
-                  return 'validation.empty_field'.tr();
-                }
-
-                return null;
-              },
-              onSaved: (value) {
-                _maxMembers =
-                    int.tryParse(value ?? '') ??
-                        _maxMembers;
-              },
             ),
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'validation.enter_project_name'.tr();
+              }
 
+              return null;
+            },
+            onSaved: (value) {
+              _title = value?.trim() ?? '';
+            },
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            initialValue: _description,
+            enabled: _canEdit,
+            maxLines: 3,
+            decoration: InputDecoration(
+              labelText: 'projects.description'.tr(),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              prefixIcon: const Icon(
+                Icons.description_outlined,
+              ),
+            ),
+            onSaved: (value) {
+              _description = value?.trim() ?? '';
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategorySection() {
+    return _buildSectionCard(
+      title: 'projects.category'.tr(),
+      icon: Icons.category_outlined,
+      subtitle: _canEditOwnerSettings
+          ? null
+          : _text(
+        ru: 'Категорию может менять только владелец проекта',
+        en: 'Only the project owner can change the category',
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildCategoryDropdown(),
+          if (_isEducationalProject) ...[
             const SizedBox(height: 12),
-
-            TextFormField(
-              key: ValueKey(
-                'max_attachments_$_maxAttachments',
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(
+                'projects.grading_enabled'.tr(),
               ),
-              initialValue: _maxAttachments.toString(),
-              enabled: _canEdit,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: 'projects.max_attachments'.tr(),
-                border: const OutlineInputBorder(),
+              subtitle: Text(
+                _canEditOwnerSettings
+                    ? 'projects.grading_enabled_hint'.tr()
+                    : _text(
+                  ru: 'Настройку оценивания может менять только владелец',
+                  en: 'Only the owner can change grading settings',
+                ),
               ),
-              validator: (value) {
-                final parsed =
-                int.tryParse(value ?? '');
-
-                if (parsed == null || parsed < 0) {
-                  return 'validation.empty_field'.tr();
-                }
-
-                return null;
-              },
-              onSaved: (value) {
-                _maxAttachments =
-                    int.tryParse(value ?? '') ??
-                        _maxAttachments;
-              },
+              value: _gradingEnabled,
+              onChanged: _canEditOwnerSettings
+                  ? (value) {
+                setState(() {
+                  _gradingEnabled = value;
+                });
+              }
+                  : null,
             ),
           ],
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTasksSection() {
+    if (widget.isNew) {
+      return _buildDraftTasksSection();
+    }
+
+    return ProjectTasksWidget(
+      projectId: widget.project.id,
+      canEdit: _canManageContent,
+    );
+  }
+
+  Widget _buildPlanningSection() {
+    return _buildSectionCard(
+      title: _text(
+        ru: 'Планирование',
+        en: 'Planning',
+      ),
+      icon: Icons.event_note_outlined,
+      child: Column(
+        children: [
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(
+              Icons.calendar_today,
+            ),
+            title: Text(
+              'projects.deadline'.tr(),
+            ),
+            subtitle: Text(
+              DateFormat.yMd(
+                context.locale.toString(),
+              ).format(_deadline),
+            ),
+            trailing: const Icon(
+              Icons.chevron_right,
+            ),
+            onTap: _canEdit ? _pickDeadline : null,
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<ProjectStatus>(
+            initialValue: _status,
+            decoration: InputDecoration(
+              labelText: 'projects.status'.tr(),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              prefixIcon: const Icon(
+                Icons.flag_outlined,
+              ),
+            ),
+            items: ProjectStatus.values.map((status) {
+              return DropdownMenuItem(
+                value: status,
+                child: Text(
+                  status.localizedText(),
+                ),
+              );
+            }).toList(),
+            onChanged: _canEdit
+                ? (value) {
+              if (value != null) {
+                setState(() {
+                  _status = value;
+                });
+              }
+            }
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildParticipantsSection() {
+    return _buildSectionCard(
+      title: _text(
+        ru: 'Участники',
+        en: 'Participants',
+      ),
+      icon: Icons.people_outline,
+      child: ParticipantsSection(
+        participants: _buildParticipantsData(),
+        isOwner: _canEditParticipants,
+        onEdit: _editParticipants,
+      ),
+    );
+  }
+
+  Widget _buildLimitsSection() {
+    if (!_showLimitsSection) {
+      return const SizedBox.shrink();
+    }
+
+    return _buildSectionCard(
+      title: _text(
+        ru: 'Ограничения',
+        en: 'Limits',
+      ),
+      subtitle: _text(
+        ru: 'Данные настройки доступны только владельцу проекта',
+        en: 'These settings are available only to the project owner',
+      ),
+      icon: Icons.tune_outlined,
+      child: Column(
+        children: [
+          TextFormField(
+            key: ValueKey(
+              'max_members_$_maxMembers',
+            ),
+            initialValue: _maxMembers.toString(),
+            enabled: _canEditOwnerSettings,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: 'projects.max_members'.tr(),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              prefixIcon: const Icon(
+                Icons.group_outlined,
+              ),
+            ),
+            validator: (value) {
+              final parsed = int.tryParse(value ?? '');
+
+              if (parsed == null || parsed < 1) {
+                return 'validation.empty_field'.tr();
+              }
+
+              return null;
+            },
+            onSaved: (value) {
+              _maxMembers =
+                  int.tryParse(value ?? '') ?? _maxMembers;
+            },
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            key: ValueKey(
+              'max_attachments_$_maxAttachments',
+            ),
+            initialValue: _maxAttachments.toString(),
+            enabled: _canEditOwnerSettings,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: 'projects.max_attachments'.tr(),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              prefixIcon: const Icon(
+                Icons.attach_file_outlined,
+              ),
+            ),
+            validator: (value) {
+              final parsed = int.tryParse(value ?? '');
+
+              if (parsed == null || parsed < 0) {
+                return 'validation.empty_field'.tr();
+              }
+
+              return null;
+            },
+            onSaved: (value) {
+              _maxAttachments =
+                  int.tryParse(value ?? '') ?? _maxAttachments;
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAttachmentsSection() {
+    return _buildSectionCard(
+      title: _text(
+        ru: 'Вложения',
+        en: 'Attachments',
+      ),
+      icon: Icons.attach_file_outlined,
+      child: AttachmentsSection(
+        attachments: _attachments,
+        isUploading: _isUploading,
+        currentlyOpeningFile: null,
+        canEditContent: _canManageContent,
+        isOwner: _isOwner,
+        onPick: _pickAttachment,
+        onOpen: (_) {},
+        onDelete: _deleteAttachment,
+      ),
+    );
+  }
+
+  Widget _buildGradeSection() {
+    if (!_showGradeSection) {
+      return const SizedBox.shrink();
+    }
+
+    return _buildSectionCard(
+      title: _text(
+        ru: 'Оценка',
+        en: 'Grade',
+      ),
+      subtitle: _canEditGrade
+          ? null
+          : _text(
+        ru: 'Оценку может ставить и менять только владелец проекта',
+        en: 'Only the project owner can set or change the grade',
+      ),
+      icon: Icons.grade_outlined,
+      child: GradeSection(
+        projectId: widget.project.id,
+        canEdit: _canEditGrade,
       ),
     );
   }
@@ -1104,10 +1447,6 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
         ),
       );
     }
-
-    final canGradeProject = context
-        .read<ProjectProvider>()
-        .canGradeProject(widget.project);
 
     return Scaffold(
       appBar: AppBar(
@@ -1132,13 +1471,17 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                 ),
               )
                   : const Icon(Icons.check),
-              onPressed:
-              _isSaving ? null : _saveProject,
+              onPressed: _isSaving ? null : _saveProject,
             ),
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          32,
+        ),
         child: Form(
           key: _formKey,
           child: Column(
@@ -1153,137 +1496,37 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                   },
                 ),
 
-              const SizedBox(height: 16),
+              if (_canEdit) const SizedBox(height: 16),
 
-              TextFormField(
-                initialValue: _title,
-                enabled: _canEdit,
-                decoration: InputDecoration(
-                  labelText: 'projects.name'.tr(),
-                  border: const OutlineInputBorder(),
-                ),
-                validator: (value) {
-                  if (value == null ||
-                      value.trim().isEmpty) {
-                    return 'validation.enter_project_name'
-                        .tr();
-                  }
-
-                  return null;
-                },
-                onSaved: (value) {
-                  _title = value?.trim() ?? '';
-                },
-              ),
+              _buildBasicInfoSection(),
 
               const SizedBox(height: 16),
 
-              TextFormField(
-                initialValue: _description,
-                enabled: _canEdit,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  labelText:
-                  'projects.description'.tr(),
-                  border: const OutlineInputBorder(),
-                ),
-                onSaved: (value) {
-                  _description = value?.trim() ?? '';
-                },
-              ),
+              _buildCategorySection(),
 
               const SizedBox(height: 16),
 
-              _buildCategoryDropdown(),
+              _buildTasksSection(),
+
+              const SizedBox(height: 16),
+
+              _buildPlanningSection(),
+
+              const SizedBox(height: 16),
+
+              _buildParticipantsSection(),
 
               const SizedBox(height: 16),
 
               _buildLimitsSection(),
 
-              const SizedBox(height: 16),
+              if (_showLimitsSection) const SizedBox(height: 16),
 
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                  'projects.deadline'.tr(),
-                ),
-                subtitle: Text(
-                  DateFormat.yMd(
-                    context.locale.toString(),
-                  ).format(_deadline),
-                ),
-                trailing:
-                const Icon(Icons.calendar_today),
-                onTap:
-                _canEdit ? _pickDeadline : null,
-              ),
-
-              const SizedBox(height: 16),
-
-              DropdownButtonFormField<ProjectStatus>(
-                initialValue: _status,
-                decoration: InputDecoration(
-                  labelText: 'projects.status'.tr(),
-                  border: const OutlineInputBorder(),
-                ),
-                items: ProjectStatus.values.map((status) {
-                  return DropdownMenuItem(
-                    value: status,
-                    child: Text(
-                      status.localizedText(),
-                    ),
-                  );
-                }).toList(),
-                onChanged: _canEdit
-                    ? (value) {
-                  if (value != null) {
-                    setState(() {
-                      _status = value;
-                    });
-                  }
-                }
-                    : null,
-              ),
-
-              const SizedBox(height: 24),
-
-              ParticipantsSection(
-                participants: _buildParticipantsData(),
-                isOwner: _canEditParticipants,
-                onEdit: _editParticipants,
-              ),
-
-              const SizedBox(height: 24),
-
-              _buildDraftTasksSection(),
-
-              const SizedBox(height: 24),
-
-              AttachmentsSection(
-                attachments: _attachments,
-                isUploading: _isUploading,
-                currentlyOpeningFile: null,
-                canEditContent: _canManageContent,
-                isOwner: _isOwner,
-                onPick: _pickAttachment,
-                onOpen: (_) {},
-                onDelete: _deleteAttachment,
-              ),
-
-              const SizedBox(height: 24),
-
-              if (!widget.isNew)
-                ProjectTasksWidget(
-                  projectId: widget.project.id,
-                  canEdit: _canManageContent,
-                ),
+              _buildAttachmentsSection(),
 
               if (_showGradeSection) ...[
-                const SizedBox(height: 24),
-                GradeSection(
-                  projectId: widget.project.id,
-                  canEdit: canGradeProject,
-                ),
+                const SizedBox(height: 16),
+                _buildGradeSection(),
               ],
             ],
           ),

@@ -50,8 +50,7 @@ class _ProjectCardState extends State<ProjectCard> {
   final NotificationService _notificationService =
   NotificationService();
 
-  bool _projectNotificationsEnabled = true;
-  bool _chatNotificationsEnabled = true;
+  bool _notificationsEnabled = true;
   bool _isNotificationLoading = false;
 
   int get _effectiveUnreadCount {
@@ -64,10 +63,6 @@ class _ProjectCardState extends State<ProjectCard> {
 
   bool get _canEditOrOwner {
     return widget.canEdit || widget.isOwner;
-  }
-
-  bool get _notificationsEnabled {
-    return _projectNotificationsEnabled;
   }
 
   @override
@@ -106,8 +101,9 @@ class _ProjectCardState extends State<ProjectCard> {
       }
 
       setState(() {
-        _projectNotificationsEnabled = settings.allEnabled;
-        _chatNotificationsEnabled = settings.chatEnabled;
+        _notificationsEnabled = settings.allEnabled &&
+            settings.chatEnabled &&
+            settings.projectUpdatesEnabled;
       });
     } catch (_) {
       if (!mounted) {
@@ -115,8 +111,7 @@ class _ProjectCardState extends State<ProjectCard> {
       }
 
       setState(() {
-        _projectNotificationsEnabled = true;
-        _chatNotificationsEnabled = true;
+        _notificationsEnabled = true;
       });
     }
   }
@@ -126,18 +121,18 @@ class _ProjectCardState extends State<ProjectCard> {
       return;
     }
 
-    final nextValue = !_projectNotificationsEnabled;
+    final nextValue = !_notificationsEnabled;
 
     final successMessage = nextValue
         ? _text(
       context,
-      ru: 'Уведомления проекта включены',
-      en: 'Project notifications enabled',
+      ru: 'Уведомления включены',
+      en: 'Notifications enabled',
     )
         : _text(
       context,
-      ru: 'Уведомления проекта отключены',
-      en: 'Project notifications disabled',
+      ru: 'Уведомления отключены',
+      en: 'Notifications disabled',
     );
 
     final errorMessage = _text(
@@ -151,7 +146,7 @@ class _ProjectCardState extends State<ProjectCard> {
         _isNotificationLoading = true;
       });
 
-      await _notificationService.setProjectAllEnabled(
+      await _notificationService.setProjectNotificationsEnabled(
         projectId: widget.project.id,
         value: nextValue,
       );
@@ -161,66 +156,7 @@ class _ProjectCardState extends State<ProjectCard> {
       }
 
       setState(() {
-        _projectNotificationsEnabled = nextValue;
-      });
-
-      SnackbarManager.showSuccess(successMessage);
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-
-      SnackbarManager.showError(errorMessage);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isNotificationLoading = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _toggleChatNotifications() async {
-    if (_isNotificationLoading) {
-      return;
-    }
-
-    final nextValue = !_chatNotificationsEnabled;
-
-    final successMessage = nextValue
-        ? _text(
-      context,
-      ru: 'Уведомления чата включены',
-      en: 'Chat notifications enabled',
-    )
-        : _text(
-      context,
-      ru: 'Уведомления чата отключены',
-      en: 'Chat notifications disabled',
-    );
-
-    final errorMessage = _text(
-      context,
-      ru: 'Не удалось изменить настройки уведомлений',
-      en: 'Failed to change notification settings',
-    );
-
-    try {
-      setState(() {
-        _isNotificationLoading = true;
-      });
-
-      await _notificationService.setProjectChatEnabled(
-        projectId: widget.project.id,
-        value: nextValue,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _chatNotificationsEnabled = nextValue;
+        _notificationsEnabled = nextValue;
       });
 
       SnackbarManager.showSuccess(successMessage);
@@ -379,12 +315,8 @@ class _ProjectCardState extends State<ProjectCard> {
                   widget.onEdit(widget.project);
                   break;
 
-                case 'toggle_project_notifications':
+                case 'toggle_notifications':
                   _toggleProjectNotifications();
-                  break;
-
-                case 'toggle_chat_notifications':
-                  _toggleChatNotifications();
                   break;
 
                 case 'delete':
@@ -404,43 +336,22 @@ class _ProjectCardState extends State<ProjectCard> {
                 ),
 
               PopupMenuItem(
-                value: 'toggle_project_notifications',
+                value: 'toggle_notifications',
                 child: _buildPopupMenuItemContent(
                   context,
-                  icon: _projectNotificationsEnabled
+                  icon: _notificationsEnabled
                       ? Icons.notifications_off_outlined
                       : Icons.notifications_none_outlined,
-                  text: _projectNotificationsEnabled
+                  text: _notificationsEnabled
                       ? _text(
                     context,
-                    ru: 'Отключить уведомления проекта',
-                    en: 'Disable project notifications',
+                    ru: 'Отключить уведомления',
+                    en: 'Disable notifications',
                   )
                       : _text(
                     context,
-                    ru: 'Включить уведомления проекта',
-                    en: 'Enable project notifications',
-                  ),
-                ),
-              ),
-
-              PopupMenuItem(
-                value: 'toggle_chat_notifications',
-                child: _buildPopupMenuItemContent(
-                  context,
-                  icon: _chatNotificationsEnabled
-                      ? Icons.chat_bubble_outline
-                      : Icons.chat_bubble_outline,
-                  text: _chatNotificationsEnabled
-                      ? _text(
-                    context,
-                    ru: 'Отключить уведомления чата',
-                    en: 'Disable chat notifications',
-                  )
-                      : _text(
-                    context,
-                    ru: 'Включить уведомления чата',
-                    en: 'Enable chat notifications',
+                    ru: 'Включить уведомления',
+                    en: 'Enable notifications',
                   ),
                 ),
               ),

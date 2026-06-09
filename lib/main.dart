@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -29,14 +27,15 @@ import 'screens/auth/login_wrapper.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   AppLogger.info('Application starting...');
 
   try {
-    /// 🔥 Localization
+    /// Localization
     await EasyLocalization.ensureInitialized();
     await initializeDateFormatting();
 
-    /// 🔥 SUPABASE (без dotenv)
+    /// Supabase
     await Supabase.initialize(
       url: Env.supabaseUrl,
       anonKey: Env.supabaseAnonKey,
@@ -44,8 +43,9 @@ Future<void> main() async {
 
     AppLogger.info('Core initialization completed');
 
-    runApp(const TaskioRoot());
-
+    runApp(
+      const TaskioRoot(),
+    );
   } catch (e, s) {
     AppLogger.error(
       'App initialization failed',
@@ -55,11 +55,16 @@ Future<void> main() async {
 
     runApp(
       MaterialApp(
+        debugShowCheckedModeBanner: false,
+        scaffoldMessengerKey: SnackbarManager.messengerKey,
         home: Scaffold(
           body: Center(
-            child: Text(
-              'Ошибка запуска:\n$e',
-              textAlign: TextAlign.center,
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'Ошибка запуска:\n$e',
+                textAlign: TextAlign.center,
+              ),
             ),
           ),
         ),
@@ -68,12 +73,14 @@ Future<void> main() async {
   }
 }
 
-/// =============================
+/// ==========================================================
 /// ROOT
-/// =============================
+/// ==========================================================
 
 class TaskioRoot extends StatelessWidget {
-  const TaskioRoot({super.key});
+  const TaskioRoot({
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -109,12 +116,14 @@ class TaskioRoot extends StatelessWidget {
   }
 }
 
-/// =============================
+/// ==========================================================
 /// APP
-/// =============================
+/// ==========================================================
 
 class TaskioApp extends StatefulWidget {
-  const TaskioApp({super.key});
+  const TaskioApp({
+    super.key,
+  });
 
   @override
   State<TaskioApp> createState() => _TaskioAppState();
@@ -125,11 +134,17 @@ class _TaskioAppState extends State<TaskioApp> {
   void initState() {
     super.initState();
 
-    /// 🔥 безопасно (не ломает Web)
-    Future.microtask(() async {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        return;
+      }
+
       try {
         await NotificationService().init();
-        AppLogger.info('NotificationService initialized');
+
+        AppLogger.info(
+          'NotificationService initialized',
+        );
       } catch (e, s) {
         AppLogger.error(
           'NotificationService error',
@@ -148,6 +163,7 @@ class _TaskioAppState extends State<TaskioApp> {
       title: 'Taskio',
       debugShowCheckedModeBanner: false,
 
+      /// Важно для безопасного показа SnackBar без BuildContext.
       scaffoldMessengerKey: SnackbarManager.messengerKey,
 
       theme: themeProv.lightTheme,

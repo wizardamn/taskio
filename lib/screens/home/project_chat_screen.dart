@@ -28,11 +28,12 @@ class ProjectChatScreen extends StatefulWidget {
       _ProjectChatScreenState();
 }
 
-class _ProjectChatScreenState
-    extends State<ProjectChatScreen> {
+class _ProjectChatScreenState extends State<ProjectChatScreen> {
   MessageModel? _replyMessage;
 
   late final ChatProvider _chat;
+
+  bool _disposed = false;
 
   @override
   void initState() {
@@ -40,23 +41,33 @@ class _ProjectChatScreenState
 
     _chat = context.read<ChatProvider>();
 
-    _chat.init(widget.projectId);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_disposed || !mounted) {
+        return;
+      }
+
+      _chat.init(widget.projectId);
+    });
   }
 
   // =========================================================
   // REPLY
   // =========================================================
 
-  void _setReply(MessageModel msg) {
-    if (!mounted) return;
+  void _setReply(MessageModel message) {
+    if (_disposed || !mounted) {
+      return;
+    }
 
     setState(() {
-      _replyMessage = msg;
+      _replyMessage = message;
     });
   }
 
   void _clearReply() {
-    if (!mounted || _replyMessage == null) return;
+    if (_disposed || !mounted || _replyMessage == null) {
+      return;
+    }
 
     setState(() {
       _replyMessage = null;
@@ -69,8 +80,64 @@ class _ProjectChatScreenState
 
   @override
   void dispose() {
+    _disposed = true;
+
     _chat.disposeProject(widget.projectId);
+
     super.dispose();
+  }
+
+  // =========================================================
+  // HELPERS
+  // =========================================================
+
+  String _cleanProjectTitle() {
+    final title = widget.projectTitle.trim();
+
+    if (title.isEmpty) {
+      return 'projects.project'.tr();
+    }
+
+    return title;
+  }
+
+  String _participantsText() {
+    final count = widget.participants.length;
+
+    if (count <= 0) {
+      return 'members.no_participants'.tr();
+    }
+
+    final isRu = context.locale.languageCode == 'ru';
+
+    if (!isRu) {
+      return count == 1 ? '1 member' : '$count members';
+    }
+
+    final mod10 = count % 10;
+    final mod100 = count % 100;
+
+    if (mod10 == 1 && mod100 != 11) {
+      return '$count участник';
+    }
+
+    if (mod10 >= 2 &&
+        mod10 <= 4 &&
+        (mod100 < 12 || mod100 > 14)) {
+      return '$count участника';
+    }
+
+    return '$count участников';
+  }
+
+  String _typingText(String typingUser) {
+    final cleanName = typingUser.trim();
+
+    if (cleanName.isEmpty) {
+      return '';
+    }
+
+    return '$cleanName ${'chat.typing'.tr()}';
   }
 
   // =========================================================
@@ -79,34 +146,24 @@ class _ProjectChatScreenState
 
   @override
   Widget build(BuildContext context) {
-    final typingUser =
-    context.select<ChatProvider, String?>(
-          (c) => c.typingUser,
+    final typingUser = context.select<ChatProvider, String?>(
+          (provider) => provider.typingUser,
     );
 
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 56,
         titleSpacing: 0,
-        title: Column(
-          crossAxisAlignment:
-          CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              widget.projectTitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            if (typingUser != null)
-              Text(
-                '$typingUser ${'chat.typing'.tr()}',
-                style: const TextStyle(
-                  fontSize: 12,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-          ],
+        centerTitle: false,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: Padding(
+          padding: const EdgeInsets.only(
+            right: 12,
+          ),
+          child: _buildTitle(
+            typingUser,
+          ),
         ),
       ),
       body: GestureDetector(
@@ -115,6 +172,7 @@ class _ProjectChatScreenState
           FocusScope.of(context).unfocus();
         },
         child: SafeArea(
+          top: false,
           child: Column(
             children: [
               Expanded(
@@ -137,6 +195,56 @@ class _ProjectChatScreenState
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildTitle(String? typingUser) {
+    final hasTyping =
+        typingUser != null && typingUser.trim().isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          _cleanProjectTitle(),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            height: 1.12,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0,
+          ),
+        ),
+        const SizedBox(height: 3),
+        AnimatedSwitcher(
+          duration: const Duration(
+            milliseconds: 160,
+          ),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          child: Text(
+            hasTyping
+                ? _typingText(typingUser)
+                : _participantsText(),
+            key: ValueKey(
+              hasTyping ? 'typing_$typingUser' : 'participants',
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.9),
+              fontSize: 12,
+              height: 1.1,
+              fontWeight: FontWeight.w400,
+              letterSpacing: 0,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

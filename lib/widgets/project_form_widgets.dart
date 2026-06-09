@@ -20,15 +20,21 @@ class DatePickerField extends StatelessWidget {
     required this.label,
   });
 
+  bool get _isEnabled {
+    return onChanged != null;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     final formattedDate = DateFormat.yMMMd(
       context.locale.toLanguageTag(),
     ).format(initialDate);
 
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: onChanged == null
+      borderRadius: BorderRadius.circular(14),
+      onTap: !_isEnabled
           ? null
           : () async {
         final picked = await showDatePicker(
@@ -39,23 +45,33 @@ class DatePickerField extends StatelessWidget {
           locale: context.locale,
         );
 
-        if (picked != null && onChanged != null) {
-          onChanged!(picked);
+        if (picked == null) {
+          return;
         }
+
+        onChanged?.call(picked);
       },
       child: InputDecorator(
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon: const Icon(
-            Icons.calendar_month,
+          prefixIcon: Icon(
+            Icons.calendar_month_outlined,
+            color: _isEnabled
+                ? theme.colorScheme.onSurfaceVariant
+                : theme.disabledColor,
           ),
-          border: const OutlineInputBorder(),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          enabled: _isEnabled,
         ),
         child: Text(
           formattedDate,
-          style: Theme.of(context)
-              .textTheme
-              .bodyLarge,
+          style: theme.textTheme.bodyLarge?.copyWith(
+            color: _isEnabled
+                ? theme.colorScheme.onSurface
+                : theme.disabledColor,
+          ),
         ),
       ),
     );
@@ -82,12 +98,21 @@ class AttachmentThumb extends StatelessWidget {
     required this.canEdit,
   });
 
-  bool _isImage(String name) {
-    if (!name.contains('.')) {
+  bool _isImageAttachment() {
+    final fileName = attachment.fileName.trim().toLowerCase();
+    final mimeType = attachment.mimeType.trim().toLowerCase();
+
+    final isImageMime = mimeType.startsWith('image/');
+
+    if (isImageMime) {
+      return true;
+    }
+
+    if (!fileName.contains('.')) {
       return false;
     }
 
-    final ext = name.split('.').last.toLowerCase();
+    final extension = fileName.split('.').last;
 
     return const {
       'jpg',
@@ -95,42 +120,47 @@ class AttachmentThumb extends StatelessWidget {
       'png',
       'gif',
       'webp',
-    }.contains(ext);
+    }.contains(extension);
+  }
+
+  String? _publicUrl() {
+    final filePath = attachment.filePath.trim();
+
+    if (filePath.isEmpty) {
+      return null;
+    }
+
+    try {
+      return SupabaseService.client.storage
+          .from(SupabaseService.bucket)
+          .getPublicUrl(filePath);
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     const double size = 100;
 
-    final colorScheme =
-        Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
-    final isImage =
-    _isImage(attachment.fileName);
-
-    final publicUrl = SupabaseService
-        .client.storage
-        .from(SupabaseService.bucket)
-        .getPublicUrl(
-      attachment.filePath,
-    );
+    final isImage = _isImageAttachment();
+    final publicUrl = _publicUrl();
 
     return Stack(
       clipBehavior: Clip.none,
       children: [
         AnimatedContainer(
-          duration: const Duration(
-            milliseconds: 200,
-          ),
+          duration: const Duration(milliseconds: 200),
           width: size,
           height: size,
           decoration: BoxDecoration(
             color: isOpening
                 ? colorScheme.primaryContainer
-                : colorScheme
-                .surfaceContainerHighest,
-            borderRadius:
-            BorderRadius.circular(16),
+                : colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: isOpening
                   ? colorScheme.primary
@@ -141,24 +171,18 @@ class AttachmentThumb extends StatelessWidget {
           child: Material(
             color: Colors.transparent,
             child: InkWell(
-              borderRadius:
-              BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(16),
               onTap: isOpening ? null : onTap,
               child: isOpening
                   ? Center(
-                child:
-                CircularProgressIndicator(
+                child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  color:
-                  colorScheme.primary,
+                  color: colorScheme.primary,
                 ),
               )
                   : ClipRRect(
-                borderRadius:
-                BorderRadius.circular(
-                  16,
-                ),
-                child: isImage
+                borderRadius: BorderRadius.circular(16),
+                child: isImage && publicUrl != null
                     ? Image.network(
                   publicUrl,
                   fit: BoxFit.cover,
@@ -167,70 +191,55 @@ class AttachmentThumb extends StatelessWidget {
                       child,
                       progress,
                       ) {
-                    if (progress ==
-                        null) {
+                    if (progress == null) {
                       return child;
                     }
 
+                    final expectedTotalBytes =
+                        progress.expectedTotalBytes;
+
+                    final value = expectedTotalBytes != null
+                        ? progress.cumulativeBytesLoaded /
+                        expectedTotalBytes
+                        : null;
+
                     return Center(
-                      child:
-                      CircularProgressIndicator(
+                      child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        value: progress
-                            .expectedTotalBytes !=
-                            null
-                            ? progress
-                            .cumulativeBytesLoaded /
-                            progress
-                                .expectedTotalBytes!
-                            : null,
+                        value: value,
+                        color: colorScheme.primary,
                       ),
                     );
                   },
-                  errorBuilder: (
-                      _,
-                      __,
-                      ___,
-                      ) =>
-                      _buildFileIcon(
-                        context,
-                      ),
+                  errorBuilder: (_, __, ___) {
+                    return _buildFileIcon(context);
+                  },
                 )
-                    : _buildFileIcon(
-                  context,
-                ),
+                    : _buildFileIcon(context),
               ),
             ),
           ),
         ),
 
-        /// DELETE BUTTON
-        if (canEdit &&
-            onDelete != null &&
-            !isOpening)
+        if (canEdit && onDelete != null && !isOpening)
           Positioned(
             top: -6,
             right: -6,
             child: Tooltip(
-              message:
-              'common.delete'.tr(),
-              child: GestureDetector(
-                onTap: onDelete,
-                child: Container(
-                  padding:
-                  const EdgeInsets.all(5),
-                  decoration:
-                  BoxDecoration(
-                    color:
-                    colorScheme.error,
-                    shape:
-                    BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.close,
-                    size: 14,
-                    color:
-                    colorScheme.onError,
+              message: 'common.delete'.tr(),
+              child: Material(
+                color: colorScheme.error,
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: onDelete,
+                  child: Padding(
+                    padding: const EdgeInsets.all(5),
+                    child: Icon(
+                      Icons.close,
+                      size: 14,
+                      color: colorScheme.onError,
+                    ),
                   ),
                 ),
               ),
@@ -240,37 +249,32 @@ class AttachmentThumb extends StatelessWidget {
     );
   }
 
-  Widget _buildFileIcon(
-      BuildContext context,
-      ) {
-    final colorScheme =
-        Theme.of(context).colorScheme;
+  Widget _buildFileIcon(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Center(
       child: Padding(
-        padding:
-        const EdgeInsets.all(6),
+        padding: const EdgeInsets.all(6),
         child: Column(
-          mainAxisAlignment:
-          MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              Icons.insert_drive_file,
+              Icons.insert_drive_file_outlined,
               size: 32,
-              color:
-              colorScheme.outline,
+              color: colorScheme.outline,
             ),
             const SizedBox(height: 6),
             Text(
-              attachment.fileName,
+              attachment.fileName.isEmpty
+                  ? 'attachments.file'.tr()
+                  : attachment.fileName,
               maxLines: 1,
-              overflow:
-              TextOverflow.ellipsis,
-              textAlign:
-              TextAlign.center,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),

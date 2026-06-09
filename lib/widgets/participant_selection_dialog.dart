@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:easy_localization/easy_localization.dart';
 
 import '../models/project_model.dart';
+import '../services/supabase_service.dart';
 
 class ParticipantSelectionDialog extends StatefulWidget {
   final List<Map<String, dynamic>> allUsers;
@@ -45,23 +46,27 @@ class _ParticipantSelectionDialogState
     _selectedRoles = {};
 
     for (final participant in widget.currentParticipants) {
-      if (participant.id.trim().isEmpty) {
+      final id = participant.id.trim();
+
+      if (id.isEmpty) {
         continue;
       }
 
-      _selectedIds.add(participant.id);
-      _selectedRoles[participant.id] = participant.role;
+      _selectedIds.add(id);
+      _selectedRoles[id] = participant.role;
     }
 
-    if (widget.ownerId.trim().isNotEmpty) {
-      _selectedIds.add(widget.ownerId);
-      _selectedRoles[widget.ownerId] = ProjectRole.owner;
+    final ownerId = widget.ownerId.trim();
+
+    if (ownerId.isNotEmpty) {
+      _selectedIds.add(ownerId);
+      _selectedRoles[ownerId] = ProjectRole.owner;
     }
 
     for (final id in _selectedIds) {
       _selectedRoles.putIfAbsent(
         id,
-            () => id == widget.ownerId
+            () => id == ownerId
             ? ProjectRole.owner
             : ProjectRole.editor,
       );
@@ -90,10 +95,8 @@ class _ParticipantSelectionDialogState
     return _usersForSelection.where((user) {
       final id = _getString(user, 'id').toLowerCase();
       final fullName = _getDisplayName(user).toLowerCase();
-      final firstName =
-      _getString(user, 'first_name').toLowerCase();
-      final lastName =
-      _getString(user, 'last_name').toLowerCase();
+      final firstName = _getString(user, 'first_name').toLowerCase();
+      final lastName = _getString(user, 'last_name').toLowerCase();
       final username = _getUsername(user).toLowerCase();
       final email = _getString(user, 'email').toLowerCase();
 
@@ -107,6 +110,56 @@ class _ParticipantSelectionDialogState
   }
 
   // =========================================================
+  // AVATAR
+  // =========================================================
+
+  String? _normalizeAvatarUrl(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return null;
+    }
+
+    final raw = value.trim();
+
+    const oldAvatarBucketMarker =
+        '/storage/v1/object/public/avatars/';
+
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      if (raw.contains(oldAvatarBucketMarker)) {
+        return raw.replaceFirst(
+          oldAvatarBucketMarker,
+          '/storage/v1/object/public/${SupabaseService.bucket}/',
+        );
+      }
+
+      return raw;
+    }
+
+    try {
+      var path = raw.replaceAll('\\', '/');
+
+      while (path.startsWith('/')) {
+        path = path.substring(1);
+      }
+
+      if (path.startsWith('avatars/')) {
+        path = path.substring('avatars/'.length);
+      }
+
+      if (path.startsWith('${SupabaseService.bucket}/')) {
+        path = path.substring(
+          '${SupabaseService.bucket}/'.length,
+        );
+      }
+
+      return SupabaseService.client.storage
+          .from(SupabaseService.bucket)
+          .getPublicUrl(path);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // =========================================================
   // BUILD
   // =========================================================
 
@@ -114,19 +167,20 @@ class _ParticipantSelectionDialogState
   Widget build(BuildContext context) {
     final screen = MediaQuery.of(context).size;
     final filteredUsers = _filteredUsers;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return AlertDialog(
       title: Text(
         'project.select_participants'.tr(),
       ),
       contentPadding: const EdgeInsets.fromLTRB(
-        24,
         20,
-        24,
+        16,
+        20,
         0,
       ),
       content: SizedBox(
-        width: screen.width > 600 ? 500 : screen.width * 0.92,
+        width: screen.width > 600 ? 520 : screen.width * 0.92,
         height: screen.height > 800 ? 620 : screen.height * 0.76,
         child: Column(
           children: [
@@ -143,8 +197,9 @@ class _ParticipantSelectionDialogState
                   ? _buildEmptyState()
                   : ListView.separated(
                 itemCount: filteredUsers.length,
-                separatorBuilder: (_, __) =>
-                const SizedBox(height: 8),
+                separatorBuilder: (_, __) {
+                  return const SizedBox(height: 8);
+                },
                 itemBuilder: (context, index) {
                   return _buildUserTile(
                     context,
@@ -156,6 +211,12 @@ class _ParticipantSelectionDialogState
           ],
         ),
       ),
+      actionsPadding: const EdgeInsets.fromLTRB(
+        16,
+        8,
+        16,
+        12,
+      ),
       actions: [
         TextButton(
           onPressed: () {
@@ -165,17 +226,30 @@ class _ParticipantSelectionDialogState
             'common.cancel'.tr(),
           ),
         ),
-        FilledButton(
+        FilledButton.icon(
           onPressed: _submit,
-          child: Text(
+          icon: const Icon(
+            Icons.check,
+            size: 18,
+          ),
+          label: Text(
             'common.done'.tr(),
           ),
         ),
       ],
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(
+          color: colorScheme.outlineVariant,
+          width: 0.6,
+        ),
+      ),
     );
   }
 
   Widget _buildSearchField() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return TextField(
       controller: _searchController,
       textInputAction: TextInputAction.search,
@@ -195,7 +269,26 @@ class _ParticipantSelectionDialogState
             });
           },
         ),
-        border: const OutlineInputBorder(),
+        filled: true,
+        fillColor: colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.55,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(
+            color: colorScheme.outlineVariant,
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(
+            color: colorScheme.primary,
+            width: 1.2,
+          ),
+        ),
       ),
       onChanged: (value) {
         setState(() {
@@ -206,26 +299,55 @@ class _ParticipantSelectionDialogState
   }
 
   Widget _buildSelectedInfo() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
     final selectedCount = _selectedIds.length;
 
     return Align(
       alignment: Alignment.centerLeft,
-      child: Text(
-        '${'members.title'.tr()}: $selectedCount',
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: Theme.of(context)
-              .colorScheme
-              .onSurfaceVariant,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: 5,
+        ),
+        decoration: BoxDecoration(
+          color: colorScheme.primaryContainer.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          '${'common.selected'.tr()}: $selectedCount',
+          style: textTheme.labelMedium?.copyWith(
+            color: colorScheme.onPrimaryContainer,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );
   }
 
   Widget _buildEmptyState() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
     return Center(
-      child: Text(
-        'members.empty'.tr(),
-        textAlign: TextAlign.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.person_search_outlined,
+            size: 42,
+            color: colorScheme.outline,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'members.empty'.tr(),
+            textAlign: TextAlign.center,
+            style: textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -258,24 +380,30 @@ class _ParticipantSelectionDialogState
       duration: const Duration(milliseconds: 180),
       decoration: BoxDecoration(
         color: isSelected
-            ? colorScheme.primaryContainer.withValues(alpha: 0.35)
+            ? colorScheme.primaryContainer.withValues(alpha: 0.32)
             : colorScheme.surface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isSelected
               ? colorScheme.primary.withValues(alpha: 0.55)
               : colorScheme.outlineVariant,
+          width: isSelected ? 1.1 : 0.7,
         ),
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         onTap: isOwner
             ? null
             : () {
           _toggleSelected(id);
         },
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(
+            10,
+            10,
+            12,
+            10,
+          ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -288,7 +416,7 @@ class _ParticipantSelectionDialogState
                 },
               ),
 
-              const SizedBox(width: 6),
+              const SizedBox(width: 4),
 
               _buildAvatar(
                 context,
@@ -319,6 +447,7 @@ class _ParticipantSelectionDialogState
                     Wrap(
                       spacing: 8,
                       runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         if (username.isNotEmpty)
                           Text(
@@ -329,20 +458,17 @@ class _ParticipantSelectionDialogState
                           ),
 
                         if (globalRole.isNotEmpty)
-                          Text(
-                            _globalRoleText(globalRole),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
+                          _buildSmallChip(
+                            context,
+                            text: _globalRoleText(globalRole),
+                            isPrimary: false,
                           ),
 
                         if (isOwner)
-                          Text(
-                            'project_roles.owner'.tr(),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colorScheme.primary,
-                              fontWeight: FontWeight.bold,
-                            ),
+                          _buildSmallChip(
+                            context,
+                            text: 'project_roles.owner'.tr(),
+                            isPrimary: true,
                           ),
                       ],
                     ),
@@ -366,6 +492,37 @@ class _ParticipantSelectionDialogState
     );
   }
 
+  Widget _buildSmallChip(
+      BuildContext context, {
+        required String text,
+        required bool isPrimary,
+      }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 2,
+      ),
+      decoration: BoxDecoration(
+        color: isPrimary
+            ? colorScheme.primaryContainer
+            : colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        text,
+        style: textTheme.labelSmall?.copyWith(
+          color: isPrimary
+              ? colorScheme.onPrimaryContainer
+              : colorScheme.onSurfaceVariant,
+          fontWeight: isPrimary ? FontWeight.w700 : FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
   Widget _buildAvatar(
       BuildContext context, {
         required String fullName,
@@ -374,29 +531,69 @@ class _ParticipantSelectionDialogState
       }) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    if (avatarUrl.isNotEmpty && avatarUrl.startsWith('http')) {
-      return CircleAvatar(
-        radius: 22,
-        backgroundColor: isOwner
-            ? colorScheme.primaryContainer
-            : colorScheme.surfaceContainerHighest,
-        backgroundImage: NetworkImage(avatarUrl),
-      );
-    }
+    final normalizedAvatarUrl = _normalizeAvatarUrl(avatarUrl);
 
-    return CircleAvatar(
-      radius: 22,
-      backgroundColor: isOwner
-          ? colorScheme.primaryContainer
-          : colorScheme.surfaceContainerHighest,
+    final backgroundColor = isOwner
+        ? colorScheme.primaryContainer
+        : colorScheme.surfaceContainerHighest;
+
+    final foregroundColor = isOwner
+        ? colorScheme.onPrimaryContainer
+        : colorScheme.onSurfaceVariant;
+
+    final fallback = Center(
       child: Text(
         _getInitials(fullName),
         style: TextStyle(
-          color: isOwner
-              ? colorScheme.onPrimaryContainer
-              : colorScheme.onSurfaceVariant,
-          fontWeight: FontWeight.bold,
+          color: foregroundColor,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
         ),
+      ),
+    );
+
+    return Container(
+      width: 44,
+      height: 44,
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: isOwner
+              ? colorScheme.primary.withValues(alpha: 0.45)
+              : colorScheme.outlineVariant,
+          width: isOwner ? 1.2 : 0.8,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: normalizedAvatarUrl == null
+          ? fallback
+          : Image.network(
+        normalizedAvatarUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) {
+          return fallback;
+        },
+        loadingBuilder: (
+            context,
+            child,
+            progress,
+            ) {
+          if (progress == null) {
+            return child;
+          }
+
+          return Center(
+            child: SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: colorScheme.primary,
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -414,7 +611,7 @@ class _ParticipantSelectionDialogState
       return Row(
         children: [
           Icon(
-            Icons.verified_user,
+            Icons.verified_user_outlined,
             size: 18,
             color: colorScheme.primary,
           ),
@@ -431,12 +628,15 @@ class _ParticipantSelectionDialogState
     }
 
     return DropdownButtonFormField<ProjectRole>(
-      initialValue:
-      role == ProjectRole.owner ? ProjectRole.editor : role,
+      initialValue: role == ProjectRole.owner
+          ? ProjectRole.editor
+          : role,
       isDense: true,
       decoration: InputDecoration(
         labelText: 'members.role'.tr(),
-        border: const OutlineInputBorder(),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 12,
           vertical: 10,
@@ -510,9 +710,9 @@ class _ParticipantSelectionDialogState
         return 1;
       }
 
-      return a.fullName
-          .toLowerCase()
-          .compareTo(b.fullName.toLowerCase());
+      return a.fullName.toLowerCase().compareTo(
+        b.fullName.toLowerCase(),
+      );
     });
 
     Navigator.pop<List<ProjectParticipant>>(
@@ -548,14 +748,16 @@ class _ParticipantSelectionDialogState
     }
 
     for (final participant in widget.currentParticipants) {
-      if (participant.id.trim().isEmpty) {
+      final id = participant.id.trim();
+
+      if (id.isEmpty) {
         continue;
       }
 
       uniqueUsers.putIfAbsent(
-        participant.id,
+        id,
             () => {
-          'id': participant.id,
+          'id': id,
           'full_name': participant.fullName,
           'username': participant.username,
           'avatar_url': participant.avatarUrl,
@@ -613,15 +815,14 @@ class _ParticipantSelectionDialogState
         ? ProjectRole.owner
         : _selectedRoles[id] ?? ProjectRole.editor;
 
+    final username = _getUsername(user);
+    final avatarUrl = _getString(user, 'avatar_url');
+
     return ProjectParticipant(
       id: id,
       fullName: _getDisplayName(user),
-      username: _getUsername(user).isEmpty
-          ? null
-          : _getUsername(user),
-      avatarUrl: _getString(user, 'avatar_url').isEmpty
-          ? null
-          : _getString(user, 'avatar_url'),
+      username: username.isEmpty ? null : username,
+      avatarUrl: avatarUrl.isEmpty ? null : avatarUrl,
       role: role,
     );
   }
@@ -631,7 +832,8 @@ class _ParticipantSelectionDialogState
       ) {
     final fullName = _getString(user, 'full_name');
 
-    if (fullName.isNotEmpty) {
+    if (fullName.isNotEmpty &&
+        fullName.toLowerCase() != 'unknown') {
       return fullName;
     }
 

@@ -1,5 +1,5 @@
-import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 import '../../services/grade_service.dart';
 import '../../utils/snackbar_manager.dart';
@@ -33,12 +33,27 @@ class _GradeSectionState extends State<GradeSection> {
   @override
   void initState() {
     super.initState();
+
     _loadGrade();
+  }
+
+  @override
+  void didUpdateWidget(covariant GradeSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.projectId != widget.projectId) {
+      _grade = null;
+      _selectedGrade = null;
+      _commentController.clear();
+
+      _loadGrade();
+    }
   }
 
   @override
   void dispose() {
     _commentController.dispose();
+
     super.dispose();
   }
 
@@ -47,7 +62,9 @@ class _GradeSectionState extends State<GradeSection> {
   // =========================================================
 
   Future<void> _loadGrade() async {
-    if (widget.projectId.trim().isEmpty) {
+    final projectId = widget.projectId.trim();
+
+    if (projectId.isEmpty) {
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -58,8 +75,14 @@ class _GradeSectionState extends State<GradeSection> {
     }
 
     try {
+      if (mounted) {
+        setState(() {
+          _isLoading = true;
+        });
+      }
+
       final grade = await _gradeService.getGrade(
-        widget.projectId,
+        projectId,
       );
 
       if (!mounted) {
@@ -69,15 +92,16 @@ class _GradeSectionState extends State<GradeSection> {
       setState(() {
         _grade = grade;
         _selectedGrade = grade?.grade;
-
         _commentController.text = grade?.comment ?? '';
       });
     } catch (_) {
-      if (mounted) {
-        SnackbarManager.showError(
-          'grades.load_error'.tr(),
-        );
+      if (!mounted) {
+        return;
       }
+
+      SnackbarManager.showError(
+        'grades.load_error'.tr(),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -96,6 +120,15 @@ class _GradeSectionState extends State<GradeSection> {
       return;
     }
 
+    final projectId = widget.projectId.trim();
+
+    if (projectId.isEmpty) {
+      SnackbarManager.showError(
+        'errors.project_not_found'.tr(),
+      );
+      return;
+    }
+
     final grade = _selectedGrade;
 
     if (grade == null) {
@@ -111,9 +144,9 @@ class _GradeSectionState extends State<GradeSection> {
       });
 
       final savedGrade = await _gradeService.saveGrade(
-        projectId: widget.projectId,
+        projectId: projectId,
         grade: grade,
-        comment: _commentController.text,
+        comment: _commentController.text.trim(),
       );
 
       if (!mounted) {
@@ -130,11 +163,13 @@ class _GradeSectionState extends State<GradeSection> {
         'grades.saved'.tr(),
       );
     } catch (_) {
-      if (mounted) {
-        SnackbarManager.showError(
-          'grades.save_error'.tr(),
-        );
+      if (!mounted) {
+        return;
       }
+
+      SnackbarManager.showError(
+        'grades.save_error'.tr(),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -145,33 +180,29 @@ class _GradeSectionState extends State<GradeSection> {
   }
 
   // =========================================================
-  // UI
+  // TEXT
+  // =========================================================
+
+  String _text({
+    required String ru,
+    required String en,
+  }) {
+    return context.locale.languageCode == 'ru' ? ru : en;
+  }
+
+  // =========================================================
+  // BUILD
   // =========================================================
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     if (_isLoading) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                'grades.loading'.tr(),
-              ),
-            ],
-          ),
-        ),
+      return _buildLoading(
+        theme,
+        colorScheme,
       );
     }
 
@@ -180,31 +211,55 @@ class _GradeSectionState extends State<GradeSection> {
         _commentController.text.trim().isNotEmpty;
 
     return Card(
+      elevation: 0,
+      color: colorScheme.surfaceContainerLowest,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: colorScheme.outlineVariant,
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildHeader(theme),
+            _buildHeader(
+              theme,
+              colorScheme,
+            ),
 
             const SizedBox(height: 16),
 
             if (!widget.canEdit && !hasGrade)
-              _buildEmptyReadonly(theme)
+              _buildEmptyReadonly(
+                theme,
+                colorScheme,
+              )
             else ...[
-              _buildGradeDropdown(),
+              _buildGradeDropdown(
+                colorScheme,
+              ),
 
               const SizedBox(height: 12),
 
-              _buildCommentField(),
+              _buildCommentField(
+                colorScheme,
+              ),
 
               const SizedBox(height: 12),
 
-              _buildMeta(theme),
+              _buildMeta(
+                theme,
+                colorScheme,
+              ),
 
               if (!widget.canEdit) ...[
                 const SizedBox(height: 12),
-                _buildReadonlyHint(theme),
+                _buildReadonlyHint(
+                  theme,
+                  colorScheme,
+                ),
               ],
 
               if (widget.canEdit) ...[
@@ -218,32 +273,130 @@ class _GradeSectionState extends State<GradeSection> {
     );
   }
 
-  Widget _buildHeader(ThemeData theme) {
+  // =========================================================
+  // LOADING
+  // =========================================================
+
+  Widget _buildLoading(
+      ThemeData theme,
+      ColorScheme colorScheme,
+      ) {
+    return Card(
+      elevation: 0,
+      color: colorScheme.surfaceContainerLowest,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: colorScheme.outlineVariant,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'grades.loading'.tr(),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // =========================================================
+  // HEADER
+  // =========================================================
+
+  Widget _buildHeader(
+      ThemeData theme,
+      ColorScheme colorScheme,
+      ) {
     return Row(
       children: [
-        Icon(
-          Icons.grade,
-          color: theme.colorScheme.primary,
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: colorScheme.primaryContainer,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(
+            Icons.grade_outlined,
+            color: colorScheme.onPrimaryContainer,
+          ),
         ),
-        const SizedBox(width: 8),
+
+        const SizedBox(width: 12),
+
         Expanded(
-          child: Text(
-            'grades.title'.tr(),
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'grades.title'.tr(),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                widget.canEdit
+                    ? _text(
+                  ru: 'Выставьте итоговую оценку проекта',
+                  en: 'Set the final project grade',
+                )
+                    : _text(
+                  ru: 'Оценка доступна только для просмотра',
+                  en: 'The grade is read-only',
+                ),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ),
         ),
       ],
     );
   }
 
-  Widget _buildGradeDropdown() {
+  // =========================================================
+  // GRADE DROPDOWN
+  // =========================================================
+
+  Widget _buildGradeDropdown(
+      ColorScheme colorScheme,
+      ) {
     return DropdownButtonFormField<int>(
       initialValue: _selectedGrade,
       decoration: InputDecoration(
         labelText: 'grades.grade'.tr(),
-        border: const OutlineInputBorder(),
+        prefixIcon: const Icon(
+          Icons.school_outlined,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(
+            color: colorScheme.outlineVariant,
+          ),
+        ),
       ),
       items: const [
         DropdownMenuItem(
@@ -273,20 +426,56 @@ class _GradeSectionState extends State<GradeSection> {
     );
   }
 
-  Widget _buildCommentField() {
+  // =========================================================
+  // COMMENT FIELD
+  // =========================================================
+
+  Widget _buildCommentField(
+      ColorScheme colorScheme,
+      ) {
     return TextFormField(
       controller: _commentController,
       enabled: widget.canEdit,
       minLines: 2,
       maxLines: 4,
+      textCapitalization: TextCapitalization.sentences,
       decoration: InputDecoration(
         labelText: 'grades.comment'.tr(),
-        border: const OutlineInputBorder(),
+        prefixIcon: const Icon(
+          Icons.comment_outlined,
+        ),
+        alignLabelWithHint: true,
+        filled: true,
+        fillColor: widget.canEdit
+            ? colorScheme.surface
+            : colorScheme.surfaceContainerHighest,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(
+            color: colorScheme.outlineVariant,
+          ),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(
+            color: colorScheme.outlineVariant,
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildMeta(ThemeData theme) {
+  // =========================================================
+  // META
+  // =========================================================
+
+  Widget _buildMeta(
+      ThemeData theme,
+      ColorScheme colorScheme,
+      ) {
     final grade = _grade;
 
     if (grade == null) {
@@ -295,59 +484,134 @@ class _GradeSectionState extends State<GradeSection> {
 
     final updatedAt = grade.updatedAt;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (grade.gradedBy.isNotEmpty)
-          Text(
-            '${'grades.graded_by'.tr()}: ${grade.gradedBy}',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (grade.gradedBy.isNotEmpty) ...[
+            Row(
+              children: [
+                Icon(
+                  Icons.person_outline,
+                  size: 18,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${'grades.graded_by'.tr()}: ${grade.gradedBy}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
             ),
+            const SizedBox(height: 6),
+          ],
+          Row(
+            children: [
+              Icon(
+                Icons.update_outlined,
+                size: 18,
+                color: colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${'grades.updated'.tr()}: ${DateFormat.yMd(context.locale.toString()).add_Hm().format(updatedAt)}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
           ),
-
-        const SizedBox(height: 4),
-
-        Text(
-          '${'grades.updated'.tr()}: ${DateFormat.yMd(context.locale.toString()).add_Hm().format(updatedAt)}',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildReadonlyHint(ThemeData theme) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(
-          Icons.info_outline,
-          size: 18,
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            'grades.readonly'.tr(),
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildEmptyReadonly(ThemeData theme) {
-    return Text(
-      'grades.not_graded'.tr(),
-      style: theme.textTheme.bodyMedium?.copyWith(
-        color: theme.colorScheme.onSurfaceVariant,
+        ],
       ),
     );
   }
+
+  // =========================================================
+  // READONLY
+  // =========================================================
+
+  Widget _buildReadonlyHint(
+      ThemeData theme,
+      ColorScheme colorScheme,
+      ) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.info_outline,
+            size: 18,
+            color: colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'grades.readonly'.tr(),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyReadonly(
+      ThemeData theme,
+      ColorScheme colorScheme,
+      ) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        vertical: 28,
+        horizontal: 12,
+      ),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            Icons.grade_outlined,
+            size: 42,
+            color: colorScheme.outline,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'grades.not_graded'.tr(),
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =========================================================
+  // SAVE BUTTON
+  // =========================================================
 
   Widget _buildSaveButton() {
     return SizedBox(
@@ -362,9 +626,13 @@ class _GradeSectionState extends State<GradeSection> {
             strokeWidth: 2,
           ),
         )
-            : const Icon(Icons.save),
+            : const Icon(
+          Icons.save_outlined,
+        ),
         label: Text(
-          'grades.save'.tr(),
+          _isSaving
+              ? 'common.saving'.tr()
+              : 'grades.save'.tr(),
         ),
       ),
     );

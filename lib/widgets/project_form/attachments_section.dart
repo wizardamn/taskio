@@ -30,107 +30,152 @@ class AttachmentsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildHeader(context, colorScheme),
-        const SizedBox(height: 12),
-        _buildContent(context, colorScheme),
-      ],
-    );
+    return Card(
+      elevation: 0,
+      color: colorScheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.7),
+          width: 0.7,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          16,
+          14,
+          16,
+          16,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildHeader(
+              context,
+              colorScheme,
+            ),
+            const SizedBox(height: 14),
+            _buildContent(
+              context,
+              colorScheme,
+            ),
+          ],
+        ),
+      ),
+    )
+        .animate()
+        .fadeIn(delay: 180.ms)
+        .slideX(begin: 0.04, end: 0);
   }
 
   // =========================================================
   // HEADER
   // =========================================================
 
-  Widget _buildHeader(BuildContext context, ColorScheme colorScheme) {
+  Widget _buildHeader(
+      BuildContext context,
+      ColorScheme colorScheme,
+      ) {
+    final textTheme = Theme.of(context).textTheme;
+
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Row(
-          children: [
-            Icon(
-              Icons.attachment_rounded,
-              size: 20,
-              color: colorScheme.primary,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'attachments.title'.tr(),
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            if (attachments.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(left: 8),
-                child: Container(
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    attachments.length.toString(),
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: colorScheme.onPrimaryContainer,
-                    ),
-                  ),
+        Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: colorScheme.primaryContainer,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Icon(
+            Icons.attachment_rounded,
+            size: 22,
+            color: colorScheme.primary,
+          ),
+        ),
+
+        const SizedBox(width: 12),
+
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'attachments.title'.tr(),
+                style: textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-          ],
+              const SizedBox(height: 2),
+              Text(
+                _attachmentsCountText(context),
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
         ),
+
         if (canEditContent)
-          TextButton.icon(
-            icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
-            label: Text('common.add'.tr()),
+          FilledButton.tonalIcon(
+            icon: isUploading
+                ? SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: colorScheme.primary,
+              ),
+            )
+                : const Icon(
+              Icons.add_rounded,
+              size: 18,
+            ),
+            label: Text(
+              'common.add'.tr(),
+            ),
             onPressed: isUploading ? null : onPick,
           ),
       ],
-    ).animate().fadeIn(delay: 100.ms);
+    );
+  }
+
+  String _attachmentsCountText(BuildContext context) {
+    final count = attachments.length;
+
+    if (count == 0) {
+      return 'attachments.empty'.tr();
+    }
+
+    if (context.locale.languageCode != 'ru') {
+      return count == 1 ? '1 file' : '$count files';
+    }
+
+    if (count == 1) {
+      return '1 файл';
+    }
+
+    if (count >= 2 && count <= 4) {
+      return '$count файла';
+    }
+
+    return '$count файлов';
   }
 
   // =========================================================
   // CONTENT
   // =========================================================
 
-  Widget _buildContent(BuildContext context, ColorScheme colorScheme) {
+  Widget _buildContent(
+      BuildContext context,
+      ColorScheme colorScheme,
+      ) {
     if (attachments.isEmpty && !isUploading) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 32),
-        decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHighest
-              .withValues(alpha: 0.3),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: colorScheme.outlineVariant
-                .withValues(alpha: 0.2),
-          ),
-        ),
-        child: Column(
-          children: [
-            Icon(
-              Icons.cloud_off_rounded,
-              color: colorScheme.outline.withValues(alpha: 0.6),
-              size: 32,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'attachments.empty'.tr(),
-              style: TextStyle(
-                color: colorScheme.outline,
-                fontSize: 13,
-              ),
-            ),
-          ],
-        ),
-      ).animate().fadeIn(duration: 300.ms);
+      return _buildEmptyState(
+        context,
+        colorScheme,
+      );
     }
 
     return Wrap(
@@ -138,48 +183,171 @@ class AttachmentsSection extends StatelessWidget {
       runSpacing: 12,
       children: [
         ...attachments.map(
-              (att) => _AttachmentThumb(
-            key: ValueKey('${att.filePath}_${att.fileName}'),
-            attachment: att,
-            canEdit: canEditContent && isOwner,
-            isOpening: currentlyOpeningFile == att.filePath,
-            onTap: () => onOpen(att),
-            onDelete: () => onDelete(att),
+              (attachment) => _AttachmentThumb(
+            key: ValueKey(
+              '${attachment.id}_${attachment.filePath}_${attachment.fileName}',
+            ),
+            attachment: attachment,
+            canEdit: canEditContent,
+            isOpening: currentlyOpeningFile == attachment.filePath,
+            onTap: () {
+              if (currentlyOpeningFile == attachment.filePath) {
+                return;
+              }
+
+              onOpen(attachment);
+            },
+            onDelete: () async {
+              final confirmed = await _confirmDelete(
+                context,
+                attachment,
+              );
+
+              if (confirmed == true) {
+                onDelete(attachment);
+              }
+            },
           )
               .animate()
-              .scale(duration: 200.ms, curve: Curves.easeOut)
+              .scale(
+            duration: 180.ms,
+            curve: Curves.easeOut,
+          )
               .fadeIn(),
         ),
-        if (isUploading) _buildUploadingThumb(colorScheme),
+        if (isUploading)
+          _buildUploadingThumb(
+            colorScheme,
+          ),
       ],
     );
   }
 
-  Widget _buildUploadingThumb(ColorScheme colorScheme) {
+  Widget _buildEmptyState(
+      BuildContext context,
+      ColorScheme colorScheme,
+      ) {
+    final textTheme = Theme.of(context).textTheme;
+
     return Container(
-      width: 80,
-      height: 80,
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        vertical: 28,
+        horizontal: 16,
+      ),
       decoration: BoxDecoration(
-        color: colorScheme.primaryContainer
-            .withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(12),
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: colorScheme.primary
-              .withValues(alpha: 0.3),
+          color: colorScheme.outlineVariant.withValues(alpha: 0.55),
+          width: 0.7,
         ),
       ),
-      child: const Center(
+      child: Column(
+        children: [
+          Icon(
+            Icons.cloud_upload_outlined,
+            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.75),
+            size: 34,
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'attachments.empty'.tr(),
+            textAlign: TextAlign.center,
+            style: textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (canEditContent) ...[
+            const SizedBox(height: 4),
+            Text(
+              'attachments.file'.tr(),
+              textAlign: TextAlign.center,
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      ),
+    ).animate().fadeIn(duration: 250.ms);
+  }
+
+  Widget _buildUploadingThumb(ColorScheme colorScheme) {
+    return Container(
+      width: 92,
+      height: 92,
+      decoration: BoxDecoration(
+        color: colorScheme.primaryContainer.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: colorScheme.primary.withValues(alpha: 0.35),
+          width: 0.8,
+        ),
+      ),
+      child: Center(
         child: SizedBox(
           width: 24,
           height: 24,
-          child: CircularProgressIndicator(strokeWidth: 2.5),
+          child: CircularProgressIndicator(
+            strokeWidth: 2.5,
+            color: colorScheme.primary,
+          ),
         ),
       ),
     )
-        .animate(onPlay: (c) => c.repeat())
+        .animate(
+      onPlay: (controller) => controller.repeat(),
+    )
         .shimmer(
       duration: 1500.ms,
-      color: Colors.white.withValues(alpha: 0.3),
+      color: Colors.white.withValues(alpha: 0.25),
+    );
+  }
+
+  Future<bool?> _confirmDelete(
+      BuildContext context,
+      Attachment attachment,
+      ) {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(
+            'common.delete'.tr(),
+          ),
+          content: Text(
+            context.locale.languageCode == 'ru'
+                ? 'Удалить файл «${attachment.fileName}»?'
+                : 'Delete file “${attachment.fileName}”?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(
+                  dialogContext,
+                  false,
+                );
+              },
+              child: Text(
+                'common.cancel'.tr(),
+              ),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(
+                  dialogContext,
+                  true,
+                );
+              },
+              child: Text(
+                'common.delete'.tr(),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -204,69 +372,173 @@ class _AttachmentThumb extends StatelessWidget {
     required this.onDelete,
   });
 
+  String get _extension {
+    final name = attachment.fileName.trim();
+
+    if (!name.contains('.')) {
+      return '';
+    }
+
+    return name.split('.').last.toLowerCase().trim();
+  }
+
+  bool get _isImage {
+    return const {
+      'jpg',
+      'jpeg',
+      'png',
+      'gif',
+      'webp',
+      'bmp',
+    }.contains(_extension);
+  }
+
+  bool get _isPdf => _extension == 'pdf';
+
+  bool get _isWord {
+    return const {
+      'doc',
+      'docx',
+    }.contains(_extension);
+  }
+
+  bool get _isExcel {
+    return const {
+      'xls',
+      'xlsx',
+      'csv',
+    }.contains(_extension);
+  }
+
+  bool get _isArchive {
+    return const {
+      'zip',
+      'rar',
+      '7z',
+    }.contains(_extension);
+  }
+
+  IconData get _fileIcon {
+    if (_isImage) {
+      return Icons.image_outlined;
+    }
+
+    if (_isPdf) {
+      return Icons.picture_as_pdf_outlined;
+    }
+
+    if (_isWord) {
+      return Icons.description_outlined;
+    }
+
+    if (_isExcel) {
+      return Icons.table_chart_outlined;
+    }
+
+    if (_isArchive) {
+      return Icons.folder_zip_outlined;
+    }
+
+    return Icons.insert_drive_file_outlined;
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
-    return InkWell(
-      onTap: isOpening ? null : onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (isOpening)
-                  const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                else
-                  const Icon(Icons.insert_drive_file_outlined),
-                const SizedBox(height: 4),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: Text(
-                    attachment.fileName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 10),
-                    textAlign: TextAlign.center,
+    return Tooltip(
+      message: attachment.fileName,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: isOpening ? null : onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                width: 92,
+                height: 92,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isOpening
+                      ? colorScheme.primaryContainer.withValues(alpha: 0.55)
+                      : colorScheme.surfaceContainerHighest.withValues(alpha: 0.8),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isOpening
+                        ? colorScheme.primary.withValues(alpha: 0.55)
+                        : colorScheme.outlineVariant,
+                    width: isOpening ? 1.1 : 0.7,
                   ),
                 ),
-              ],
-            ),
-          ),
-          if (canEdit && !isOpening)
-            Positioned(
-              top: -6,
-              right: -6,
-              child: GestureDetector(
-                onTap: onDelete,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: colorScheme.error,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.close,
-                    size: 14,
-                    color: colorScheme.onError,
-                  ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (isOpening)
+                      SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: colorScheme.primary,
+                        ),
+                      )
+                    else
+                      Icon(
+                        _fileIcon,
+                        size: 28,
+                        color: colorScheme.primary,
+                      ),
+
+                    const SizedBox(height: 8),
+
+                    Text(
+                      attachment.fileName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: textTheme.labelSmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                        height: 1.1,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-        ],
+
+              if (canEdit && !isOpening)
+                Positioned(
+                  top: -7,
+                  right: -7,
+                  child: Tooltip(
+                    message: 'common.delete'.tr(),
+                    child: Material(
+                      color: colorScheme.error,
+                      shape: const CircleBorder(),
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: onDelete,
+                        customBorder: const CircleBorder(),
+                        child: SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: Icon(
+                            Icons.close_rounded,
+                            size: 15,
+                            color: colorScheme.onError,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

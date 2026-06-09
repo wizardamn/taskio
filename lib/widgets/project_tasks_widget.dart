@@ -97,11 +97,13 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
 
       await _taskService.refreshTasks(projectId);
     } catch (e) {
-      if (mounted) {
-        SnackbarManager.showError(
-          ErrorMapper.map(e),
-        );
+      if (!mounted) {
+        return;
       }
+
+      SnackbarManager.showError(
+        ErrorMapper.map(e),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -159,15 +161,21 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
 
       await _taskService.refreshTasks(projectId);
 
+      if (!mounted) {
+        return;
+      }
+
       SnackbarManager.showSuccess(
         'tasks.added'.tr(),
       );
     } catch (e) {
-      if (mounted) {
-        SnackbarManager.showError(
-          ErrorMapper.map(e),
-        );
+      if (!mounted) {
+        return;
       }
+
+      SnackbarManager.showError(
+        ErrorMapper.map(e),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -188,7 +196,7 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
 
     final result = await showDialog<bool>(
       context: context,
-      builder: (_) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: Text(
             'tasks.delete_title'.tr(),
@@ -199,17 +207,26 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
           actions: [
             TextButton(
               onPressed: () {
-                Navigator.pop(context, false);
+                Navigator.pop(
+                  dialogContext,
+                  false,
+                );
               },
               child: Text(
                 'common.cancel'.tr(),
               ),
             ),
-            FilledButton(
+            FilledButton.icon(
               onPressed: () {
-                Navigator.pop(context, true);
+                Navigator.pop(
+                  dialogContext,
+                  true,
+                );
               },
-              child: Text(
+              icon: const Icon(
+                Icons.delete_outline,
+              ),
+              label: Text(
                 'common.delete'.tr(),
               ),
             ),
@@ -236,7 +253,7 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
 
     final confirmed = await _confirmDelete();
 
-    if (!confirmed) {
+    if (!mounted || !confirmed) {
       return;
     }
 
@@ -249,17 +266,21 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
 
       await _taskService.refreshTasks(widget.projectId);
 
-      if (mounted) {
-        SnackbarManager.showSuccess(
-          'tasks.deleted'.tr(),
-        );
+      if (!mounted) {
+        return;
       }
+
+      SnackbarManager.showSuccess(
+        'tasks.deleted'.tr(),
+      );
     } catch (e) {
-      if (mounted) {
-        SnackbarManager.showError(
-          ErrorMapper.map(e),
-        );
+      if (!mounted) {
+        return;
       }
+
+      SnackbarManager.showError(
+        ErrorMapper.map(e),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -294,11 +315,13 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
 
       await _taskService.refreshTasks(widget.projectId);
     } catch (e) {
-      if (mounted) {
-        SnackbarManager.showError(
-          ErrorMapper.map(e),
-        );
+      if (!mounted) {
+        return;
       }
+
+      SnackbarManager.showError(
+        ErrorMapper.map(e),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -337,6 +360,14 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
     final textTheme = theme.textTheme;
 
     return Card(
+      elevation: 0,
+      color: colorScheme.surfaceContainerLowest,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: colorScheme.outlineVariant,
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -347,12 +378,12 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
               colorScheme,
             ),
 
-            const SizedBox(height: 12),
-
             if (widget.canEdit) ...[
+              const SizedBox(height: 14),
               _buildInput(colorScheme),
-              const SizedBox(height: 4),
             ],
+
+            const SizedBox(height: 14),
 
             StreamBuilder<List<TaskModel>>(
               stream: _tasksStream,
@@ -364,14 +395,7 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
                 if (!snapshot.hasData &&
                     snapshot.connectionState ==
                         ConnectionState.waiting) {
-                  return const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                      ),
-                    ),
-                  );
+                  return _buildLoading(colorScheme);
                 }
 
                 final tasks = snapshot.data ?? const <TaskModel>[];
@@ -402,40 +426,77 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
       ) {
     return Row(
       children: [
-        Icon(
-          Icons.checklist,
-          color: colorScheme.primary,
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: colorScheme.primaryContainer,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(
+            Icons.checklist_outlined,
+            color: colorScheme.onPrimaryContainer,
+          ),
         ),
 
-        const SizedBox(width: 8),
+        const SizedBox(width: 12),
 
         Expanded(
-          child: Text(
-            'tasks.title'.tr(),
-            style: textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'tasks.title'.tr(),
+                style: textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                widget.canEdit
+                    ? _text(
+                  ru: 'Добавляйте и отмечайте задачи проекта',
+                  en: 'Add and complete project tasks',
+                )
+                    : _text(
+                  ru: 'Просмотр задач проекта',
+                  en: 'Project tasks view',
+                ),
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ),
         ),
 
         if (_isRefreshing)
-          const SizedBox(
-            width: 18,
-            height: 18,
+          SizedBox(
+            width: 20,
+            height: 20,
             child: CircularProgressIndicator(
               strokeWidth: 2,
+              color: colorScheme.primary,
             ),
           )
         else
           IconButton(
             tooltip: 'common.refresh'.tr(),
             onPressed: _refreshTasks,
-            icon: const Icon(
+            icon: Icon(
               Icons.refresh,
+              color: colorScheme.onSurfaceVariant,
             ),
           ),
       ],
     );
+  }
+
+  String _text({
+    required String ru,
+    required String en,
+  }) {
+    return context.locale.languageCode == 'ru' ? ru : en;
   }
 
   // =========================================================
@@ -460,8 +521,17 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
               isDense: true,
               filled: true,
               fillColor: colorScheme.surfaceContainerHighest,
+              prefixIcon: const Icon(
+                Icons.task_alt_outlined,
+              ),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(
+                  color: colorScheme.outlineVariant,
+                ),
               ),
             ),
           ),
@@ -518,8 +588,6 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
           confirmDismiss: (_) async {
             await _deleteTask(task);
 
-            // Возвращаем false, потому что список сам обновится через stream.
-            // Так Dismissible не удаляет элемент раньше базы данных.
             return false;
           },
           background: Container(
@@ -529,10 +597,10 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
             ),
             decoration: BoxDecoration(
               color: colorScheme.errorContainer,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(14),
             ),
             child: Icon(
-              Icons.delete,
+              Icons.delete_outline,
               color: colorScheme.onErrorContainer,
             ),
           ),
@@ -546,22 +614,61 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
   }
 
   // =========================================================
-  // EMPTY / ERROR
+  // LOADING / EMPTY / ERROR
   // =========================================================
+
+  Widget _buildLoading(ColorScheme colorScheme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        vertical: 20,
+      ),
+      child: Column(
+        children: List.generate(
+          3,
+              (index) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: index == 2 ? 0 : 8,
+              ),
+              child: Container(
+                height: 48,
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              )
+                  .animate(
+                onPlay: (controller) {
+                  controller.repeat(
+                    reverse: true,
+                  );
+                },
+              )
+                  .fade(
+                begin: 0.45,
+                end: 0.95,
+                duration: 900.ms,
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
 
   Widget _buildEmpty(
       ColorScheme colorScheme,
       ) {
     return Padding(
       padding: const EdgeInsets.symmetric(
-        vertical: 32,
+        vertical: 28,
       ),
       child: Center(
         child: Column(
           children: [
             Icon(
               Icons.assignment_outlined,
-              size: 40,
+              size: 42,
               color: colorScheme.outlineVariant,
             ),
             const SizedBox(height: 8),
@@ -580,13 +687,29 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
   Widget _buildError(
       ColorScheme colorScheme,
       ) {
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: Text(
-        'common.error_loading'.tr(),
-        style: TextStyle(
-          color: colorScheme.error,
-        ),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.error_outline,
+            color: colorScheme.onErrorContainer,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'common.error_loading'.tr(),
+              style: TextStyle(
+                color: colorScheme.onErrorContainer,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -606,37 +729,53 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
         color: task.isCompleted
             ? colorScheme.surfaceContainerLow
             : colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: colorScheme.outlineVariant,
+          color: task.isCompleted
+              ? colorScheme.outlineVariant.withValues(alpha: 0.7)
+              : colorScheme.outlineVariant,
         ),
       ),
       child: CheckboxListTile(
         value: task.isCompleted,
         controlAffinity: ListTileControlAffinity.leading,
+        contentPadding: const EdgeInsets.only(
+          left: 8,
+          right: 4,
+        ),
         onChanged: widget.canEdit && !isProcessing
             ? (_) => _toggleTask(task)
             : null,
         title: Text(
           task.title,
           style: TextStyle(
+            fontWeight: task.isCompleted
+                ? FontWeight.w400
+                : FontWeight.w500,
+            color: task.isCompleted
+                ? colorScheme.onSurfaceVariant
+                : colorScheme.onSurface,
             decoration: task.isCompleted
                 ? TextDecoration.lineThrough
                 : null,
           ),
         ),
         secondary: isProcessing
-            ? const SizedBox(
+            ? SizedBox(
           width: 18,
           height: 18,
           child: CircularProgressIndicator(
             strokeWidth: 2,
+            color: colorScheme.primary,
           ),
         )
             : widget.canEdit
             ? IconButton(
           tooltip: 'common.delete'.tr(),
-          icon: const Icon(Icons.delete_outline),
+          icon: Icon(
+            Icons.delete_outline,
+            color: colorScheme.onSurfaceVariant,
+          ),
           onPressed: () => _deleteTask(task),
         )
             : null,

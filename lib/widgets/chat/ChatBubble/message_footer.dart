@@ -15,44 +15,79 @@ class MessageFooter extends StatelessWidget {
     this.isEdited = false,
   });
 
+  // =========================================================
+  // HELPERS
+  // =========================================================
+
   String _formatTime(DateTime date) {
-    return DateFormat('HH:mm').format(date);
+    final local = date.toLocal();
+
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+
+    return '$hour:$minute';
   }
+
+  // =========================================================
+  // BUILD
+  // =========================================================
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
-    final textStyle = TextStyle(
+    final baseColor = isMe
+        ? colorScheme.onPrimaryContainer.withValues(alpha: 0.72)
+        : colorScheme.onSurfaceVariant.withValues(alpha: 0.78);
+
+    final readColor = isRead
+        ? const Color(0xFF29B6F6)
+        : baseColor.withValues(alpha: 0.72);
+
+    final textStyle = theme.textTheme.labelSmall?.copyWith(
       fontSize: 10,
-      height: 1.2,
-      color: theme.colorScheme.onSurfaceVariant.withValues(alpha:0.8),
-    );
+      height: 1.15,
+      color: baseColor,
+      fontWeight: FontWeight.w500,
+    ) ??
+        TextStyle(
+          fontSize: 10,
+          height: 1.15,
+          color: baseColor,
+          fontWeight: FontWeight.w500,
+        );
 
     return DefaultTextStyle(
       style: textStyle,
       child: Row(
         mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.end,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          /// ⏰ ВРЕМЯ
-          Text(_formatTime(time)),
+          Text(
+            _formatTime(time),
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.clip,
+          ),
 
-          /// ✏️ EDITED
           if (isEdited) ...[
             const SizedBox(width: 4),
-            Text('• ${'chat.edited'.tr()}'),
+            Text(
+              '• ${'chat.edited'.tr()}',
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+            ),
           ],
 
-          /// ✅ ГАЛОЧКИ (как Telegram)
           if (isMe) ...[
             const SizedBox(width: 4),
             Icon(
-              isRead ? Icons.done_all : Icons.done,
+              isRead ? Icons.done_all_rounded : Icons.done_rounded,
               size: 14,
-              color: isRead
-                  ? const Color(0xFF4FC3F7) // Telegram blue
-                  : theme.colorScheme.onSurfaceVariant.withValues(alpha:0.6),
+              color: readColor,
             ),
           ],
         ],

@@ -34,6 +34,7 @@ class ChatService {
   final Map<String, StreamController<List<MessageModel>>> _controllers = {};
   final Map<String, List<MessageModel>> _cache = {};
   final Map<String, String> _userCache = {};
+  final Map<String, Map<String, String?>> _userProfileCache = {};
   final Map<String, String> _projectTitleCache = {};
 
   final Set<String> _activeChats = {};
@@ -66,7 +67,8 @@ class ChatService {
     *,
     profiles:sender_id(
       full_name,
-      username
+      username,
+      avatar_url
     ),
     reply:reply_to_message_id(
       id,
@@ -79,7 +81,8 @@ class ChatService {
       preview_url,
       profiles:sender_id(
         full_name,
-        username
+        username,
+        avatar_url
       )
     ),
     message_reads!left(
@@ -169,47 +172,210 @@ class ChatService {
     _notificationsInitialized = true;
   }
 
+  String _extensionFromFileName(String fileName) {
+    final clean = fileName.trim();
+
+    if (!clean.contains('.')) {
+      return '';
+    }
+
+    return clean.split('.').last.toLowerCase().trim();
+  }
+
+  bool _isImageExtension(String extension) {
+    return const {
+      'jpg',
+      'jpeg',
+      'png',
+      'webp',
+      'gif',
+      'bmp',
+      'heic',
+      'heif',
+    }.contains(extension.toLowerCase());
+  }
+
+  MessageType _messageTypeFromFileName(
+      String fileName,
+      MessageType requestedType,
+      ) {
+    final extension = _extensionFromFileName(fileName);
+
+    if (_isImageExtension(extension)) {
+      return MessageType.image;
+    }
+
+    return MessageType.file;
+  }
+
+  String _mimeTypeFromFileName(String fileName) {
+    final ext = _extensionFromFileName(fileName);
+
+    switch (ext) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+
+      case 'png':
+        return 'image/png';
+
+      case 'webp':
+        return 'image/webp';
+
+      case 'gif':
+        return 'image/gif';
+
+      case 'bmp':
+        return 'image/bmp';
+
+      case 'heic':
+        return 'image/heic';
+
+      case 'heif':
+        return 'image/heif';
+
+      case 'pdf':
+        return 'application/pdf';
+
+      case 'doc':
+        return 'application/msword';
+
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+      case 'xls':
+        return 'application/vnd.ms-excel';
+
+      case 'xlsx':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+      case 'csv':
+        return 'text/csv';
+
+      case 'ppt':
+        return 'application/vnd.ms-powerpoint';
+
+      case 'pptx':
+        return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+
+      case 'txt':
+        return 'text/plain';
+
+      case 'json':
+        return 'application/json';
+
+      case 'zip':
+        return 'application/zip';
+
+      case 'rar':
+        return 'application/vnd.rar';
+
+      case '7z':
+        return 'application/x-7z-compressed';
+
+      default:
+        return 'application/octet-stream';
+    }
+  }
+
+  String _safeStorageFileName(String rawName) {
+    final clean = rawName.trim().isEmpty ? 'file' : rawName.trim();
+
+    final safeName = clean.replaceAll(
+      RegExp(r'[^a-zA-Z0-9а-яА-ЯёЁ._-]+'),
+      '_',
+    );
+
+    return safeName.isEmpty ? 'file' : safeName;
+  }
+
+  String? _replyPreviewUrlForTemp(MessageModel? replyMessage) {
+    if (replyMessage == null) {
+      return null;
+    }
+
+    if (!replyMessage.isImage) {
+      return null;
+    }
+
+    final preview = replyMessage.previewUrl?.trim();
+
+    if (preview != null && preview.isNotEmpty) {
+      return preview;
+    }
+
+    final content = replyMessage.content.trim();
+
+    if (content.isNotEmpty) {
+      return content;
+    }
+
+    return null;
+  }
+
   // =========================================================
   // USER CACHE
   // =========================================================
 
-  Future<String> _getUserName(String userId) async {
-    if (_userCache.containsKey(userId)) {
-      return _userCache[userId]!;
+  Future<Map<String, String?>> _getUserProfile(String userId) async {
+    if (_userProfileCache.containsKey(userId)) {
+      return _userProfileCache[userId]!;
     }
 
     try {
       final res = await _client
           .from('profiles')
-          .select('full_name, username')
+          .select(
+        '''
+            full_name,
+            username,
+            avatar_url
+            ''',
+      )
           .eq('id', userId)
           .maybeSingle();
 
       final fullName = res?['full_name']?.toString().trim();
       final username = res?['username']?.toString().trim();
+      final avatarUrl = res?['avatar_url']?.toString().trim();
 
-      final name = fullName != null && fullName.isNotEmpty
+      final displayName = fullName != null && fullName.isNotEmpty
           ? fullName
           : username != null && username.isNotEmpty
-          ? '@$username'
+          ? username
           : _fallbackUserName;
 
-      if (_userCache.length >= _maxUserCacheSize) {
-        _userCache.remove(_userCache.keys.first);
+      final profile = <String, String?>{
+        'full_name': displayName,
+        'username': username,
+        'avatar_url': avatarUrl != null && avatarUrl.isNotEmpty
+            ? avatarUrl
+            : null,
+      };
+
+      if (_userProfileCache.length >= _maxUserCacheSize) {
+        _userProfileCache.remove(
+          _userProfileCache.keys.first,
+        );
       }
 
-      _userCache[userId] = name;
+      _userProfileCache[userId] = profile;
+      _userCache[userId] = displayName;
 
-      return name;
+      return profile;
     } catch (e, st) {
       AppLogger.error(
-        'Get user name error',
+        'Get user profile error',
         error: e,
         stackTrace: st,
         tag: 'ChatService',
       );
 
-      return _fallbackUserName;
+      return const {
+        'full_name': _fallbackUserName,
+        'username': null,
+        'avatar_url': null,
+      };
     }
   }
 
@@ -319,12 +485,14 @@ class ChatService {
     final currentUserId = _currentUserId;
 
     if (row['profiles'] == null && row['sender_id'] != null) {
-      final senderName = await _getUserName(
+      final senderProfile = await _getUserProfile(
         row['sender_id'].toString(),
       );
 
       row['profiles'] = {
-        'full_name': senderName,
+        'full_name': senderProfile['full_name'],
+        'username': senderProfile['username'],
+        'avatar_url': senderProfile['avatar_url'],
       };
     }
 
@@ -343,7 +511,8 @@ class ChatService {
               preview_url,
               profiles:sender_id(
                 full_name,
-                username
+                username,
+                avatar_url
               )
             ''')
             .eq(
@@ -856,12 +1025,14 @@ extension ChatServiceMessaging on ChatService {
 
     final tempId = 'temp_${_uuid.v4()}';
     final replyMessage = _findCachedMessage(projectId, replyTo);
+    final senderProfile = await _getUserProfile(userId);
 
     final temp = MessageModel(
       id: tempId,
       projectId: projectId,
       senderId: userId,
-      senderName: ChatService._currentUserName,
+      senderName: senderProfile['full_name'] ?? ChatService._currentUserName,
+      senderAvatarUrl: senderProfile['avatar_url'],
       content: text,
       createdAt: DateTime.now(),
       status: MessageStatus.sending,
@@ -872,7 +1043,7 @@ extension ChatServiceMessaging on ChatService {
       replySenderName: replyMessage?.senderName,
       replyType: replyMessage?.type,
       replyFileName: replyMessage?.fileName,
-      replyPreviewUrl: replyMessage?.previewUrl ?? replyMessage?.content,
+      replyPreviewUrl: _replyPreviewUrlForTemp(replyMessage),
       replyMimeType: replyMessage?.mimeType,
       isRead: true,
     );
@@ -1112,28 +1283,49 @@ extension ChatServiceFinal on ChatService {
     }
 
     try {
-      final rawName =
-          fileName ?? (file != null ? file.path.split('/').last : 'file');
+      final rawName = fileName?.trim().isNotEmpty == true
+          ? fileName!.trim()
+          : file != null
+          ? file.path.split('/').last
+          : 'file';
 
-      final safeName = rawName.replaceAll(
-        RegExp(r'[^a-zA-Z0-9._-]'),
-        '_',
-      );
+      final safeName = _safeStorageFileName(rawName);
 
       final uniqueName =
-          '${DateTime.now().millisecondsSinceEpoch}_$safeName';
+          '${DateTime.now().millisecondsSinceEpoch}_${_uuid.v4()}_$safeName';
 
       final path = 'chat_files/$projectId/$uniqueName';
 
+      final messageType = _messageTypeFromFileName(
+        rawName,
+        type,
+      );
+
+      final mimeType = _mimeTypeFromFileName(rawName);
+
+      int fileSize = 0;
+
       if (fileBytes != null) {
+        fileSize = fileBytes.length;
+
         await _client.storage.from(SupabaseService.bucket).uploadBinary(
           path,
           fileBytes,
+          fileOptions: FileOptions(
+            contentType: mimeType,
+            upsert: true,
+          ),
         );
       } else if (file != null) {
+        fileSize = await file.length();
+
         await _client.storage.from(SupabaseService.bucket).upload(
           path,
           file,
+          fileOptions: FileOptions(
+            contentType: mimeType,
+            upsert: true,
+          ),
         );
       } else {
         return;
@@ -1147,9 +1339,11 @@ extension ChatServiceFinal on ChatService {
         'project_id': projectId,
         'sender_id': userId,
         'content': url,
-        'type': type == MessageType.image ? 'image' : 'file',
+        'type': messageType == MessageType.image ? 'image' : 'file',
         'file_name': rawName,
-        'preview_url': type == MessageType.image ? url : null,
+        'file_size': fileSize,
+        'mime_type': mimeType,
+        'preview_url': messageType == MessageType.image ? url : null,
         'status': 'sent',
         'is_deleted': false,
       });
@@ -1524,6 +1718,7 @@ extension ChatServiceFinal on ChatService {
     _activeChats.clear();
     _lastUnread = {};
     _userCache.clear();
+    _userProfileCache.clear();
     _projectTitleCache.clear();
 
     _cacheService.clearAll();

@@ -1,5 +1,5 @@
-import 'package:flutter/material.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/material.dart';
 
 enum SnackType {
   success,
@@ -9,10 +9,8 @@ enum SnackType {
 }
 
 class SnackbarManager {
-
-  /// Global ScaffoldMessenger key
-  static final GlobalKey<ScaffoldMessengerState>
-  messengerKey =
+  /// Global ScaffoldMessenger key.
+  static final GlobalKey<ScaffoldMessengerState> messengerKey =
   GlobalKey<ScaffoldMessengerState>();
 
   // =========================================================
@@ -22,119 +20,89 @@ class SnackbarManager {
   static void show(
       String message, {
         SnackType type = SnackType.info,
-        Duration duration =
-        const Duration(seconds: 3),
+        Duration duration = const Duration(seconds: 3),
         String? actionLabel,
         VoidCallback? onAction,
         bool isLocalizedKey = true,
       }) {
+    final cleanMessage = message.trim();
 
-    final messenger =
-        messengerKey.currentState;
-
-    if (messenger == null) return;
-
-    // =====================================
-    // EMPTY MESSAGE PROTECTION
-    // =====================================
-
-    if (message.trim().isEmpty) {
+    if (cleanMessage.isEmpty) {
       return;
     }
 
-    // =====================================
-    // LOCALIZATION
-    // =====================================
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final messenger = messengerKey.currentState;
 
-    final resolvedMessage =
-    isLocalizedKey
-        ? message.tr()
-        : message;
+      if (messenger == null || !messenger.mounted) {
+        return;
+      }
 
-    final resolvedAction =
-    actionLabel?.tr();
+      final resolvedMessage = _resolveText(
+        cleanMessage,
+        isLocalizedKey: isLocalizedKey,
+      );
 
-    final config =
-    _resolveType(type);
+      final resolvedAction = actionLabel == null
+          ? null
+          : _resolveText(
+        actionLabel,
+        isLocalizedKey: isLocalizedKey,
+      );
 
-    // =====================================
-    // HIDE CURRENT
-    // =====================================
+      final config = _resolveType(type);
 
-    messenger.hideCurrentSnackBar();
+      try {
+        messenger.clearSnackBars();
+      } catch (_) {
+        // ScaffoldMessenger мог быть пересоздан во время перехода экранов.
+      }
 
-    // =====================================
-    // SHOW
-    // =====================================
-
-    messenger.showSnackBar(
-      SnackBar(
-        behavior:
-        SnackBarBehavior.floating,
-
-        duration: duration,
-
-        margin: const EdgeInsets.all(16),
-
-        shape: RoundedRectangleBorder(
-          borderRadius:
-          BorderRadius.circular(14),
-        ),
-
-        backgroundColor:
-        config.color,
-
-        elevation: 6,
-
-        content: Row(
-          children: [
-
-            // =========================
-            // ICON
-            // =========================
-
-            Icon(
-              config.icon,
-              color: Colors.white,
-              size: 20,
+      try {
+        messenger.showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            duration: duration,
+            margin: const EdgeInsets.all(16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
             ),
-
-            const SizedBox(width: 12),
-
-            // =========================
-            // TEXT
-            // =========================
-
-            Expanded(
-              child: Text(
-                resolvedMessage,
-                maxLines: 3,
-                overflow:
-                TextOverflow.ellipsis,
-                style: const TextStyle(
+            backgroundColor: config.color,
+            elevation: 6,
+            content: Row(
+              children: [
+                Icon(
+                  config.icon,
                   color: Colors.white,
-                  fontWeight:
-                  FontWeight.w500,
+                  size: 20,
                 ),
-              ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    resolvedMessage,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-
-        // =============================
-        // ACTION
-        // =============================
-
-        action: resolvedAction != null
-            ? SnackBarAction(
-          label: resolvedAction,
-          textColor: Colors.white,
-          onPressed:
-          onAction ?? () {},
-        )
-            : null,
-      ),
-    );
+            action: resolvedAction != null
+                ? SnackBarAction(
+              label: resolvedAction,
+              textColor: Colors.white,
+              onPressed: onAction ?? () {},
+            )
+                : null,
+          ),
+        );
+      } catch (_) {
+        // Защита от показа snackbar в момент уничтожения дерева виджетов.
+      }
+    });
   }
 
   // =========================================================
@@ -186,6 +154,39 @@ class SnackbarManager {
   }
 
   // =========================================================
+  // LOCALIZATION
+  // =========================================================
+
+  static String _resolveText(
+      String value, {
+        required bool isLocalizedKey,
+      }) {
+    final cleanValue = value.trim();
+
+    if (cleanValue.isEmpty) {
+      return cleanValue;
+    }
+
+    if (!isLocalizedKey) {
+      return cleanValue;
+    }
+
+    if (!_looksLikeLocalizationKey(cleanValue)) {
+      return cleanValue;
+    }
+
+    try {
+      return cleanValue.tr();
+    } catch (_) {
+      return cleanValue;
+    }
+  }
+
+  static bool _looksLikeLocalizationKey(String value) {
+    return RegExp(r'^[a-zA-Z0-9_.-]+$').hasMatch(value);
+  }
+
+  // =========================================================
   // INTERNAL
   // =========================================================
 
@@ -193,7 +194,6 @@ class SnackbarManager {
       SnackType type,
       ) {
     switch (type) {
-
       case SnackType.success:
         return _SnackConfig(
           color: Colors.green.shade600,
