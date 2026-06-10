@@ -16,6 +16,7 @@ class ProjectService {
   final NotificationService _notifications = NotificationService();
 
   static const String _invitationsTable = 'project_invitations';
+  static const String _attachmentsTable = 'project_attachments';
 
   String? _currentUserId;
 
@@ -166,6 +167,58 @@ class ProjectService {
         role == ProjectRole.editor;
   }
 
+  bool canManageTasks(ProjectModel project) {
+    final role = _currentUserRole(project);
+
+    return role == ProjectRole.owner ||
+        role == ProjectRole.editor;
+  }
+
+  bool canCompleteTasks(ProjectModel project) {
+    final role = _currentUserRole(project);
+
+    return role == ProjectRole.owner ||
+        role == ProjectRole.editor ||
+        role == ProjectRole.viewer;
+  }
+
+  bool canAddAttachments(ProjectModel project) {
+    final role = _currentUserRole(project);
+
+    return role == ProjectRole.owner ||
+        role == ProjectRole.editor ||
+        role == ProjectRole.viewer;
+  }
+
+  bool canDeleteAnyAttachments(ProjectModel project) {
+    final role = _currentUserRole(project);
+
+    return role == ProjectRole.owner ||
+        role == ProjectRole.editor;
+  }
+
+  bool canDeleteAttachment({
+    required ProjectModel project,
+    required Attachment attachment,
+  }) {
+    final role = _currentUserRole(project);
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      return false;
+    }
+
+    if (role == ProjectRole.owner || role == ProjectRole.editor) {
+      return true;
+    }
+
+    if (role != ProjectRole.viewer) {
+      return false;
+    }
+
+    return attachment.isUploadedBy(userId);
+  }
+
   bool canManageMembers(ProjectModel project) {
     return isOwner(project);
   }
@@ -182,6 +235,26 @@ class ProjectService {
     }
 
     return canEditProject(project);
+  }
+
+  Future<bool> canAddAttachmentsById(String projectId) async {
+    final project = await getById(projectId);
+
+    if (project == null) {
+      return false;
+    }
+
+    return canAddAttachments(project);
+  }
+
+  Future<bool> canCompleteTasksById(String projectId) async {
+    final project = await getById(projectId);
+
+    if (project == null) {
+      return false;
+    }
+
+    return canCompleteTasks(project);
   }
 
   ProjectRole? _currentUserRole(ProjectModel project) {
@@ -1016,7 +1089,7 @@ class ProjectService {
       }
     }
 
-    return 'Проект';
+    return 'Project';
   }
 
   Future<void> acceptInvitation(String invitationId) async {
@@ -1063,15 +1136,11 @@ class ProjectService {
       );
 
       if (invitedBy != null && invitedBy.isNotEmpty) {
-        await _notifications.createProjectNotification(
-          recipientId: invitedBy,
-          senderId: userId,
+        await _notifications.notifyProjectInvitationAccepted(
           projectId: projectId,
           projectTitle: projectTitle,
-          type: 'member_invite_accepted',
-          title: 'Приглашение принято',
-          body:
-          'Пользователь принял приглашение в проект "$projectTitle"',
+          recipientId: invitedBy,
+          senderId: userId,
         );
       }
     } catch (e, st) {
@@ -1127,15 +1196,11 @@ class ProjectService {
       );
 
       if (invitedBy != null && invitedBy.isNotEmpty) {
-        await _notifications.createProjectNotification(
-          recipientId: invitedBy,
-          senderId: userId,
+        await _notifications.notifyProjectInvitationDeclined(
           projectId: projectId,
           projectTitle: projectTitle,
-          type: 'member_invite_declined',
-          title: 'Приглашение отклонено',
-          body:
-          'Пользователь отклонил приглашение в проект "$projectTitle"',
+          recipientId: invitedBy,
+          senderId: userId,
         );
       }
     } catch (e, st) {
@@ -1256,8 +1321,11 @@ class ProjectService {
 
       await _notifications.showProjectUpdateNotification(
         projectId: created.id,
-        title: 'Проект создан',
-        body: created.title,
+        title: _notifications.localizedTitleForType('project_created'),
+        body: _notifications.localizedBodyForType(
+          'project_created',
+          projectTitle: created.title,
+        ),
         payload: created.id,
       );
 
@@ -1503,7 +1571,7 @@ class ProjectService {
       );
 
       await _safeDeleteByProjectId(
-        table: 'project_attachments',
+        table: _attachmentsTable,
         projectId: id,
       );
 
@@ -1563,7 +1631,7 @@ class ProjectService {
         throw Exception('errors.project_not_found');
       }
 
-      if (!canManageProjectContent(project)) {
+      if (!canAddAttachments(project)) {
         throw Exception('errors.no_permission');
       }
 
@@ -1636,7 +1704,6 @@ class ProjectService {
         }
 
         final attachmentId = const Uuid().v4();
-
         final now = DateTime.now();
 
         final attachment = Attachment(
@@ -1652,7 +1719,7 @@ class ProjectService {
 
         uploaded.add(attachment);
 
-        await client.from('project_attachments').insert({
+        await client.from(_attachmentsTable).insert({
           'id': attachmentId,
           'project_id': projectId,
           'uploaded_by': userId,
@@ -1665,18 +1732,22 @@ class ProjectService {
       }
 
       if (uploaded.isNotEmpty) {
-        await _notifications.notifyProjectUpdatedForMembers(
-          project: project,
+        final updatedProject = project.copyWith(
+          attachments: [
+            ...project.attachments,
+            ...uploaded,
+          ],
+        );
+
+        await _notifications.notifyFileAddedForMembers(
+          project: updatedProject,
           senderId: userId,
         );
+
+        return updatedProject;
       }
 
-      return project.copyWith(
-        attachments: [
-          ...project.attachments,
-          ...uploaded,
-        ],
-      );
+      return project;
     } catch (e, st) {
       _handleError(
         e,
@@ -1784,12 +1855,24 @@ class ProjectService {
         return;
       }
 
-      if (!canManageProjectContent(project)) {
-        throw Exception('errors.no_permission');
-      }
-
       if (filePath.trim().isEmpty) {
         return;
+      }
+
+      final attachment = await _findAttachmentForDelete(
+        project: project,
+        filePath: filePath,
+      );
+
+      if (attachment == null) {
+        throw Exception('errors.file_not_found');
+      }
+
+      if (!canDeleteAttachment(
+        project: project,
+        attachment: attachment,
+      )) {
+        throw Exception('errors.no_permission');
       }
 
       try {
@@ -1801,7 +1884,7 @@ class ProjectService {
       }
 
       await client
-          .from('project_attachments')
+          .from(_attachmentsTable)
           .delete()
           .eq('project_id', projectId)
           .eq('file_path', filePath);
@@ -1816,6 +1899,56 @@ class ProjectService {
         st,
         'delete attachment failed',
       );
+    }
+  }
+
+  Future<Attachment?> _findAttachmentForDelete({
+    required ProjectModel project,
+    required String filePath,
+  }) async {
+    final normalizedPath = filePath.trim();
+
+    if (normalizedPath.isEmpty) {
+      return null;
+    }
+
+    for (final attachment in project.attachments) {
+      if (attachment.filePath == normalizedPath) {
+        return attachment;
+      }
+    }
+
+    try {
+      final raw = await client
+          .from(_attachmentsTable)
+          .select(
+        '''
+            id,
+            project_id,
+            uploaded_by,
+            file_name,
+            file_path,
+            mime_type,
+            file_size,
+            created_at
+            ''',
+      )
+          .eq('project_id', project.id)
+          .eq('file_path', normalizedPath)
+          .maybeSingle();
+
+      if (raw == null) {
+        return null;
+      }
+
+      return Attachment.fromJson(
+        Map<String, dynamic>.from(raw),
+      );
+    } catch (e) {
+      debugPrint(
+        '[ProjectService] attachment fallback lookup failed: $e',
+      );
+      return null;
     }
   }
 }

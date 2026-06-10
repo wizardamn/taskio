@@ -35,7 +35,7 @@
 
     <application
         android:name="${applicationName}"
-        android:label="taskio"
+        android:label="Taskio"
         android:icon="@mipmap/launcher_icon"
         android:requestLegacyExternalStorage="true"
         android:enableOnBackInvokedCallback="true"

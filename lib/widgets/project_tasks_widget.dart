@@ -11,12 +11,20 @@ import '../utils/snackbar_manager.dart';
 
 class ProjectTasksWidget extends StatefulWidget {
   final String projectId;
+
+  /// true только для owner/editor.
+  /// Даёт право добавлять и удалять задачи.
   final bool canEdit;
+
+  /// true для owner/editor/viewer.
+  /// Даёт право отмечать задачу выполненной/невыполненной.
+  final bool canCompleteTasks;
 
   const ProjectTasksWidget({
     super.key,
     required this.projectId,
     required this.canEdit,
+    this.canCompleteTasks = true,
   });
 
   @override
@@ -38,6 +46,14 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
   bool _isRefreshing = false;
 
   final Set<String> _processingTaskIds = {};
+
+  bool get _canManageTasks {
+    return widget.canEdit;
+  }
+
+  bool get _canCompleteTasks {
+    return widget.canCompleteTasks;
+  }
 
   @override
   void initState() {
@@ -73,6 +89,17 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
     }
 
     _tasksStream = _taskService.getTasksStream(projectId);
+  }
+
+  // =========================================================
+  // TEXT
+  // =========================================================
+
+  String _text({
+    required String ru,
+    required String en,
+  }) {
+    return context.locale.languageCode == 'ru' ? ru : en;
   }
 
   // =========================================================
@@ -118,7 +145,7 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
   // =========================================================
 
   Future<void> _addTask() async {
-    if (_isAdding || !widget.canEdit) {
+    if (_isAdding || !_canManageTasks) {
       return;
     }
 
@@ -243,7 +270,7 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
   // =========================================================
 
   Future<void> _deleteTask(TaskModel task) async {
-    if (!widget.canEdit) {
+    if (!_canManageTasks) {
       return;
     }
 
@@ -295,7 +322,7 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
   // =========================================================
 
   Future<void> _toggleTask(TaskModel task) async {
-    if (!widget.canEdit) {
+    if (!_canCompleteTasks) {
       return;
     }
 
@@ -378,7 +405,7 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
               colorScheme,
             ),
 
-            if (widget.canEdit) ...[
+            if (_canManageTasks) ...[
               const SizedBox(height: 14),
               _buildInput(colorScheme),
             ],
@@ -453,15 +480,7 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
               ),
               const SizedBox(height: 2),
               Text(
-                widget.canEdit
-                    ? _text(
-                  ru: 'Добавляйте и отмечайте задачи проекта',
-                  en: 'Add and complete project tasks',
-                )
-                    : _text(
-                  ru: 'Просмотр задач проекта',
-                  en: 'Project tasks view',
-                ),
+                _headerSubtitle(),
                 style: textTheme.bodySmall?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),
@@ -492,11 +511,25 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
     );
   }
 
-  String _text({
-    required String ru,
-    required String en,
-  }) {
-    return context.locale.languageCode == 'ru' ? ru : en;
+  String _headerSubtitle() {
+    if (_canManageTasks) {
+      return _text(
+        ru: 'Добавляйте и отмечайте задачи проекта',
+        en: 'Add and complete project tasks',
+      );
+    }
+
+    if (_canCompleteTasks) {
+      return _text(
+        ru: 'Отмечайте выполнение задач проекта',
+        en: 'Complete project tasks',
+      );
+    }
+
+    return _text(
+      ru: 'Просмотр задач проекта',
+      en: 'Project tasks view',
+    );
   }
 
   // =========================================================
@@ -575,7 +608,7 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
       itemBuilder: (context, index) {
         final task = tasks[index];
 
-        if (!widget.canEdit) {
+        if (!_canManageTasks) {
           return _buildTaskTile(
             task,
             colorScheme,
@@ -643,8 +676,7 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
                     reverse: true,
                   );
                 },
-              )
-                  .fade(
+              ).fade(
                 begin: 0.45,
                 end: 0.95,
                 duration: 900.ms,
@@ -743,7 +775,7 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
           left: 8,
           right: 4,
         ),
-        onChanged: widget.canEdit && !isProcessing
+        onChanged: _canCompleteTasks && !isProcessing
             ? (_) => _toggleTask(task)
             : null,
         title: Text(
@@ -769,7 +801,7 @@ class _ProjectTasksWidgetState extends State<ProjectTasksWidget> {
             color: colorScheme.primary,
           ),
         )
-            : widget.canEdit
+            : _canManageTasks
             ? IconButton(
           tooltip: 'common.delete'.tr(),
           icon: Icon(

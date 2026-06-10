@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -19,6 +21,7 @@ import '../../widgets/project_card.dart';
 import '../../widgets/project_list_skeleton.dart';
 import '../../widgets/user_profile_drawer.dart';
 
+import '../archive/archive_screen.dart';
 import '../notifications/notifications_screen.dart';
 
 import 'project_chat_screen.dart';
@@ -71,6 +74,17 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   }
 
   // =========================================================
+  // TEXT
+  // =========================================================
+
+  String _text({
+    required String ru,
+    required String en,
+  }) {
+    return context.locale.languageCode == 'ru' ? ru : en;
+  }
+
+  // =========================================================
   // UNREAD
   // =========================================================
 
@@ -96,7 +110,8 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
 
       final currentAuth = context.read<AuthProvider>();
 
-      final currentUserId = currentAuth.isGuest ? null : currentAuth.userId;
+      final currentUserId =
+      currentAuth.isGuest ? null : currentAuth.userId;
 
       if (_unreadUserId == currentUserId) {
         return;
@@ -174,6 +189,54 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
     await provider.fetchProjects();
   }
 
+  Future<void> _openArchiveScreen() async {
+    final authProv = context.read<AuthProvider>();
+
+    if (authProv.isGuest) {
+      SnackbarManager.showWarning(
+        'projects.operation_denied_guest'.tr(),
+      );
+      return;
+    }
+
+    final provider = context.read<ProjectProvider>();
+
+    try {
+      await provider.fetchProjects();
+
+      if (!mounted) {
+        return;
+      }
+
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => const ArchiveScreen(),
+        ),
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      await provider.fetchProjects();
+    } catch (e, st) {
+      AppLogger.error(
+        'Open archive error',
+        error: e,
+        stackTrace: st,
+        tag: 'ProjectListScreen',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      SnackbarManager.showError(
+        ErrorMapper.map(e),
+      );
+    }
+  }
+
   Future<void> _openProject(ProjectModel project) async {
     final provider = context.read<ProjectProvider>();
 
@@ -186,10 +249,21 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
 
     provider.setCurrentProject(project.id);
 
+    final freshProject = await provider.refreshProject(
+      project.id,
+      makeCurrent: true,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    final projectToOpen = freshProject ?? project;
+
     final updated = await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ProjectFormScreen(
-          project: project,
+          project: projectToOpen,
           isNew: false,
         ),
       ),
@@ -295,6 +369,97 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
   }
 
   // =========================================================
+  // DELETE PROJECT
+  // =========================================================
+
+  Future<bool> _confirmDeleteProject(ProjectModel project) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(
+            'common.delete'.tr(),
+          ),
+          content: Text(
+            _text(
+              ru: 'Удалить проект «${project.title}»? Это действие нельзя отменить.',
+              en: 'Delete project “${project.title}”? This action cannot be undone.',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(
+                  dialogContext,
+                  false,
+                );
+              },
+              child: Text(
+                'common.cancel'.tr(),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(
+                  dialogContext,
+                  true,
+                );
+              },
+              icon: const Icon(
+                Icons.delete_outline,
+              ),
+              label: Text(
+                'common.delete'.tr(),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    return result ?? false;
+  }
+
+  Future<void> _deleteProject(ProjectModel project) async {
+    final provider = context.read<ProjectProvider>();
+
+    provider.setCurrentProject(project.id);
+
+    if (!provider.isOwner(project)) {
+      SnackbarManager.showError(
+        'errors.no_permission'.tr(),
+      );
+      return;
+    }
+
+    final confirmed = await _confirmDeleteProject(project);
+
+    if (!mounted || !confirmed) {
+      return;
+    }
+
+    try {
+      await provider.deleteProject(project.id);
+
+      if (!mounted) {
+        return;
+      }
+
+      SnackbarManager.showSuccess(
+        'projects.deleted_success'.tr(),
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+
+      SnackbarManager.showError(
+        ErrorMapper.map(e),
+      );
+    }
+  }
+
+  // =========================================================
   // FILTER MENU
   // =========================================================
 
@@ -302,6 +467,10 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
       BuildContext context,
       ProjectProvider prov,
       ) async {
+    if (prov.filter == ProjectFilter.completedOnly) {
+      prov.setFilter(ProjectFilter.all);
+    }
+
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -310,7 +479,7 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
       builder: (_) {
         return DraggableScrollableSheet(
           expand: false,
-          initialChildSize: 0.75,
+          initialChildSize: 0.72,
           minChildSize: 0.5,
           maxChildSize: 0.95,
           builder: (context, controller) {
@@ -320,11 +489,29 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                   controller: controller,
                   padding: const EdgeInsets.all(16),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
                     children: [
                       Text(
                         'filter.title'.tr(),
-                        style: Theme.of(context).textTheme.titleLarge,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _text(
+                          ru: 'На этом экране отображаются только активные проекты. Завершённые проекты находятся в архиве.',
+                          en: 'This screen shows only active projects. Completed projects are available in the archive.',
+                        ),
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant,
+                        ),
                       ),
                       const SizedBox(height: 16),
                       Wrap(
@@ -335,7 +522,8 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                             label: Text(
                               'filter.all'.tr(),
                             ),
-                            selected: prov.filter == ProjectFilter.all,
+                            selected:
+                            prov.filter == ProjectFilter.all,
                             onSelected: (_) {
                               prov.setFilter(
                                 ProjectFilter.all,
@@ -358,26 +546,14 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                               setModalState(() {});
                             },
                           ),
-                          ChoiceChip(
-                            label: Text(
-                              'filter.completed'.tr(),
-                            ),
-                            selected: prov.filter ==
-                                ProjectFilter.completedOnly,
-                            onSelected: (_) {
-                              prov.setFilter(
-                                ProjectFilter.completedOnly,
-                              );
-
-                              setModalState(() {});
-                            },
-                          ),
                         ],
                       ),
                       const SizedBox(height: 32),
                       Text(
                         'projects.deadline'.tr(),
-                        style: Theme.of(context).textTheme.titleMedium,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium,
                       ),
                       const SizedBox(height: 12),
                       Wrap(
@@ -445,7 +621,9 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                       const SizedBox(height: 32),
                       Text(
                         'sorting.title'.tr(),
-                        style: Theme.of(context).textTheme.titleMedium,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium,
                       ),
                       const SizedBox(height: 12),
                       Card(
@@ -458,7 +636,8 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                               title: Text(
                                 'sorting.nearest'.tr(),
                               ),
-                              trailing: prov.sortBy == SortBy.deadlineAsc
+                              trailing:
+                              prov.sortBy == SortBy.deadlineAsc
                                   ? const Icon(
                                 Icons.check,
                               )
@@ -478,7 +657,8 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                               title: Text(
                                 'sorting.farthest'.tr(),
                               ),
-                              trailing: prov.sortBy == SortBy.deadlineDesc
+                              trailing:
+                              prov.sortBy == SortBy.deadlineDesc
                                   ? const Icon(
                                 Icons.check,
                               )
@@ -534,7 +714,24 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 16),
+                      if (prov.archivedProjectsCount > 0)
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _openArchiveScreen();
+                            },
+                            icon: const Icon(
+                              Icons.archive_outlined,
+                            ),
+                            label: Text(
+                              'navigation.archive'.tr(),
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 12),
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton.icon(
@@ -573,8 +770,19 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
 
     _syncUnreadStream(authProv);
 
-    final projects = prov.projects;
+    if (prov.filter == ProjectFilter.completedOnly) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          context.read<ProjectProvider>().setFilter(
+            ProjectFilter.all,
+          );
+        }
+      });
+    }
+
+    final projects = prov.activeProjects;
     final isGuest = authProv.isGuest;
+    final hasArchivedProjects = prov.hasArchivedProjects;
 
     return Scaffold(
       appBar: AppBar(
@@ -666,7 +874,9 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
           }
         },
         child: projects.isEmpty
-            ? _buildEmptyState()
+            ? _buildEmptyState(
+          hasArchivedProjects: hasArchivedProjects,
+        )
             : _buildProjectsBody(
           projects,
           authProv,
@@ -682,15 +892,78 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState({
+    required bool hasArchivedProjects,
+  }) {
+    final theme = Theme.of(context);
+
+    final title = hasArchivedProjects
+        ? _text(
+      ru: 'Активных проектов нет',
+      en: 'No active projects',
+    )
+        : 'projects.no_projects'.tr();
+
+    final subtitle = hasArchivedProjects
+        ? _text(
+      ru: 'Завершённые проекты находятся в архиве.',
+      en: 'Completed projects are available in the archive.',
+    )
+        : _text(
+      ru: 'Создайте новый проект, чтобы начать работу.',
+      en: 'Create a new project to get started.',
+    );
+
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       children: [
         SizedBox(
-          height: MediaQuery.of(context).size.height * 0.55,
+          height: MediaQuery.of(context).size.height * 0.58,
           child: Center(
-            child: Text(
-              'projects.no_projects'.tr(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 28,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    hasArchivedProjects
+                        ? Icons.archive_outlined
+                        : Icons.folder_open_outlined,
+                    size: 58,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    subtitle,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (hasArchivedProjects) ...[
+                    const SizedBox(height: 20),
+                    FilledButton.icon(
+                      onPressed: _openArchiveScreen,
+                      icon: const Icon(
+                        Icons.archive_outlined,
+                      ),
+                      label: Text(
+                        'navigation.archive'.tr(),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
         ),
@@ -753,17 +1026,15 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
       itemBuilder: (context, index) {
         final project = projects[index];
 
-        final isOwner = project.ownerId == authProv.userId;
-
         final canOpen = provider.canOpenProject(project);
-
-        final canEdit = provider.canEditProject(project);
-
-        final unreadCount = unreadMap[project.id] ?? 0;
 
         if (!canOpen) {
           return const SizedBox.shrink();
         }
+
+        final isOwner = provider.isOwner(project);
+        final canEdit = provider.canEditProject(project);
+        final unreadCount = unreadMap[project.id] ?? project.unreadCount;
 
         return ProjectCard(
           project: project,
@@ -772,37 +1043,10 @@ class _ProjectListScreenState extends State<ProjectListScreen> {
           isOwner: isOwner,
           searchQuery: provider.searchQuery,
           onEdit: _openProject,
-          onDelete: (p) async {
-            provider.setCurrentProject(p.id);
-
-            if (!provider.isOwner(p)) {
-              SnackbarManager.showError(
-                'errors.no_permission'.tr(),
-              );
-              return;
-            }
-
-            try {
-              await provider.deleteProject(p.id);
-
-              if (!context.mounted) {
-                return;
-              }
-
-              SnackbarManager.showSuccess(
-                'projects.deleted_success'.tr(),
-              );
-            } catch (e) {
-              if (!context.mounted) {
-                return;
-              }
-
-              SnackbarManager.showError(
-                ErrorMapper.map(e),
-              );
-            }
+          onDelete: _deleteProject,
+          onChat: () {
+            _openChat(project);
           },
-          onChat: () => _openChat(project),
         )
             .animate()
             .fadeIn(

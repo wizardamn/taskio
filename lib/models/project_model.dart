@@ -76,6 +76,16 @@ String _stringSafe(dynamic value) {
   return value?.toString().trim() ?? '';
 }
 
+String? _emptyStringToNull(dynamic value) {
+  final text = _stringSafe(value);
+
+  if (text.isEmpty || text.toLowerCase() == 'null') {
+    return null;
+  }
+
+  return text;
+}
+
 /// ============================================================
 /// PROJECT ROLE
 /// ============================================================
@@ -116,6 +126,30 @@ extension ProjectRoleExtension on ProjectRole {
       case ProjectRole.viewer:
         return 'project_roles.viewer'.tr();
     }
+  }
+
+  bool get canManageProject {
+    return this == ProjectRole.owner || this == ProjectRole.editor;
+  }
+
+  bool get canManageTasks {
+    return this == ProjectRole.owner || this == ProjectRole.editor;
+  }
+
+  bool get canCompleteTasks {
+    return this == ProjectRole.owner ||
+        this == ProjectRole.editor ||
+        this == ProjectRole.viewer;
+  }
+
+  bool get canAddAttachments {
+    return this == ProjectRole.owner ||
+        this == ProjectRole.editor ||
+        this == ProjectRole.viewer;
+  }
+
+  bool get canDeleteAnyAttachments {
+    return this == ProjectRole.owner || this == ProjectRole.editor;
   }
 }
 
@@ -398,6 +432,10 @@ class Attachment {
   final String mimeType;
   final int fileSize;
   final DateTime uploadedAt;
+
+  /// Основное поле автора загрузки.
+  ///
+  /// В БД должно соответствовать колонке `uploaded_by`.
   final String uploaderId;
 
   const Attachment({
@@ -411,6 +449,24 @@ class Attachment {
     required this.uploaderId,
   });
 
+  /// Алиас для удобной проверки прав.
+  String get uploadedBy => uploaderId;
+
+  /// Алиас, чтобы старые/новые виджеты могли обращаться безопасно.
+  String get uploadedById => uploaderId;
+
+  /// true, если файл загрузил текущий пользователь.
+  bool isUploadedBy(String? userId) {
+    final currentUserId = _emptyStringToNull(userId);
+    final ownerId = _emptyStringToNull(uploaderId);
+
+    if (currentUserId == null || ownerId == null) {
+      return false;
+    }
+
+    return currentUserId == ownerId;
+  }
+
   factory Attachment.fromJson(
       Map<String, dynamic> json,
       ) {
@@ -422,10 +478,19 @@ class Attachment {
       mimeType: _stringSafe(json['mime_type']),
       fileSize: _parseIntSafe(json['file_size']),
       uploadedAt: _parseDateSafe(
-        json['created_at'] ?? json['uploaded_at'],
+        json['created_at'] ??
+            json['uploaded_at'] ??
+            json['uploadedAt'],
       ),
       uploaderId: _stringSafe(
-        json['uploaded_by'] ?? json['uploader_id'],
+        json['uploaded_by'] ??
+            json['uploadedBy'] ??
+            json['uploaded_by_id'] ??
+            json['uploadedById'] ??
+            json['uploader_id'] ??
+            json['uploaderId'] ??
+            json['user_id'] ??
+            json['userId'],
       ),
     );
   }
@@ -441,6 +506,28 @@ class Attachment {
       'created_at': uploadedAt.toUtc().toIso8601String(),
       'uploaded_by': uploaderId,
     };
+  }
+
+  Attachment copyWith({
+    String? id,
+    String? projectId,
+    String? fileName,
+    String? filePath,
+    String? mimeType,
+    int? fileSize,
+    DateTime? uploadedAt,
+    String? uploaderId,
+  }) {
+    return Attachment(
+      id: id ?? this.id,
+      projectId: projectId ?? this.projectId,
+      fileName: fileName ?? this.fileName,
+      filePath: filePath ?? this.filePath,
+      mimeType: mimeType ?? this.mimeType,
+      fileSize: fileSize ?? this.fileSize,
+      uploadedAt: uploadedAt ?? this.uploadedAt,
+      uploaderId: uploaderId ?? this.uploaderId,
+    );
   }
 }
 
@@ -506,6 +593,107 @@ class ProjectModel {
         .where((id) => id.trim().isNotEmpty)
         .toSet()
         .toList();
+  }
+
+  List<String> get memberIds {
+    final ids = <String>{};
+
+    if (ownerId.trim().isNotEmpty) {
+      ids.add(ownerId.trim());
+    }
+
+    ids.addAll(participantIds);
+
+    return ids.toList();
+  }
+
+  bool isOwner(String? userId) {
+    final currentUserId = _emptyStringToNull(userId);
+
+    if (currentUserId == null) {
+      return false;
+    }
+
+    return ownerId.trim() == currentUserId;
+  }
+
+  ProjectParticipant? participantForUser(String? userId) {
+    final currentUserId = _emptyStringToNull(userId);
+
+    if (currentUserId == null) {
+      return null;
+    }
+
+    for (final participant in participantsData) {
+      if (participant.id.trim() == currentUserId) {
+        return participant;
+      }
+    }
+
+    return null;
+  }
+
+  ProjectRole? roleForUser(String? userId) {
+    if (isOwner(userId)) {
+      return ProjectRole.owner;
+    }
+
+    return participantForUser(userId)?.role;
+  }
+
+  bool isMember(String? userId) {
+    return roleForUser(userId) != null;
+  }
+
+  bool canManageProject(String? userId) {
+    final role = roleForUser(userId);
+
+    return role == ProjectRole.owner || role == ProjectRole.editor;
+  }
+
+  bool canManageTasks(String? userId) {
+    final role = roleForUser(userId);
+
+    return role == ProjectRole.owner || role == ProjectRole.editor;
+  }
+
+  bool canCompleteTasks(String? userId) {
+    final role = roleForUser(userId);
+
+    return role == ProjectRole.owner ||
+        role == ProjectRole.editor ||
+        role == ProjectRole.viewer;
+  }
+
+  bool canAddAttachments(String? userId) {
+    final role = roleForUser(userId);
+
+    return role == ProjectRole.owner ||
+        role == ProjectRole.editor ||
+        role == ProjectRole.viewer;
+  }
+
+  bool canDeleteAnyAttachments(String? userId) {
+    final role = roleForUser(userId);
+
+    return role == ProjectRole.owner || role == ProjectRole.editor;
+  }
+
+  bool canDeleteAttachment({
+    required String? userId,
+    required Attachment attachment,
+  }) {
+    if (canDeleteAnyAttachments(userId)) {
+      return true;
+    }
+
+    final role = roleForUser(userId);
+
+    if (role != ProjectRole.viewer) {
+      return false;
+    }
+
+    return attachment.isUploadedBy(userId);
   }
 
   double get progress {
@@ -624,16 +812,6 @@ class ProjectModel {
     }
 
     return result;
-  }
-
-  static String? _emptyStringToNull(dynamic value) {
-    final text = _stringSafe(value);
-
-    if (text.isEmpty) {
-      return null;
-    }
-
-    return text;
   }
 
   Map<String, dynamic> toJson() {

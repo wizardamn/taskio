@@ -12,18 +12,21 @@ import 'highlight_text.dart';
 class ProjectCard extends StatefulWidget {
   final ProjectModel project;
 
-  /// Используется как открытие карточки проекта.
+  /// Открытие карточки проекта.
   /// Даже viewer должен иметь возможность открыть карточку.
   final Function(ProjectModel) onEdit;
 
   final Function(ProjectModel) onDelete;
   final VoidCallback? onChat;
 
-  /// Право менять настройки проекта.
-  /// Viewer может открыть карточку, но не должен видеть меню редактирования.
+  /// Право редактировать проект.
+  /// owner/editor — true.
+  /// viewer — false.
   final bool canEdit;
 
+  /// true только для владельца.
   final bool isOwner;
+
   final String searchQuery;
 
   /// Передаётся из ProjectListScreen через unreadMap.
@@ -57,12 +60,20 @@ class _ProjectCardState extends State<ProjectCard> {
     return widget.unreadCount ?? widget.project.unreadCount;
   }
 
+  /// Меню с тремя точками показывается только тем,
+  /// кто реально может редактировать или удалить проект.
+  ///
+  /// viewer меню не видит, но открыть проект, чат и уведомления может.
   bool get _canShowMenu {
-    return true;
+    return widget.canEdit || widget.isOwner;
   }
 
-  bool get _canEditOrOwner {
+  bool get _canEditProject {
     return widget.canEdit || widget.isOwner;
+  }
+
+  bool get _canDeleteProject {
+    return widget.isOwner;
   }
 
   @override
@@ -78,6 +89,18 @@ class _ProjectCardState extends State<ProjectCard> {
     if (oldWidget.project.id != widget.project.id) {
       _loadNotificationSettings();
     }
+  }
+
+  // =========================================================
+  // TEXT
+  // =========================================================
+
+  String _text(
+      BuildContext context, {
+        required String ru,
+        required String en,
+      }) {
+    return context.locale.languageCode == 'ru' ? ru : en;
   }
 
   // =========================================================
@@ -175,13 +198,9 @@ class _ProjectCardState extends State<ProjectCard> {
     }
   }
 
-  String _text(
-      BuildContext context, {
-        required String ru,
-        required String en,
-      }) {
-    return context.locale.languageCode == 'ru' ? ru : en;
-  }
+  // =========================================================
+  // BUILD
+  // =========================================================
 
   @override
   Widget build(BuildContext context) {
@@ -304,7 +323,11 @@ class _ProjectCardState extends State<ProjectCard> {
 
         if (_canShowMenu)
           PopupMenuButton<String>(
-            tooltip: 'common.open'.tr(),
+            tooltip: _text(
+              context,
+              ru: 'Действия',
+              en: 'Actions',
+            ),
             icon: Icon(
               Icons.more_vert,
               color: colorScheme.onSurfaceVariant,
@@ -315,17 +338,13 @@ class _ProjectCardState extends State<ProjectCard> {
                   widget.onEdit(widget.project);
                   break;
 
-                case 'toggle_notifications':
-                  _toggleProjectNotifications();
-                  break;
-
                 case 'delete':
                   widget.onDelete(widget.project);
                   break;
               }
             },
             itemBuilder: (_) => [
-              if (_canEditOrOwner)
+              if (_canEditProject)
                 PopupMenuItem(
                   value: 'edit',
                   child: _buildPopupMenuItemContent(
@@ -335,28 +354,7 @@ class _ProjectCardState extends State<ProjectCard> {
                   ),
                 ),
 
-              PopupMenuItem(
-                value: 'toggle_notifications',
-                child: _buildPopupMenuItemContent(
-                  context,
-                  icon: _notificationsEnabled
-                      ? Icons.notifications_off_outlined
-                      : Icons.notifications_none_outlined,
-                  text: _notificationsEnabled
-                      ? _text(
-                    context,
-                    ru: 'Отключить уведомления',
-                    en: 'Disable notifications',
-                  )
-                      : _text(
-                    context,
-                    ru: 'Включить уведомления',
-                    en: 'Enable notifications',
-                  ),
-                ),
-              ),
-
-              if (widget.isOwner)
+              if (_canDeleteProject)
                 PopupMenuItem(
                   value: 'delete',
                   child: _buildPopupMenuItemContent(
@@ -773,8 +771,6 @@ class _ProjectCardState extends State<ProjectCard> {
   // =========================================================
 
   Widget _buildAttachments(BuildContext context) {
-    final client = SupabaseService.client;
-
     return Padding(
       padding: const EdgeInsets.only(top: 10),
       child: SizedBox(
@@ -792,13 +788,13 @@ class _ProjectCardState extends State<ProjectCard> {
               return const SizedBox.shrink();
             }
 
-            final url = client.storage
-                .from(SupabaseService.bucket)
-                .getPublicUrl(attachment.filePath);
+            final url = _publicUrlForAttachment(attachment.filePath);
 
-            final isImage = _isImageAttachment(
-              attachment.mimeType,
-            );
+            if (url == null) {
+              return const SizedBox.shrink();
+            }
+
+            final isImage = _isImageAttachment(attachment);
 
             return GestureDetector(
               onTap: () async {
@@ -842,32 +838,88 @@ class _ProjectCardState extends State<ProjectCard> {
     );
   }
 
-  bool _isImageAttachment(String mimeType) {
-    final mime = mimeType.toLowerCase();
+  String? _publicUrlForAttachment(String rawPath) {
+    final raw = rawPath.trim();
 
-    return mime.contains('image') ||
-        mime.contains('png') ||
-        mime.contains('jpg') ||
-        mime.contains('jpeg') ||
-        mime.contains('gif') ||
-        mime.contains('webp');
+    if (raw.isEmpty) {
+      return null;
+    }
+
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      return raw;
+    }
+
+    try {
+      var path = raw.replaceAll('\\', '/');
+
+      while (path.startsWith('/')) {
+        path = path.substring(1);
+      }
+
+      if (path.startsWith('${SupabaseService.bucket}/')) {
+        path = path.substring(
+          '${SupabaseService.bucket}/'.length,
+        );
+      }
+
+      return SupabaseService.client.storage
+          .from(SupabaseService.bucket)
+          .getPublicUrl(path);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _isImageAttachment(Attachment attachment) {
+    final mime = attachment.mimeType.toLowerCase().trim();
+    final name = attachment.fileName.toLowerCase().trim();
+    final path = attachment.filePath.toLowerCase().trim();
+
+    if (mime.contains('image')) {
+      return true;
+    }
+
+    return name.endsWith('.jpg') ||
+        name.endsWith('.jpeg') ||
+        name.endsWith('.png') ||
+        name.endsWith('.gif') ||
+        name.endsWith('.webp') ||
+        path.endsWith('.jpg') ||
+        path.endsWith('.jpeg') ||
+        path.endsWith('.png') ||
+        path.endsWith('.gif') ||
+        path.endsWith('.webp');
   }
 
   Future<void> _openAttachment(String url) async {
     final uri = Uri.tryParse(url);
 
     if (uri == null) {
+      SnackbarManager.showError(
+        'chat.file_open_error'.tr(),
+      );
       return;
     }
 
-    if (!await canLaunchUrl(uri)) {
-      return;
-    }
+    try {
+      final canOpen = await canLaunchUrl(uri);
 
-    await launchUrl(
-      uri,
-      mode: LaunchMode.externalApplication,
-    );
+      if (!canOpen) {
+        SnackbarManager.showError(
+          'chat.file_open_error'.tr(),
+        );
+        return;
+      }
+
+      await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (_) {
+      SnackbarManager.showError(
+        'chat.file_open_error'.tr(),
+      );
+    }
   }
 }
 

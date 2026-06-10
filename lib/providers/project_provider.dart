@@ -33,6 +33,12 @@ enum DeadlineFilter {
   overdue,
 }
 
+enum _ProjectListMode {
+  all,
+  active,
+  archived,
+}
+
 class ProjectProvider extends ChangeNotifier {
   final ProjectService _service;
 
@@ -53,6 +59,8 @@ class ProjectProvider extends ChangeNotifier {
   final NotificationService _notifications = NotificationService();
 
   final Set<String> _completedShown = {};
+  final Set<String> _autoCompletingProjectIds = {};
+  final Set<String> _autoArchiveIgnoredProjectIds = {};
 
   final List<ProjectModel> _projects = [];
   final List<Map<String, dynamic>> _pendingInvitations = [];
@@ -87,7 +95,7 @@ class ProjectProvider extends ChangeNotifier {
   bool get isInvitationsLoading => _isInvitationsLoading;
   String? get errorMessage => _errorMessage;
 
-  bool get isGuest => _userId == null;
+  bool get isGuest => _userId == null || _userId!.trim().isEmpty;
 
   List<Map<String, dynamic>> get pendingInvitations {
     return List<Map<String, dynamic>>.unmodifiable(
@@ -122,7 +130,64 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   List<ProjectModel> get projects {
-    var result = List<ProjectModel>.from(_projects);
+    return activeProjects;
+  }
+
+  List<ProjectModel> get allProjects {
+    return _buildProjectList(
+      _projects,
+      mode: _ProjectListMode.all,
+    );
+  }
+
+  List<ProjectModel> get activeProjects {
+    return _buildProjectList(
+      _projects,
+      mode: _ProjectListMode.active,
+    );
+  }
+
+  List<ProjectModel> get archivedProjects {
+    return _buildProjectList(
+      _projects,
+      mode: _ProjectListMode.archived,
+    );
+  }
+
+  int get archivedProjectsCount {
+    return _projects.where(isArchivedProject).length;
+  }
+
+  bool get hasArchivedProjects {
+    return archivedProjectsCount > 0;
+  }
+
+  List<ProjectModel> _buildProjectList(
+      Iterable<ProjectModel> source, {
+        required _ProjectListMode mode,
+      }) {
+    var result = List<ProjectModel>.from(source);
+
+    switch (mode) {
+      case _ProjectListMode.active:
+        result = result
+            .where(
+              (project) => !isArchivedProject(project),
+        )
+            .toList();
+        break;
+
+      case _ProjectListMode.archived:
+        result = result
+            .where(
+              (project) => isArchivedProject(project),
+        )
+            .toList();
+        break;
+
+      case _ProjectListMode.all:
+        break;
+    }
 
     final now = DateTime.now();
 
@@ -232,6 +297,8 @@ class ProjectProvider extends ChangeNotifier {
     _pendingInvitations.clear();
     _lastEmitted.clear();
     _completedShown.clear();
+    _autoCompletingProjectIds.clear();
+    _autoArchiveIgnoredProjectIds.clear();
 
     _currentProjectId = null;
     _lastEmittedCurrentProjectId = null;
@@ -264,6 +331,8 @@ class ProjectProvider extends ChangeNotifier {
     _lastEmittedCurrentProjectId = null;
 
     _completedShown.clear();
+    _autoCompletingProjectIds.clear();
+    _autoArchiveIgnoredProjectIds.clear();
     _pendingInvitations.clear();
 
     _searchDebounce?.cancel();
@@ -397,10 +466,7 @@ class ProjectProvider extends ChangeNotifier {
       await fetchPendingInvitations();
 
       SnackbarManager.showSuccess(
-        _localizedText(
-          ru: 'Приглашение принято',
-          en: 'Invitation accepted',
-        ),
+        'invitations.accepted'.tr(),
       );
     } catch (e, st) {
       _handleError(
@@ -436,10 +502,7 @@ class ProjectProvider extends ChangeNotifier {
       await fetchPendingInvitations();
 
       SnackbarManager.showSuccess(
-        _localizedText(
-          ru: 'Приглашение отклонено',
-          en: 'Invitation declined',
-        ),
+        'invitations.declined'.tr(),
       );
     } catch (e, st) {
       _handleError(
@@ -450,15 +513,6 @@ class ProjectProvider extends ChangeNotifier {
     } finally {
       _setInvitationsLoading(false);
     }
-  }
-
-  String _localizedText({
-    required String ru,
-    required String en,
-  }) {
-    final locale = Intl.getCurrentLocale().toLowerCase();
-
-    return locale.startsWith('ru') ? ru : en;
   }
 
   // =========================================================
@@ -484,6 +538,7 @@ class ProjectProvider extends ChangeNotifier {
 
       if (_isSame(loaded, _projects)) {
         _fixCurrentProject();
+        await _checkCompletedProjects();
         _emitIfChanged();
         return;
       }
@@ -496,7 +551,7 @@ class ProjectProvider extends ChangeNotifier {
 
       await _rescheduleProjectDeadlines();
 
-      _checkCompletedProjects();
+      await _checkCompletedProjects();
 
       _emitIfChanged();
     } catch (e, st) {
@@ -565,6 +620,9 @@ class ProjectProvider extends ChangeNotifier {
       await _syncProjectDeadlineNotification(fresh);
 
       _fixCurrentProject();
+
+      await _checkCompletedProjects();
+
       _emitIfChanged();
 
       return fresh;
@@ -587,18 +645,26 @@ class ProjectProvider extends ChangeNotifier {
 
     final currentId = _currentProjectId;
 
-    if (currentId == null || currentId.isEmpty) {
-      _currentProjectId = _projects.first.id;
+    if (currentId != null && currentId.isNotEmpty) {
+      final exists = _projects.any(
+            (project) => project.id == currentId,
+      );
+
+      if (exists) {
+        return;
+      }
+    }
+
+    final active = _projects.where(
+          (project) => !isArchivedProject(project),
+    );
+
+    if (active.isNotEmpty) {
+      _currentProjectId = active.first.id;
       return;
     }
 
-    final exists = _projects.any(
-          (project) => project.id == currentId,
-    );
-
-    if (!exists) {
-      _currentProjectId = _projects.first.id;
-    }
+    _currentProjectId = _projects.first.id;
   }
 
   // =========================================================
@@ -714,6 +780,8 @@ class ProjectProvider extends ChangeNotifier {
 
       await fetchPendingInvitations();
 
+      await _checkCompletedProjects();
+
       _emitIfChanged();
     } catch (e, st) {
       _handleError(
@@ -758,6 +826,121 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   // =========================================================
+  // ARCHIVE / RESTORE / COMPLETE
+  // =========================================================
+
+  bool isArchivedProject(ProjectModel project) {
+    return project.statusEnum == ProjectStatus.completed ||
+        project.statusEnum == ProjectStatus.archived;
+  }
+
+  bool canArchiveProject(ProjectModel project) {
+    return canEditProject(project) && !isArchivedProject(project);
+  }
+
+  bool canRestoreProject(ProjectModel project) {
+    return canEditProject(project) && isArchivedProject(project);
+  }
+
+  Future<void> completeProject(ProjectModel project) async {
+    _autoArchiveIgnoredProjectIds.remove(project.id);
+
+    await _changeProjectStatus(
+      project: project,
+      status: ProjectStatus.completed,
+      operation: 'completeProject',
+    );
+  }
+
+  Future<void> archiveProject(ProjectModel project) async {
+    _autoArchiveIgnoredProjectIds.remove(project.id);
+
+    await _changeProjectStatus(
+      project: project,
+      status: ProjectStatus.archived,
+      operation: 'archiveProject',
+    );
+  }
+
+  Future<void> restoreProject(ProjectModel project) async {
+    _autoArchiveIgnoredProjectIds.add(project.id);
+    _completedShown.remove(project.id);
+
+    await _changeProjectStatus(
+      project: project,
+      status: ProjectStatus.inProgress,
+      operation: 'restoreProject',
+    );
+  }
+
+  Future<void> _changeProjectStatus({
+    required ProjectModel project,
+    required ProjectStatus status,
+    required String operation,
+  }) async {
+    if (isGuest) {
+      _denyGuest();
+      return;
+    }
+
+    final current = _findProject(project.id) ?? project;
+
+    if (!canEditProject(current)) {
+      _denyPermission();
+      return;
+    }
+
+    if (current.statusEnum == status) {
+      return;
+    }
+
+    try {
+      _setLoading(true);
+
+      final updated = current.copyWith(
+        status: status.index,
+      );
+
+      await _service.update(updated);
+
+      final fresh = await _service.getById(updated.id);
+
+      if (fresh == null) {
+        await fetchProjects();
+        return;
+      }
+
+      final index = _projects.indexWhere(
+            (item) => item.id == fresh.id,
+      );
+
+      if (index != -1) {
+        _projects[index] = fresh;
+      } else {
+        _projects.insert(0, fresh);
+      }
+
+      _sort(_projects);
+
+      _currentProjectId = fresh.id;
+
+      await _syncProjectDeadlineNotification(fresh);
+
+      _fixCurrentProject();
+
+      _emitIfChanged();
+    } catch (e, st) {
+      _handleError(
+        e,
+        st,
+        operation,
+      );
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  // =========================================================
   // DELETE PROJECT
   // =========================================================
 
@@ -782,6 +965,10 @@ class ProjectProvider extends ChangeNotifier {
       _projects.removeWhere(
             (project) => project.id == id,
       );
+
+      _completedShown.remove(id);
+      _autoCompletingProjectIds.remove(id);
+      _autoArchiveIgnoredProjectIds.remove(id);
 
       if (_currentProjectId == id) {
         _currentProjectId =
@@ -908,7 +1095,7 @@ class ProjectProvider extends ChangeNotifier {
 
     final project = _findProject(projectId);
 
-    if (project != null && !canManageProjectContent(project)) {
+    if (project != null && !canAddAttachments(project)) {
       _denyPermission();
       return null;
     }
@@ -960,9 +1147,20 @@ class ProjectProvider extends ChangeNotifier {
 
     final project = _findProject(projectId);
 
-    if (project != null && !canManageProjectContent(project)) {
-      _denyPermission();
-      return;
+    if (project != null) {
+      final attachment = _findAttachmentInProject(
+        project: project,
+        filePath: filePath,
+      );
+
+      if (attachment != null &&
+          !canDeleteAttachment(
+            project: project,
+            attachment: attachment,
+          )) {
+        _denyPermission();
+        return;
+      }
     }
 
     try {
@@ -1037,6 +1235,58 @@ class ProjectProvider extends ChangeNotifier {
         role == ProjectRole.editor;
   }
 
+  bool canManageTasks(ProjectModel project) {
+    final role = _currentUserRole(project);
+
+    return role == ProjectRole.owner ||
+        role == ProjectRole.editor;
+  }
+
+  bool canCompleteTasks(ProjectModel project) {
+    final role = _currentUserRole(project);
+
+    return role == ProjectRole.owner ||
+        role == ProjectRole.editor ||
+        role == ProjectRole.viewer;
+  }
+
+  bool canAddAttachments(ProjectModel project) {
+    final role = _currentUserRole(project);
+
+    return role == ProjectRole.owner ||
+        role == ProjectRole.editor ||
+        role == ProjectRole.viewer;
+  }
+
+  bool canDeleteAnyAttachments(ProjectModel project) {
+    final role = _currentUserRole(project);
+
+    return role == ProjectRole.owner ||
+        role == ProjectRole.editor;
+  }
+
+  bool canDeleteAttachment({
+    required ProjectModel project,
+    required Attachment attachment,
+  }) {
+    final role = _currentUserRole(project);
+    final userId = _userId;
+
+    if (userId == null || userId.isEmpty) {
+      return false;
+    }
+
+    if (role == ProjectRole.owner || role == ProjectRole.editor) {
+      return true;
+    }
+
+    if (role != ProjectRole.viewer) {
+      return false;
+    }
+
+    return attachment.isUploadedBy(userId);
+  }
+
   bool canEditOwnerSettings(ProjectModel project) {
     return isOwner(project);
   }
@@ -1087,6 +1337,25 @@ class ProjectProvider extends ChangeNotifier {
     for (final project in _projects) {
       if (project.id == id) {
         return project;
+      }
+    }
+
+    return null;
+  }
+
+  Attachment? _findAttachmentInProject({
+    required ProjectModel project,
+    required String filePath,
+  }) {
+    final normalizedPath = filePath.trim();
+
+    if (normalizedPath.isEmpty) {
+      return null;
+    }
+
+    for (final attachment in project.attachments) {
+      if (attachment.filePath == normalizedPath) {
+        return attachment;
       }
     }
 
@@ -1373,7 +1642,6 @@ class ProjectProvider extends ChangeNotifier {
             }
 
             await fetchProjects();
-            _checkCompletedProjects();
           },
         );
       },
@@ -1486,27 +1754,129 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   // =========================================================
-  // COMPLETED CHECK
+  // COMPLETED CHECK / AUTO ARCHIVE
   // =========================================================
 
-  void _checkCompletedProjects() {
-    for (final project in _projects) {
+  Future<void> _checkCompletedProjects() async {
+    final snapshot = List<ProjectModel>.from(_projects);
+
+    for (final project in snapshot) {
+      if (_disposed) {
+        return;
+      }
+
       final completed = project.totalTasks > 0 &&
           project.completedTasks == project.totalTasks;
 
-      if (!completed || _completedShown.contains(project.id)) {
+      if (!completed) {
+        _completedShown.remove(project.id);
+        _autoArchiveIgnoredProjectIds.remove(project.id);
         continue;
       }
 
-      _completedShown.add(project.id);
+      if (isArchivedProject(project)) {
+        _completedShown.add(project.id);
+        continue;
+      }
 
-      SnackbarManager.showSuccess(
-        'projects.completed'.tr(
-          namedArgs: {
-            'title': project.title,
-          },
-        ),
+      if (_autoArchiveIgnoredProjectIds.contains(project.id)) {
+        continue;
+      }
+
+      if (!canEditProject(project)) {
+        if (_completedShown.add(project.id)) {
+          SnackbarManager.showSuccess(
+            'projects.completed'.tr(
+              namedArgs: {
+                'title': project.title,
+              },
+            ),
+          );
+        }
+
+        continue;
+      }
+
+      await _completeProjectAutomatically(project);
+    }
+  }
+
+  Future<void> _completeProjectAutomatically(
+      ProjectModel project,
+      ) async {
+    if (_disposed) {
+      return;
+    }
+
+    if (_autoCompletingProjectIds.contains(project.id)) {
+      return;
+    }
+
+    _autoCompletingProjectIds.add(project.id);
+
+    try {
+      final current = _findProject(project.id) ?? project;
+
+      if (current.statusEnum == ProjectStatus.completed ||
+          current.statusEnum == ProjectStatus.archived) {
+        return;
+      }
+
+      final stillCompleted = current.totalTasks > 0 &&
+          current.completedTasks == current.totalTasks;
+
+      if (!stillCompleted) {
+        return;
+      }
+
+      final updated = current.copyWith(
+        status: ProjectStatus.completed.index,
       );
+
+      await _service.update(updated);
+
+      final fresh = await _service.getById(updated.id);
+
+      final nextProject = fresh ?? updated;
+
+      final index = _projects.indexWhere(
+            (item) => item.id == nextProject.id,
+      );
+
+      if (index != -1) {
+        _projects[index] = nextProject;
+      } else {
+        _projects.insert(0, nextProject);
+      }
+
+      _sort(_projects);
+
+      _currentProjectId = nextProject.id;
+
+      await _syncProjectDeadlineNotification(nextProject);
+
+      _fixCurrentProject();
+
+      if (_completedShown.add(nextProject.id)) {
+        SnackbarManager.showSuccess(
+          'projects.completed'.tr(
+            namedArgs: {
+              'title': nextProject.title,
+            },
+          ),
+        );
+      }
+
+      _emitIfChanged();
+    } catch (e, st) {
+      AppLogger.error(
+        'Automatic project completion failed',
+        error: e,
+        stackTrace: st,
+        tag: 'ProjectProvider',
+      );
+    } finally {
+      _autoCompletingProjectIds.remove(project.id);
     }
   }
 
@@ -1692,6 +2062,8 @@ class ProjectProvider extends ChangeNotifier {
     _invitationsRefreshDebounce = null;
 
     _completedShown.clear();
+    _autoCompletingProjectIds.clear();
+    _autoArchiveIgnoredProjectIds.clear();
     _pendingInvitations.clear();
 
     _removeRealtime();

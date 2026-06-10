@@ -41,7 +41,10 @@ class _ExportScreenState extends State<ExportScreen> {
     super.initState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
+
       await _initSelection();
     });
   }
@@ -51,7 +54,9 @@ class _ExportScreenState extends State<ExportScreen> {
   // =========================================================
 
   Future<void> _initSelection() async {
-    if (_initializedSelection) return;
+    if (_initializedSelection) {
+      return;
+    }
 
     final provider = context.read<ProjectProvider>();
 
@@ -66,9 +71,12 @@ class _ExportScreenState extends State<ExportScreen> {
       );
     }
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
-    final projects = provider.projects;
+    final projects = provider.allProjects;
+
     final currentProject = _resolveCurrentProject(
       projects,
       provider,
@@ -211,10 +219,12 @@ class _ExportScreenState extends State<ExportScreen> {
   // =========================================================
 
   void _changeScope(ReportScope? scope) {
-    if (scope == null) return;
+    if (scope == null) {
+      return;
+    }
 
     final provider = context.read<ProjectProvider>();
-    final projects = provider.projects;
+    final projects = provider.allProjects;
 
     setState(() {
       _scope = scope;
@@ -303,7 +313,11 @@ class _ExportScreenState extends State<ExportScreen> {
     try {
       await provider.fetchProjects();
 
-      final allProjects = provider.projects;
+      if (!mounted) {
+        return;
+      }
+
+      final allProjects = provider.allProjects;
 
       if (allProjects.isEmpty) {
         SnackbarManager.showWarning(
@@ -330,7 +344,9 @@ class _ExportScreenState extends State<ExportScreen> {
         options: _reportOptions(),
       );
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
         _pdf = pdf;
@@ -348,7 +364,9 @@ class _ExportScreenState extends State<ExportScreen> {
         tag: 'ExportScreen',
       );
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       SnackbarManager.showError(
         ErrorMapper.map(e),
@@ -365,7 +383,9 @@ class _ExportScreenState extends State<ExportScreen> {
   Future<void> _sharePdf() async {
     final pdf = _pdf;
 
-    if (pdf == null) return;
+    if (pdf == null) {
+      return;
+    }
 
     try {
       final bytes = await pdf.save();
@@ -395,7 +415,9 @@ class _ExportScreenState extends State<ExportScreen> {
   Future<void> _print() async {
     final pdf = _pdf;
 
-    if (pdf == null) return;
+    if (pdf == null) {
+      return;
+    }
 
     try {
       await Printing.layoutPdf(
@@ -456,7 +478,6 @@ class _ExportScreenState extends State<ExportScreen> {
               });
             },
           ),
-
           AnimatedCrossFade(
             duration: const Duration(milliseconds: 200),
             crossFadeState: _settingsExpanded
@@ -481,7 +502,6 @@ class _ExportScreenState extends State<ExportScreen> {
                             ),
                           ),
                         ),
-
                         RadioListTile<ReportScope>(
                           value: ReportScope.selectedProjects,
                           contentPadding: EdgeInsets.zero,
@@ -489,7 +509,6 @@ class _ExportScreenState extends State<ExportScreen> {
                             'export.selected_projects'.tr(),
                           ),
                         ),
-
                         RadioListTile<ReportScope>(
                           value: ReportScope.allProjects,
                           contentPadding: EdgeInsets.zero,
@@ -504,9 +523,7 @@ class _ExportScreenState extends State<ExportScreen> {
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 8),
-
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
@@ -514,14 +531,11 @@ class _ExportScreenState extends State<ExportScreen> {
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
-
                   if (_scope == ReportScope.selectedProjects) ...[
                     const SizedBox(height: 12),
                     _buildProjectPicker(projects),
                   ],
-
                   const SizedBox(height: 16),
-
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
@@ -584,9 +598,7 @@ class _ExportScreenState extends State<ExportScreen> {
                 'common.select_all'.tr(),
               ),
             ),
-
             const SizedBox(width: 8),
-
             TextButton.icon(
               onPressed: _clearSelectedProjects,
               icon: const Icon(Icons.clear),
@@ -596,9 +608,7 @@ class _ExportScreenState extends State<ExportScreen> {
             ),
           ],
         ),
-
         const SizedBox(height: 8),
-
         ConstrainedBox(
           constraints: const BoxConstraints(
             maxHeight: 220,
@@ -661,16 +671,12 @@ class _ExportScreenState extends State<ExportScreen> {
               size: 72,
               color: Theme.of(context).colorScheme.outline,
             ),
-
             const SizedBox(height: 16),
-
             Text(
               'report.no_preview'.tr(),
               style: Theme.of(context).textTheme.titleMedium,
             ),
-
             const SizedBox(height: 8),
-
             Text(
               'export.generate_preview_hint'.tr(),
               textAlign: TextAlign.center,
@@ -710,7 +716,7 @@ class _ExportScreenState extends State<ExportScreen> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<ProjectProvider>();
-    final projects = provider.projects;
+    final projects = provider.allProjects;
 
     if (!_initializedSelection) {
       return Scaffold(
@@ -736,13 +742,11 @@ class _ExportScreenState extends State<ExportScreen> {
             tooltip: 'common.refresh'.tr(),
             onPressed: _isLoading ? null : _generate,
           ),
-
           IconButton(
             icon: const Icon(Icons.share),
             tooltip: 'common.share'.tr(),
             onPressed: _pdf == null ? null : _sharePdf,
           ),
-
           IconButton(
             icon: const Icon(Icons.print),
             tooltip: 'common.print'.tr(),
@@ -756,7 +760,6 @@ class _ExportScreenState extends State<ExportScreen> {
             projects,
             provider,
           ),
-
           Expanded(
             child: _isLoading
                 ? const Center(

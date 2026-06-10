@@ -11,6 +11,7 @@ import '../screens/profile/profile_screen.dart';
 import '../screens/calendar/calendar_screen.dart';
 import '../screens/auth/login_screen.dart';
 import '../screens/export/export_screen.dart';
+import '../screens/archive/archive_screen.dart';
 
 import '../services/notification_service.dart';
 import '../services/supabase_service.dart';
@@ -44,7 +45,6 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
   bool _allNotificationsEnabled = true;
   bool _chatNotificationsEnabled = true;
   bool _projectUpdatesEnabled = true;
-
 
   // ======================================================
   // DRAWER NAVIGATION
@@ -117,6 +117,47 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
     await navigator.push(
       MaterialPageRoute(
         builder: (_) => const CalendarScreen(),
+      ),
+    );
+  }
+
+  Future<void> _openArchiveScreen({
+    required BuildContext context,
+    required ProjectProvider projectProv,
+  }) async {
+    final navigator = Navigator.of(
+      context,
+      rootNavigator: true,
+    );
+
+    await _closeDrawerAndWait(context);
+
+    try {
+      LoadingOverlay.show();
+
+      await projectProv.fetchProjects();
+    } catch (e, st) {
+      AppLogger.error(
+        'Refresh before archive opening failed',
+        error: e,
+        stackTrace: st,
+        tag: 'Drawer',
+      );
+
+      SnackbarManager.showError(
+        ErrorMapper.map(e),
+      );
+    } finally {
+      LoadingOverlay.hide();
+    }
+
+    if (!navigator.mounted) {
+      return;
+    }
+
+    await navigator.push(
+      MaterialPageRoute(
+        builder: (_) => const ArchiveScreen(),
       ),
     );
   }
@@ -297,9 +338,10 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
       }
 
       SnackbarManager.showSuccess(
-        value
+        (value
             ? 'notifications.all_enabled'
-            : 'notifications.all_disabled',
+            : 'notifications.all_disabled')
+            .tr(),
       );
     } catch (e, st) {
       AppLogger.error(
@@ -342,9 +384,10 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
       }
 
       SnackbarManager.showSuccess(
-        value
+        (value
             ? 'notifications.chat_enabled'
-            : 'notifications.chat_disabled',
+            : 'notifications.chat_disabled')
+            .tr(),
       );
     } catch (e, st) {
       AppLogger.error(
@@ -388,9 +431,10 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
       }
 
       SnackbarManager.showSuccess(
-        value
+        (value
             ? 'notifications.project_updates_enabled'
-            : 'notifications.project_updates_disabled',
+            : 'notifications.project_updates_disabled')
+            .tr(),
       );
     } catch (e, st) {
       AppLogger.error(
@@ -596,6 +640,35 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
         .slideX(begin: 0.05);
   }
 
+  Widget? _buildArchiveCounter({
+    required BuildContext context,
+    required int count,
+  }) {
+    if (count <= 0) {
+      return null;
+    }
+
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 3,
+      ),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        count.toString(),
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onPrimaryContainer,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
   // ======================================================
   // HEADER
   // ======================================================
@@ -760,11 +833,11 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
       return;
     }
 
-    final projects = projectProv.projects;
+    final projects = projectProv.allProjects;
 
     if (projects.isEmpty) {
       SnackbarManager.showError(
-        'projects.no_projects',
+        'projects.no_projects'.tr(),
       );
       return;
     }
@@ -797,10 +870,12 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
   Widget build(BuildContext context) {
     final authProv = context.watch<AuthProvider>();
     final themeProv = context.watch<ThemeProvider>();
-    final projectProv = context.read<ProjectProvider>();
+    final projectProv = context.watch<ProjectProvider>();
 
     final isGuest = authProv.isGuest;
     final colorScheme = Theme.of(context).colorScheme;
+
+    final archivedProjectsCount = projectProv.archivedProjectsCount;
 
     return Drawer(
       child: Column(
@@ -871,11 +946,28 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
                   context,
                   'navigation.management'.tr(),
                 ),
+                if (!isGuest)
+                  _buildDrawerItem(
+                    context: context,
+                    icon: Icons.archive_outlined,
+                    title: 'navigation.archive'.tr(),
+                    index: 5,
+                    trailing: _buildArchiveCounter(
+                      context: context,
+                      count: archivedProjectsCount,
+                    ),
+                    onTap: () {
+                      _openArchiveScreen(
+                        context: context,
+                        projectProv: projectProv,
+                      );
+                    },
+                  ),
                 _buildDrawerItem(
                   context: context,
                   icon: Icons.picture_as_pdf_outlined,
                   title: 'export.title'.tr(),
-                  index: 5,
+                  index: 6,
                   onTap: () {
                     _openExportScreen(
                       context: context,
@@ -887,7 +979,7 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
                   context: context,
                   icon: Icons.calendar_month_outlined,
                   title: 'navigation.calendar'.tr(),
-                  index: 6,
+                  index: 7,
                   onTap: () {
                     _openCalendarScreen(context);
                   },
@@ -897,7 +989,7 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
                     context: context,
                     icon: Icons.sync_outlined,
                     title: 'projects.refresh'.tr(),
-                    index: 7,
+                    index: 8,
                     onTap: () async {
                       await _closeDrawerAndWait(context);
 
@@ -907,7 +999,7 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
                         await projectProv.fetchProjects();
 
                         SnackbarManager.showSuccess(
-                          'common.updated',
+                          'common.updated'.tr(),
                         );
                       } catch (e, st) {
                         AppLogger.error(
@@ -929,7 +1021,7 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
                   context: context,
                   icon: Icons.info_outline,
                   title: 'app.about'.tr(),
-                  index: 8,
+                  index: 9,
                   onTap: () {
                     _openAboutAppDialog(context);
                   },
@@ -947,7 +1039,7 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
               title: isGuest
                   ? 'auth.login'.tr()
                   : 'auth.logout'.tr(),
-              index: 9,
+              index: 10,
               color: isGuest ? colorScheme.primary : colorScheme.error,
               onTap: () async {
                 final navigator = Navigator.of(
@@ -990,7 +1082,7 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
                   }
 
                   SnackbarManager.showSuccess(
-                    'auth.logout_success',
+                    'auth.logout_success'.tr(),
                   );
                 } catch (e, st) {
                   AppLogger.error(
@@ -1106,7 +1198,7 @@ class _UserProfileDrawerState extends State<UserProfileDrawer> {
           Navigator.of(context).pop();
 
           SnackbarManager.showSuccess(
-            'profile.language_changed',
+            'profile.language_changed'.tr(),
           );
         } catch (e, st) {
           AppLogger.error(

@@ -11,6 +11,7 @@ import '../../models/project_model.dart';
 import '../../providers/project_provider.dart';
 import '../../services/supabase_service.dart';
 import '../../utils/error_mapper.dart';
+import '../../utils/file_opener_utils.dart';
 import '../../utils/snackbar_manager.dart';
 import '../../widgets/participant_selection_dialog.dart';
 import '../../widgets/project_form/attachments_section.dart';
@@ -63,8 +64,31 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   bool _isUploading = false;
   bool _isSaving = false;
 
+  String? _currentlyOpeningFile;
+
+  /// true для owner/editor.
+  /// Даёт право редактировать основные данные проекта.
   bool _canEdit = false;
+
+  /// true для owner/editor.
+  /// Даёт право управлять содержимым проекта на уровне редактирования.
   bool _canManageContent = false;
+
+  /// true для owner/editor.
+  /// Даёт право добавлять и удалять задачи.
+  bool _canManageTasks = false;
+
+  /// true для owner/editor/viewer.
+  /// Даёт право выполнять задачи.
+  bool _canCompleteTasks = false;
+
+  /// true для owner/editor/viewer.
+  /// Даёт право добавлять вложения.
+  bool _canAddAttachments = false;
+
+  /// true для owner/editor.
+  /// Даёт право удалять любые вложения.
+  bool _canDeleteAnyAttachments = false;
 
   String get _currentUserId {
     return _supabase.auth.currentUser?.id ?? '';
@@ -83,7 +107,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       return true;
     }
 
-    return widget.project.ownerId == _currentUserId;
+    return widget.project.isOwner(_currentUserId);
   }
 
   bool get _canEditOwnerSettings {
@@ -212,22 +236,70 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     if (widget.isNew) {
       _canEdit = true;
       _canManageContent = true;
+      _canManageTasks = true;
+      _canCompleteTasks = true;
+      _canAddAttachments = false;
+      _canDeleteAnyAttachments = true;
       return;
     }
 
     try {
       final provider = context.read<ProjectProvider>();
 
-      _canEdit = provider.canEditProject(
+      final providerCanEdit = provider.canEditProject(
         widget.project,
       );
 
-      _canManageContent = provider.canManageProjectContent(
+      final providerCanManageContent =
+      provider.canManageProjectContent(
         widget.project,
       );
+
+      final role = widget.project.roleForUser(_currentUserId);
+
+      _canEdit = providerCanEdit ||
+          role == ProjectRole.owner ||
+          role == ProjectRole.editor;
+
+      _canManageContent = providerCanManageContent ||
+          role == ProjectRole.owner ||
+          role == ProjectRole.editor;
+
+      _canManageTasks = role == ProjectRole.owner ||
+          role == ProjectRole.editor;
+
+      _canCompleteTasks = role == ProjectRole.owner ||
+          role == ProjectRole.editor ||
+          role == ProjectRole.viewer;
+
+      _canAddAttachments = role == ProjectRole.owner ||
+          role == ProjectRole.editor ||
+          role == ProjectRole.viewer;
+
+      _canDeleteAnyAttachments = role == ProjectRole.owner ||
+          role == ProjectRole.editor;
     } catch (_) {
-      _canEdit = false;
-      _canManageContent = false;
+      final role = widget.project.roleForUser(_currentUserId);
+
+      _canEdit = role == ProjectRole.owner ||
+          role == ProjectRole.editor;
+
+      _canManageContent = role == ProjectRole.owner ||
+          role == ProjectRole.editor;
+
+      _canManageTasks = role == ProjectRole.owner ||
+          role == ProjectRole.editor;
+
+      _canCompleteTasks = role == ProjectRole.owner ||
+          role == ProjectRole.editor ||
+          role == ProjectRole.viewer;
+
+      _canAddAttachments = role == ProjectRole.owner ||
+          role == ProjectRole.editor ||
+          role == ProjectRole.viewer;
+
+      _canDeleteAnyAttachments = role == ProjectRole.owner ||
+          role == ProjectRole.editor;
     }
   }
 
@@ -245,6 +317,24 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     } catch (_) {
       _users = [];
     }
+  }
+
+  // =========================================================
+  // PERMISSIONS HELPERS
+  // =========================================================
+
+  bool _canDeleteAttachment(Attachment attachment) {
+    if (_canDeleteAnyAttachments) {
+      return true;
+    }
+
+    final role = widget.project.roleForUser(_currentUserId);
+
+    if (role != ProjectRole.viewer) {
+      return false;
+    }
+
+    return attachment.isUploadedBy(_currentUserId);
   }
 
   // =========================================================
@@ -560,7 +650,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   // =========================================================
 
   void _addDraftTask() {
-    if (!_canEdit) {
+    if (!_canManageTasks) {
       return;
     }
 
@@ -585,7 +675,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   }
 
   void _removeDraftTask(int index) {
-    if (!_canEdit) {
+    if (!_canManageTasks) {
       return;
     }
 
@@ -634,7 +724,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
               Expanded(
                 child: TextField(
                   controller: _draftTaskController,
-                  enabled: _canEdit,
+                  enabled: _canManageTasks,
                   textCapitalization: TextCapitalization.sentences,
                   textInputAction: TextInputAction.done,
                   decoration: InputDecoration(
@@ -649,7 +739,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
               const SizedBox(width: 8),
               IconButton.filled(
                 tooltip: 'common.add'.tr(),
-                onPressed: _canEdit ? _addDraftTask : null,
+                onPressed: _canManageTasks ? _addDraftTask : null,
                 icon: const Icon(Icons.add),
               ),
             ],
@@ -686,7 +776,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                     trailing: IconButton(
                       tooltip: 'common.delete'.tr(),
                       icon: const Icon(Icons.close),
-                      onPressed: _canEdit
+                      onPressed: _canManageTasks
                           ? () => _removeDraftTask(index)
                           : null,
                     ),
@@ -711,7 +801,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       return;
     }
 
-    if (!_canManageContent) {
+    if (!_canAddAttachments) {
       SnackbarManager.showError(
         'errors.no_permission'.tr(),
       );
@@ -800,10 +890,60 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     }
   }
 
+  Future<void> _openAttachment(Attachment attachment) async {
+    final filePath = attachment.filePath.trim();
+
+    if (filePath.isEmpty) {
+      SnackbarManager.showError(
+        'errors.file_not_found'.tr(),
+      );
+      return;
+    }
+
+    if (_currentlyOpeningFile == filePath) {
+      return;
+    }
+
+    setState(() {
+      _currentlyOpeningFile = filePath;
+    });
+
+    try {
+      final errorKey = await FileOpenerUtils.downloadAndOpen(
+        filePath,
+        attachment.fileName,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (errorKey != null && errorKey.trim().isNotEmpty) {
+        SnackbarManager.showError(
+          errorKey.tr(),
+        );
+      }
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+
+      SnackbarManager.showError(
+        ErrorMapper.map(e),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _currentlyOpeningFile = null;
+        });
+      }
+    }
+  }
+
   Future<void> _deleteAttachment(
       Attachment attachment,
       ) async {
-    if (!_canManageContent) {
+    if (!_canDeleteAttachment(attachment)) {
       SnackbarManager.showError(
         'errors.no_permission'.tr(),
       );
@@ -846,6 +986,13 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
   Future<void> _saveProject() async {
     if (_isSaving) {
+      return;
+    }
+
+    if (!_canEdit) {
+      SnackbarManager.showError(
+        'errors.no_permission'.tr(),
+      );
       return;
     }
 
@@ -1226,7 +1373,8 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
     return ProjectTasksWidget(
       projectId: widget.project.id,
-      canEdit: _canManageContent,
+      canEdit: _canManageTasks,
+      canCompleteTasks: _canCompleteTasks,
     );
   }
 
@@ -1400,11 +1548,18 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       child: AttachmentsSection(
         attachments: _attachments,
         isUploading: _isUploading,
-        currentlyOpeningFile: null,
+        currentlyOpeningFile: _currentlyOpeningFile,
+
         canEditContent: _canManageContent,
         isOwner: _isOwner,
+
+        canAddAttachments: _canAddAttachments,
+        canDeleteAnyAttachments: _canDeleteAnyAttachments,
+        canDeleteOwnAttachments: true,
+        currentUserId: _currentUserId,
+
         onPick: _pickAttachment,
-        onOpen: (_) {},
+        onOpen: _openAttachment,
         onDelete: _deleteAttachment,
       ),
     );

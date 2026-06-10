@@ -9,6 +9,16 @@ import 'supabase_service.dart';
 class TaskService {
   final SupabaseClient _client = SupabaseService.client;
 
+  static const String _tasksTable = 'project_tasks';
+
+  static const String _taskSelect = '''
+    id,
+    project_id,
+    title,
+    is_completed,
+    created_at
+  ''';
+
   final Map<String, List<TaskModel>> _cache = {};
   final Map<String, StreamController<List<TaskModel>>> _controllers = {};
   final Map<String, RealtimeChannel> _channels = {};
@@ -132,16 +142,8 @@ class TaskService {
   Future<void> _loadInitial(String projectId) async {
     try {
       final data = await _client
-          .from('project_tasks')
-          .select(
-        '''
-            id,
-            project_id,
-            title,
-            is_completed,
-            created_at
-            ''',
-      )
+          .from(_tasksTable)
+          .select(_taskSelect)
           .eq('project_id', projectId)
           .order(
         'created_at',
@@ -206,7 +208,7 @@ class TaskService {
     channel.onPostgresChanges(
       event: PostgresChangeEvent.all,
       schema: 'public',
-      table: 'project_tasks',
+      table: _tasksTable,
       filter: PostgresChangeFilter(
         type: PostgresChangeFilterType.eq,
         column: 'project_id',
@@ -292,6 +294,9 @@ class TaskService {
             list,
             TaskModel.fromJson(newRecord),
           );
+        } else {
+          _scheduleRefresh(projectId);
+          return;
         }
       } else if (event.contains('update')) {
         if (newRecord.isNotEmpty) {
@@ -299,6 +304,9 @@ class TaskService {
             list,
             TaskModel.fromJson(newRecord),
           );
+        } else {
+          _scheduleRefresh(projectId);
+          return;
         }
       } else if (event.contains('delete')) {
         final id = oldRecord['id']?.toString();
@@ -334,6 +342,11 @@ class TaskService {
   // CRUD
   // =========================================================
 
+  /// Добавление задачи.
+  ///
+  /// ВАЖНО:
+  /// viewer не должен вызывать этот метод из UI.
+  /// Проверка роли должна быть в ProjectTasksWidget/родительском экране.
   Future<void> addTask(
       String projectId,
       String title,
@@ -347,22 +360,14 @@ class TaskService {
 
     try {
       final data = await _client
-          .from('project_tasks')
+          .from(_tasksTable)
           .insert({
         'project_id': cleanProjectId,
         'title': text,
         'is_completed': false,
         'created_at': DateTime.now().toUtc().toIso8601String(),
       })
-          .select(
-        '''
-            id,
-            project_id,
-            title,
-            is_completed,
-            created_at
-            ''',
-      )
+          .select(_taskSelect)
           .single();
 
       final task = TaskModel.fromJson(
@@ -390,34 +395,44 @@ class TaskService {
     }
   }
 
+  /// Старый метод оставлен для совместимости.
+  ///
+  /// Он меняет только поле is_completed.
+  /// Это подходит для viewer, потому что наблюдатель должен иметь право
+  /// только выполнять/снимать выполнение задач.
   Future<void> toggleTask(
       String taskId,
       bool current,
       ) async {
+    await setTaskCompleted(
+      taskId: taskId,
+      isCompleted: !current,
+    );
+  }
+
+  /// Безопасное обновление статуса выполнения задачи.
+  ///
+  /// Метод не меняет title, project_id и другие поля.
+  Future<void> setTaskCompleted({
+    required String taskId,
+    required bool isCompleted,
+  }) async {
     final cleanTaskId = taskId.trim();
 
     if (cleanTaskId.isEmpty) {
       return;
     }
 
-    final projectId = _projectIdByTaskId(cleanTaskId);
+    final projectIdFromCache = _projectIdByTaskId(cleanTaskId);
 
     try {
       final data = await _client
-          .from('project_tasks')
+          .from(_tasksTable)
           .update({
-        'is_completed': !current,
+        'is_completed': isCompleted,
       })
           .eq('id', cleanTaskId)
-          .select(
-        '''
-            id,
-            project_id,
-            title,
-            is_completed,
-            created_at
-            ''',
-      )
+          .select(_taskSelect)
           .maybeSingle();
 
       if (data == null) {
@@ -430,10 +445,9 @@ class TaskService {
 
       final effectiveProjectId = task.projectId.isNotEmpty
           ? task.projectId
-          : projectId;
+          : projectIdFromCache;
 
-      if (effectiveProjectId != null &&
-          effectiveProjectId.isNotEmpty) {
+      if (effectiveProjectId != null && effectiveProjectId.isNotEmpty) {
         _cache.putIfAbsent(effectiveProjectId, () => []);
 
         _upsertTaskInList(
@@ -446,7 +460,7 @@ class TaskService {
       }
     } catch (e, st) {
       AppLogger.error(
-        'toggleTask error',
+        'setTaskCompleted error',
         error: e,
         stackTrace: st,
         tag: 'TaskService',
@@ -456,6 +470,11 @@ class TaskService {
     }
   }
 
+  /// Удаление задачи.
+  ///
+  /// ВАЖНО:
+  /// viewer не должен вызывать этот метод из UI.
+  /// Проверка роли должна быть в ProjectTasksWidget/родительском экране.
   Future<void> deleteTask(String taskId) async {
     final cleanTaskId = taskId.trim();
 
@@ -467,7 +486,7 @@ class TaskService {
 
     try {
       await _client
-          .from('project_tasks')
+          .from(_tasksTable)
           .delete()
           .eq('id', cleanTaskId);
 

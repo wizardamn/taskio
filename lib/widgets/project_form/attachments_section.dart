@@ -8,8 +8,40 @@ class AttachmentsSection extends StatelessWidget {
   final List<Attachment> attachments;
   final bool isUploading;
   final String? currentlyOpeningFile;
+
+  /// Старое право редактирования контента.
+  ///
+  /// Для owner/editor обычно true.
+  /// Для viewer обычно false.
   final bool canEditContent;
+
+  /// Старый флаг владельца проекта.
   final bool isOwner;
+
+  /// Новый параметр:
+  /// разрешает добавлять вложения.
+  ///
+  /// Для owner/editor/viewer должно быть true.
+  final bool? canAddAttachments;
+
+  /// Новый параметр:
+  /// разрешает удалять любые вложения.
+  ///
+  /// Для owner/editor должно быть true.
+  /// Для viewer должно быть false.
+  final bool? canDeleteAnyAttachments;
+
+  /// Новый параметр:
+  /// разрешает удалять свои вложения.
+  ///
+  /// Для viewer должно быть true.
+  final bool canDeleteOwnAttachments;
+
+  /// ID текущего пользователя.
+  ///
+  /// Нужен, чтобы viewer мог удалять только свои вложения.
+  final String? currentUserId;
+
   final VoidCallback onPick;
   final Function(Attachment) onOpen;
   final Function(Attachment) onDelete;
@@ -24,7 +56,96 @@ class AttachmentsSection extends StatelessWidget {
     required this.onPick,
     required this.onOpen,
     required this.onDelete,
+    this.canAddAttachments,
+    this.canDeleteAnyAttachments,
+    this.canDeleteOwnAttachments = true,
+    this.currentUserId,
   });
+
+  bool get _canAddAttachments {
+    return canAddAttachments ?? canEditContent;
+  }
+
+  bool get _canDeleteAnyAttachments {
+    return canDeleteAnyAttachments ?? (isOwner || canEditContent);
+  }
+
+  String? _normalizeId(String? value) {
+    final text = value?.trim();
+
+    if (text == null || text.isEmpty || text.toLowerCase() == 'null') {
+      return null;
+    }
+
+    return text;
+  }
+
+  String? _attachmentUploadedBy(Attachment attachment) {
+    try {
+      final dynamic value = (attachment as dynamic).uploadedBy;
+      final normalized = _normalizeId(value?.toString());
+
+      if (normalized != null) {
+        return normalized;
+      }
+    } catch (_) {
+      // ignore
+    }
+
+    try {
+      final dynamic value = (attachment as dynamic).uploadedById;
+      final normalized = _normalizeId(value?.toString());
+
+      if (normalized != null) {
+        return normalized;
+      }
+    } catch (_) {
+      // ignore
+    }
+
+    try {
+      final dynamic value = (attachment as dynamic).uploaderId;
+      final normalized = _normalizeId(value?.toString());
+
+      if (normalized != null) {
+        return normalized;
+      }
+    } catch (_) {
+      // ignore
+    }
+
+    try {
+      final dynamic value = (attachment as dynamic).userId;
+      final normalized = _normalizeId(value?.toString());
+
+      if (normalized != null) {
+        return normalized;
+      }
+    } catch (_) {
+      // ignore
+    }
+
+    return null;
+  }
+
+  bool _canDeleteAttachment(Attachment attachment) {
+    if (_canDeleteAnyAttachments) {
+      return true;
+    }
+
+    if (!canDeleteOwnAttachments) {
+      return false;
+    }
+
+    final userId = _normalizeId(currentUserId);
+    final uploadedBy = _attachmentUploadedBy(attachment);
+
+    if (userId == null || uploadedBy == null) {
+      return false;
+    }
+
+    return userId == uploadedBy;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -117,7 +238,7 @@ class AttachmentsSection extends StatelessWidget {
           ),
         ),
 
-        if (canEditContent)
+        if (_canAddAttachments)
           FilledButton.tonalIcon(
             icon: isUploading
                 ? SizedBox(
@@ -183,37 +304,45 @@ class AttachmentsSection extends StatelessWidget {
       runSpacing: 12,
       children: [
         ...attachments.map(
-              (attachment) => _AttachmentThumb(
-            key: ValueKey(
-              '${attachment.id}_${attachment.filePath}_${attachment.fileName}',
-            ),
-            attachment: attachment,
-            canEdit: canEditContent,
-            isOpening: currentlyOpeningFile == attachment.filePath,
-            onTap: () {
-              if (currentlyOpeningFile == attachment.filePath) {
-                return;
-              }
+              (attachment) {
+            final canDelete = _canDeleteAttachment(attachment);
 
-              onOpen(attachment);
-            },
-            onDelete: () async {
-              final confirmed = await _confirmDelete(
-                context,
-                attachment,
-              );
+            return _AttachmentThumb(
+              key: ValueKey(
+                '${attachment.id}_${attachment.filePath}_${attachment.fileName}',
+              ),
+              attachment: attachment,
+              canDelete: canDelete,
+              isOpening: currentlyOpeningFile == attachment.filePath,
+              onTap: () {
+                if (currentlyOpeningFile == attachment.filePath) {
+                  return;
+                }
 
-              if (confirmed == true) {
-                onDelete(attachment);
-              }
-            },
-          )
-              .animate()
-              .scale(
-            duration: 180.ms,
-            curve: Curves.easeOut,
-          )
-              .fadeIn(),
+                onOpen(attachment);
+              },
+              onDelete: () async {
+                if (!canDelete) {
+                  return;
+                }
+
+                final confirmed = await _confirmDelete(
+                  context,
+                  attachment,
+                );
+
+                if (confirmed == true) {
+                  onDelete(attachment);
+                }
+              },
+            )
+                .animate()
+                .scale(
+              duration: 180.ms,
+              curve: Curves.easeOut,
+            )
+                .fadeIn();
+          },
         ),
         if (isUploading)
           _buildUploadingThumb(
@@ -259,7 +388,7 @@ class AttachmentsSection extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
-          if (canEditContent) ...[
+          if (_canAddAttachments) ...[
             const SizedBox(height: 4),
             Text(
               'attachments.file'.tr(),
@@ -358,7 +487,7 @@ class AttachmentsSection extends StatelessWidget {
 
 class _AttachmentThumb extends StatelessWidget {
   final Attachment attachment;
-  final bool canEdit;
+  final bool canDelete;
   final bool isOpening;
   final VoidCallback onTap;
   final VoidCallback onDelete;
@@ -366,7 +495,7 @@ class _AttachmentThumb extends StatelessWidget {
   const _AttachmentThumb({
     super.key,
     required this.attachment,
-    required this.canEdit,
+    required this.canDelete,
     required this.isOpening,
     required this.onTap,
     required this.onDelete,
@@ -465,7 +594,9 @@ class _AttachmentThumb extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: isOpening
                       ? colorScheme.primaryContainer.withValues(alpha: 0.55)
-                      : colorScheme.surfaceContainerHighest.withValues(alpha: 0.8),
+                      : colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.8,
+                  ),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
                     color: isOpening
@@ -510,7 +641,7 @@ class _AttachmentThumb extends StatelessWidget {
                 ),
               ),
 
-              if (canEdit && !isOpening)
+              if (canDelete && !isOpening)
                 Positioned(
                   top: -7,
                   right: -7,
