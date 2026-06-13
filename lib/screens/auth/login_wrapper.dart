@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -17,18 +19,30 @@ import '../home/project_list_screen.dart';
 import 'login_screen.dart';
 
 class LoginWrapper extends StatefulWidget {
-  const LoginWrapper({super.key});
+  const LoginWrapper({
+    super.key,
+  });
 
   @override
-  State<LoginWrapper> createState() => _LoginWrapperState();
+  State<LoginWrapper> createState() {
+    return _LoginWrapperState();
+  }
 }
 
 class _LoginWrapperState extends State<LoginWrapper> {
   final AuthService _authService = AuthService();
 
   Future<void>? _profileFuture;
+
   String? _loadedUserId;
+  String? _lastProjectProviderUserId;
+  String? _lastClearedState;
+
   bool _isSigningOut = false;
+
+  // =====================================================
+  // BUILD
+  // =====================================================
 
   @override
   Widget build(BuildContext context) {
@@ -39,20 +53,11 @@ class _LoginWrapperState extends State<LoginWrapper> {
     // =====================================================
 
     if (authProvider.isGuest) {
-      _resetState();
+      _resetProfileLoadingState();
 
-      final projectProvider = context.read<ProjectProvider>();
-
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (!mounted) {
-          return;
-        }
-
-        await projectProvider.setUser(
-          'guest',
-          'profile.guest'.tr(),
-        );
-      });
+      _scheduleProjectProviderClear(
+        reason: 'guest',
+      );
 
       return const ProjectListScreen();
     }
@@ -62,25 +67,23 @@ class _LoginWrapperState extends State<LoginWrapper> {
     // =====================================================
 
     if (!authProvider.isAuthenticated) {
-      _resetState();
+      _resetProfileLoadingState();
 
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) {
-          return;
-        }
-
-        context.read<ProjectProvider>().clear(
-          keepProjects: false,
-        );
-      });
+      _scheduleProjectProviderClear(
+        reason: 'unauthenticated',
+      );
 
       return const LoginScreen();
     }
 
-    final currentUserId = authProvider.userId;
+    final currentUserId = authProvider.userId?.trim();
 
     if (currentUserId == null || currentUserId.isEmpty) {
-      _resetState();
+      _resetProfileLoadingState();
+
+      _scheduleProjectProviderClear(
+        reason: 'empty_user_id',
+      );
 
       return const LoginScreen();
     }
@@ -91,7 +94,11 @@ class _LoginWrapperState extends State<LoginWrapper> {
 
     if (_loadedUserId != currentUserId || _profileFuture == null) {
       _loadedUserId = currentUserId;
-      _profileFuture = _loadProfile(currentUserId);
+      _lastClearedState = null;
+
+      _profileFuture = _loadProfile(
+        currentUserId,
+      );
     }
 
     return FutureBuilder<void>(
@@ -108,6 +115,10 @@ class _LoginWrapperState extends State<LoginWrapper> {
             tag: 'LoginWrapper',
           );
 
+          _scheduleProjectProviderClear(
+            reason: 'profile_error',
+          );
+
           return const LoginScreen();
         }
 
@@ -117,10 +128,35 @@ class _LoginWrapperState extends State<LoginWrapper> {
   }
 
   // =====================================================
+  // PROJECT PROVIDER CLEAR
+  // =====================================================
+
+  void _scheduleProjectProviderClear({
+    required String reason,
+  }) {
+    if (_lastClearedState == reason) {
+      return;
+    }
+
+    _lastClearedState = reason;
+    _lastProjectProviderUserId = null;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      context.read<ProjectProvider>().clear(
+        keepProjects: false,
+      );
+    });
+  }
+
+  // =====================================================
   // RESET
   // =====================================================
 
-  void _resetState() {
+  void _resetProfileLoadingState() {
     _profileFuture = null;
     _loadedUserId = null;
     _isSigningOut = false;
@@ -140,13 +176,15 @@ class _LoginWrapperState extends State<LoginWrapper> {
         tag: 'LoginWrapper',
       );
 
-      final profile = await _authService.getProfile();
+      final profile = authProvider.profile ?? await _authService.getProfile();
 
       if (!mounted) {
         return;
       }
 
-      if (authProvider.userId != userId) {
+      final currentAuthUserId = authProvider.userId?.trim();
+
+      if (currentAuthUserId != userId) {
         return;
       }
 
@@ -181,10 +219,22 @@ class _LoginWrapperState extends State<LoginWrapper> {
         displayName = authProvider.user?.email ?? 'common.user'.tr();
       }
 
-      await projectProvider.setUser(
-        profile.id,
-        displayName,
-      );
+      final profileId = profile.id.trim();
+
+      if (profileId.isEmpty) {
+        throw Exception(
+          'errors.fetch_failed',
+        );
+      }
+
+      if (_lastProjectProviderUserId != profileId) {
+        _lastProjectProviderUserId = profileId;
+
+        await projectProvider.setUser(
+          profileId,
+          displayName,
+        );
+      }
 
       AppLogger.info(
         'Profile loaded successfully',
@@ -216,11 +266,15 @@ class _LoginWrapperState extends State<LoginWrapper> {
 
       await authProvider.signOut();
 
-      if (mounted) {
-        projectProvider.clear(
-          keepProjects: false,
-        );
+      if (!mounted) {
+        return;
       }
+
+      projectProvider.clear(
+        keepProjects: false,
+      );
+
+      _lastProjectProviderUserId = null;
     }
   }
 
@@ -239,9 +293,18 @@ class _LoginWrapperState extends State<LoginWrapper> {
     );
   }
 
+  // =====================================================
+  // DISPOSE
+  // =====================================================
+
   @override
   void dispose() {
-    _resetState();
+    _profileFuture = null;
+    _loadedUserId = null;
+    _lastProjectProviderUserId = null;
+    _lastClearedState = null;
+    _isSigningOut = false;
+
     super.dispose();
   }
 }

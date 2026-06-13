@@ -2,54 +2,59 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ErrorMapper {
+  const ErrorMapper._();
+
   static String map(dynamic error) {
     if (error == null) {
       return 'errors.unknown'.tr();
     }
 
-    // ==============================
-    // SUPABASE AUTH
-    // ==============================
-
     if (error is AuthException) {
       return _mapAuthError(error);
     }
-
-    // ==============================
-    // SUPABASE DATABASE
-    // ==============================
 
     if (error is PostgrestException) {
       return _mapDatabaseError(error);
     }
 
-    // ==============================
-    // SUPABASE STORAGE
-    // ==============================
-
     if (error is StorageException) {
       return _mapStorageError(error);
     }
 
-    final raw = error.toString();
-    final message = raw.toLowerCase();
+    final raw = error.toString().trim();
 
-    // ==============================
-    // LOCALIZATION KEYS
-    // ==============================
+    final localization = _tryTranslateLocalizationKey(raw);
 
-    if (message.contains('errors.')) {
-      final match = RegExp(r'errors\.[a-zA-Z0-9_]+')
-          .firstMatch(raw);
-
-      if (match != null) {
-        return match.group(0)!.tr();
-      }
+    if (localization != null) {
+      return localization;
     }
 
-    // ==============================
-    // GENERIC STRING MATCH
-    // ==============================
+    final message = raw.toLowerCase();
+
+    if (message.contains('username_taken')) {
+      return 'validation.username_taken'.tr();
+    }
+
+    if (message.contains('email not confirmed') ||
+        message.contains('email_not_confirmed')) {
+      return 'errors.email_not_confirmed'.tr();
+    }
+
+    if (message.contains('invalid login credentials') ||
+        message.contains('invalid_credentials')) {
+      return 'errors.invalid_credentials'.tr();
+    }
+
+    if (message.contains('user already registered') ||
+        message.contains('user already exists') ||
+        message.contains('user_exists')) {
+      return 'errors.user_exists'.tr();
+    }
+
+    if (message.contains('database error saving new user') ||
+        message.contains('error saving new user')) {
+      return 'errors.database_saving_user'.tr();
+    }
 
     if (message.contains('network') ||
         message.contains('socket') ||
@@ -61,7 +66,9 @@ class ErrorMapper {
       return 'errors.timeout'.tr();
     }
 
-    if (message.contains('permission')) {
+    if (message.contains('permission') ||
+        message.contains('row-level security') ||
+        message.contains('42501')) {
       return 'errors.permission_denied'.tr();
     }
 
@@ -73,22 +80,50 @@ class ErrorMapper {
       return 'errors.fetch_failed'.tr();
     }
 
+    if (message.contains('duplicate key') ||
+        message.contains('23505')) {
+      return 'errors.duplicate'.tr();
+    }
+
+    if (message.contains('foreign key') ||
+        message.contains('23503')) {
+      return 'errors.foreign_key'.tr();
+    }
+
     return 'errors.unknown'.tr();
   }
 
+  // =========================================================
+  // AUTH
+  // =========================================================
+
   static String _mapAuthError(AuthException e) {
-    final msg = e.message.toLowerCase();
+    final raw = e.message.trim();
+
+    final localization = _tryTranslateLocalizationKey(raw);
+
+    if (localization != null) {
+      return localization;
+    }
+
+    final msg = raw.toLowerCase();
+
+    if (msg.contains('username_taken')) {
+      return 'validation.username_taken'.tr();
+    }
 
     if (msg.contains('invalid login credentials') ||
         msg.contains('invalid_credentials')) {
       return 'errors.invalid_credentials'.tr();
     }
 
-    if (msg.contains('email not confirmed')) {
+    if (msg.contains('email not confirmed') ||
+        msg.contains('email_not_confirmed')) {
       return 'errors.email_not_confirmed'.tr();
     }
 
-    if (msg.contains('user already registered')) {
+    if (msg.contains('user already registered') ||
+        msg.contains('user already exists')) {
       return 'errors.user_exists'.tr();
     }
 
@@ -106,23 +141,63 @@ class ErrorMapper {
       return 'errors.empty_credentials'.tr();
     }
 
+    if (msg.contains('database error saving new user') ||
+        msg.contains('error saving new user')) {
+      return 'errors.database_saving_user'.tr();
+    }
+
+    if (msg.contains('network') ||
+        msg.contains('socket') ||
+        msg.contains('connection')) {
+      return 'errors.network'.tr();
+    }
+
+    if (msg.contains('timeout')) {
+      return 'errors.timeout'.tr();
+    }
+
     return 'errors.auth_failed'.tr();
   }
+
+  // =========================================================
+  // DATABASE
+  // =========================================================
 
   static String _mapDatabaseError(
       PostgrestException e,
       ) {
-    final msg = e.message.toLowerCase().trim();
+    final raw = e.message.trim();
 
-    if (msg.contains('duplicate key')) {
+    final localization = _tryTranslateLocalizationKey(raw);
+
+    if (localization != null) {
+      return localization;
+    }
+
+    final msg = raw.toLowerCase();
+
+    if (msg.contains('username_taken')) {
+      return 'validation.username_taken'.tr();
+    }
+
+    if (msg.contains('duplicate key') ||
+        msg.contains('23505')) {
+      if (msg.contains('username') ||
+          msg.contains('profiles_username')) {
+        return 'validation.username_taken'.tr();
+      }
+
       return 'errors.duplicate'.tr();
     }
 
-    if (msg.contains('foreign key')) {
+    if (msg.contains('foreign key') ||
+        msg.contains('23503')) {
       return 'errors.foreign_key'.tr();
     }
 
-    if (msg.contains('permission denied')) {
+    if (msg.contains('permission denied') ||
+        msg.contains('row-level security') ||
+        msg.contains('42501')) {
       return 'errors.permission_denied'.tr();
     }
 
@@ -130,19 +205,37 @@ class ErrorMapper {
       return 'errors.fetch_failed'.tr();
     }
 
+    if (msg.contains('invalid input value for enum')) {
+      return 'errors.database'.tr();
+    }
+
     return 'errors.database'.tr();
   }
+
+  // =========================================================
+  // STORAGE
+  // =========================================================
 
   static String _mapStorageError(
       StorageException e,
       ) {
-    final msg = e.message.toLowerCase();
+    final raw = e.message.trim();
+
+    final localization = _tryTranslateLocalizationKey(raw);
+
+    if (localization != null) {
+      return localization;
+    }
+
+    final msg = raw.toLowerCase();
 
     if (msg.contains('not found')) {
       return 'errors.file_not_found'.tr();
     }
 
-    if (msg.contains('permission')) {
+    if (msg.contains('permission') ||
+        msg.contains('row-level security') ||
+        msg.contains('42501')) {
       return 'errors.permission_denied'.tr();
     }
 
@@ -151,5 +244,70 @@ class ErrorMapper {
     }
 
     return 'errors.storage'.tr();
+  }
+
+  // =========================================================
+  // LOCALIZATION HELPERS
+  // =========================================================
+
+  static String? _tryTranslateLocalizationKey(String raw) {
+    final clean = raw.trim();
+
+    if (clean.isEmpty) {
+      return null;
+    }
+
+    final directKey = _cleanLocalizationKey(clean);
+
+    if (_isSupportedLocalizationKey(directKey)) {
+      return directKey.tr();
+    }
+
+    final match = RegExp(
+      r'(validation|errors|profile|projects|auth|attachments|notifications|chat)\.[a-zA-Z0-9_]+',
+    ).firstMatch(clean);
+
+    if (match == null) {
+      return null;
+    }
+
+    final key = match.group(0);
+
+    if (key == null || key.trim().isEmpty) {
+      return null;
+    }
+
+    return key.tr();
+  }
+
+  static String _cleanLocalizationKey(String value) {
+    var text = value.trim();
+
+    if (text.startsWith('Exception:')) {
+      text = text.replaceFirst('Exception:', '').trim();
+    }
+
+    if (text.startsWith('AuthException(message:')) {
+      final match = RegExp(
+        r'AuthException\(message:\s*([^,\)]+)',
+      ).firstMatch(text);
+
+      if (match != null) {
+        text = match.group(1)?.trim() ?? text;
+      }
+    }
+
+    return text;
+  }
+
+  static bool _isSupportedLocalizationKey(String value) {
+    return value.startsWith('validation.') ||
+        value.startsWith('errors.') ||
+        value.startsWith('profile.') ||
+        value.startsWith('projects.') ||
+        value.startsWith('auth.') ||
+        value.startsWith('attachments.') ||
+        value.startsWith('notifications.') ||
+        value.startsWith('chat.');
   }
 }

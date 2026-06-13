@@ -18,6 +18,10 @@ class ProjectService {
   static const String _invitationsTable = 'project_invitations';
   static const String _attachmentsTable = 'project_attachments';
 
+  static final RegExp _uuidRegex = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+  );
+
   String? _currentUserId;
 
   // =========================================================
@@ -25,10 +29,52 @@ class ProjectService {
   // =========================================================
 
   void updateOwner(String? userId) {
-    _currentUserId = userId;
+    final normalized = userId?.trim();
+
+    if (_isValidUuid(normalized)) {
+      _currentUserId = normalized;
+      return;
+    }
+
+    _currentUserId = null;
   }
 
   String? get currentUserId => _currentUserId;
+
+  bool get _hasValidCurrentUser {
+    return _isValidUuid(_currentUserId);
+  }
+
+  bool _isValidUuid(String? value) {
+    final id = value?.trim();
+
+    if (id == null || id.isEmpty) {
+      return false;
+    }
+
+    if (id.toLowerCase() == 'guest') {
+      return false;
+    }
+
+    return _uuidRegex.hasMatch(id);
+  }
+
+  String _requireUserId() {
+    final userId = _currentUserId?.trim();
+
+    if (!_isValidUuid(userId)) {
+      throw Exception('errors.not_authenticated');
+    }
+
+    return userId!;
+  }
+
+  Set<String> _validUuidSet(Iterable<String> values) {
+    return values
+        .map((value) => value.trim())
+        .where(_isValidUuid)
+        .toSet();
+  }
 
   // =========================================================
   // ERROR
@@ -52,11 +98,11 @@ class ProjectService {
   // =========================================================
 
   Future<void> _ensureCurrentUserProfile() async {
-    final userId = _currentUserId;
-
-    if (userId == null || userId.isEmpty) {
+    if (!_hasValidCurrentUser) {
       return;
     }
+
+    final userId = _currentUserId!.trim();
 
     try {
       final exists = await client
@@ -89,6 +135,8 @@ class ProjectService {
           .toLowerCase()
           .replaceAll(RegExp(r'[^a-z0-9_]+'), '_');
 
+      final now = DateTime.now().toUtc().toIso8601String();
+
       final data = <String, dynamic>{
         'id': userId,
         'username': username != null && username.isNotEmpty
@@ -98,8 +146,8 @@ class ProjectService {
             ? fullName
             : fallbackName,
         'role': 'student',
-        'created_at': DateTime.now().toUtc().toIso8601String(),
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
+        'created_at': now,
+        'updated_at': now,
       };
 
       if (avatarUrl != null && avatarUrl.isNotEmpty) {
@@ -126,7 +174,7 @@ class ProjectService {
   bool isOwner(ProjectModel project) {
     final userId = _currentUserId;
 
-    if (userId == null || userId.isEmpty) {
+    if (!_isValidUuid(userId)) {
       return false;
     }
 
@@ -136,7 +184,7 @@ class ProjectService {
   bool isProjectMember(ProjectModel project) {
     final userId = _currentUserId;
 
-    if (userId == null || userId.isEmpty) {
+    if (!_isValidUuid(userId)) {
       return false;
     }
 
@@ -204,7 +252,7 @@ class ProjectService {
     final role = _currentUserRole(project);
     final userId = _currentUserId;
 
-    if (userId == null || userId.isEmpty) {
+    if (!_isValidUuid(userId)) {
       return false;
     }
 
@@ -216,7 +264,7 @@ class ProjectService {
       return false;
     }
 
-    return attachment.isUploadedBy(userId);
+    return attachment.isUploadedBy(userId!);
   }
 
   bool canManageMembers(ProjectModel project) {
@@ -260,7 +308,7 @@ class ProjectService {
   ProjectRole? _currentUserRole(ProjectModel project) {
     final userId = _currentUserId;
 
-    if (userId == null || userId.isEmpty) {
+    if (!_isValidUuid(userId)) {
       return null;
     }
 
@@ -282,20 +330,14 @@ class ProjectService {
   // =========================================================
 
   Future<List<Map<String, dynamic>>> getUsersForSelection() async {
+    if (!_hasValidCurrentUser) {
+      return [];
+    }
+
     try {
       final response = await client
           .from('profiles')
-          .select(
-        '''
-            id,
-            full_name,
-            first_name,
-            last_name,
-            username,
-            avatar_url,
-            role
-            ''',
-      )
+          .select('*')
           .order('full_name', ascending: true);
 
       final users = List<Map<String, dynamic>>.from(response);
@@ -360,14 +402,16 @@ class ProjectService {
     final memberIds = <String>{};
 
     for (final project in projects) {
-      if (project.ownerId.trim().isNotEmpty) {
-        memberIds.add(project.ownerId.trim());
+      final ownerId = project.ownerId.trim();
+
+      if (_isValidUuid(ownerId)) {
+        memberIds.add(ownerId);
       }
 
       for (final participant in project.participantsData) {
         final id = participant.id.trim();
 
-        if (id.isNotEmpty) {
+        if (_isValidUuid(id)) {
           memberIds.add(id);
         }
       }
@@ -400,8 +444,8 @@ class ProjectService {
       for (final profile in profiles) {
         final id = profile['id']?.toString();
 
-        if (id != null && id.isNotEmpty) {
-          profileById[id] = profile;
+        if (_isValidUuid(id)) {
+          profileById[id!] = profile;
         }
       }
 
@@ -438,7 +482,7 @@ class ProjectService {
     for (final participant in project.participantsData) {
       final id = participant.id.trim();
 
-      if (id.isEmpty) {
+      if (!_isValidUuid(id)) {
         continue;
       }
 
@@ -452,7 +496,7 @@ class ProjectService {
 
     final ownerId = project.ownerId.trim();
 
-    if (ownerId.isNotEmpty) {
+    if (_isValidUuid(ownerId)) {
       final existingOwner = participantsById[ownerId];
       final ownerProfile = profileById[ownerId];
 
@@ -548,9 +592,7 @@ class ProjectService {
   // =========================================================
 
   Future<List<ProjectModel>> getAll() async {
-    final userId = _currentUserId;
-
-    if (userId == null || userId.isEmpty) {
+    if (!_hasValidCurrentUser) {
       return [];
     }
 
@@ -619,7 +661,7 @@ class ProjectService {
     })
         .whereType<String>()
         .map((id) => id.trim())
-        .where((id) => id.isNotEmpty)
+        .where(_isValidUuid)
         .toSet()
         .toList();
   }
@@ -629,7 +671,13 @@ class ProjectService {
   // =========================================================
 
   Future<ProjectModel?> getById(String id) async {
-    if (id.trim().isEmpty) {
+    final projectId = id.trim();
+
+    if (!_isValidUuid(projectId)) {
+      return null;
+    }
+
+    if (!_hasValidCurrentUser) {
       return null;
     }
 
@@ -637,7 +685,7 @@ class ProjectService {
       final data = await client
           .from('projects_view')
           .select()
-          .eq('id', id)
+          .eq('id', projectId)
           .maybeSingle();
 
       if (data == null) {
@@ -698,8 +746,8 @@ class ProjectService {
       }
     }
 
-    if (ownerId != null && ownerId.isNotEmpty) {
-      json['owner_id'] = ownerId;
+    if (_isValidUuid(ownerId)) {
+      json['owner_id'] = ownerId!.trim();
     }
 
     if (!includeOwnerSettings) {
@@ -726,12 +774,17 @@ class ProjectService {
     required List<String> participantIds,
     List<ProjectParticipant>? participants,
   }) async {
-    if (projectId.trim().isEmpty || ownerId.trim().isEmpty) {
+    final normalizedProjectId = projectId.trim();
+    final normalizedOwnerId = ownerId.trim();
+
+    if (!_isValidUuid(normalizedProjectId) ||
+        !_isValidUuid(normalizedOwnerId) ||
+        !_hasValidCurrentUser) {
       return;
     }
 
     try {
-      final project = await getById(projectId);
+      final project = await getById(normalizedProjectId);
 
       if (project != null && !isOwner(project)) {
         throw Exception('errors.no_permission');
@@ -743,22 +796,19 @@ class ProjectService {
         for (final participant in participants) {
           final id = participant.id.trim();
 
-          if (id.isEmpty) {
+          if (!_isValidUuid(id)) {
             continue;
           }
 
-          roleById[id] = id == ownerId
+          roleById[id] = id == normalizedOwnerId
               ? ProjectRole.owner
               : _normalizeEditableRole(participant.role);
         }
       }
 
-      final targetIds = participantIds
-          .map((id) => id.trim())
-          .where((id) => id.isNotEmpty)
-          .toSet();
+      final targetIds = _validUuidSet(participantIds);
 
-      targetIds.add(ownerId);
+      targetIds.add(normalizedOwnerId);
 
       if (project != null &&
           project.maxMembers > 0 &&
@@ -769,38 +819,40 @@ class ProjectService {
       final existing = await client
           .from('project_members')
           .select('member_id, role')
-          .eq('project_id', projectId);
+          .eq('project_id', normalizedProjectId);
 
       final existingRows = List<Map<String, dynamic>>.from(existing);
 
       final existingIds = existingRows
-          .map<String>((row) => row['member_id'].toString())
+          .map<String?>((row) => row['member_id']?.toString().trim())
+          .whereType<String>()
+          .where(_isValidUuid)
           .toSet();
 
       final existingRoles = <String, String>{};
 
       for (final row in existingRows) {
-        final memberId = row['member_id']?.toString();
+        final memberId = row['member_id']?.toString().trim();
         final role = row['role']?.toString();
 
-        if (memberId == null || memberId.isEmpty) {
+        if (!_isValidUuid(memberId)) {
           continue;
         }
 
-        existingRoles[memberId] =
+        existingRoles[memberId!] =
         role != null && role.isNotEmpty ? role : 'viewer';
       }
 
       final toRemove = existingIds
           .difference(targetIds)
-          .where((id) => id != ownerId)
+          .where((id) => id != normalizedOwnerId)
           .toSet();
 
       if (toRemove.isNotEmpty) {
         await client
             .from('project_members')
             .delete()
-            .eq('project_id', projectId)
+            .eq('project_id', normalizedProjectId)
             .inFilter(
           'member_id',
           toRemove.toList(),
@@ -808,7 +860,7 @@ class ProjectService {
       }
 
       await _deletePendingInvitationsNotInTarget(
-        projectId: projectId,
+        projectId: normalizedProjectId,
         targetIds: targetIds,
       );
 
@@ -816,9 +868,9 @@ class ProjectService {
       final idsToInvite = <String>{};
 
       for (final id in targetIds) {
-        if (id == ownerId) {
+        if (id == normalizedOwnerId) {
           rowsToUpsert.add({
-            'project_id': projectId,
+            'project_id': normalizedProjectId,
             'member_id': id,
             'role': ProjectRole.owner.value,
           });
@@ -833,7 +885,7 @@ class ProjectService {
 
         if (existingIds.contains(id)) {
           rowsToUpsert.add({
-            'project_id': projectId,
+            'project_id': normalizedProjectId,
             'member_id': id,
             'role': _normalizeEditableRole(role).value,
           });
@@ -854,7 +906,7 @@ class ProjectService {
           final role = roleById[invitedUserId] ?? ProjectRole.viewer;
 
           await inviteProjectMember(
-            projectId: projectId,
+            projectId: normalizedProjectId,
             invitedUserId: invitedUserId,
             role: _normalizeEditableRole(role),
             project: project,
@@ -874,17 +926,23 @@ class ProjectService {
     required String projectId,
     required Set<String> targetIds,
   }) async {
+    final normalizedProjectId = projectId.trim();
+
+    if (!_isValidUuid(normalizedProjectId) || !_hasValidCurrentUser) {
+      return;
+    }
+
     try {
       final pendingRaw = await client
           .from(_invitationsTable)
           .select('invited_user_id')
-          .eq('project_id', projectId)
+          .eq('project_id', normalizedProjectId)
           .eq('status', 'pending');
 
       final pendingIds = List<Map<String, dynamic>>.from(pendingRaw)
-          .map((row) => row['invited_user_id']?.toString())
+          .map((row) => row['invited_user_id']?.toString().trim())
           .whereType<String>()
-          .where((id) => id.isNotEmpty)
+          .where(_isValidUuid)
           .toSet();
 
       final toDelete = pendingIds.difference(targetIds);
@@ -896,7 +954,7 @@ class ProjectService {
       await client
           .from(_invitationsTable)
           .delete()
-          .eq('project_id', projectId)
+          .eq('project_id', normalizedProjectId)
           .eq('status', 'pending')
           .inFilter(
         'invited_user_id',
@@ -915,14 +973,18 @@ class ProjectService {
     required ProjectRole role,
     ProjectModel? project,
   }) async {
-    final userId = _currentUserId;
+    final userId = _requireUserId();
 
-    if (userId == null || userId.isEmpty) {
-      throw Exception('errors.not_authenticated');
+    final normalizedProjectId = projectId.trim();
+    final normalizedInvitedUserId = invitedUserId.trim();
+
+    if (!_isValidUuid(normalizedProjectId) ||
+        !_isValidUuid(normalizedInvitedUserId)) {
+      return;
     }
 
     try {
-      final currentProject = project ?? await getById(projectId);
+      final currentProject = project ?? await getById(normalizedProjectId);
 
       if (currentProject == null) {
         throw Exception('errors.project_not_found');
@@ -938,10 +1000,7 @@ class ProjectService {
         throw Exception('errors.no_permission');
       }
 
-      final normalizedInvitedUserId = invitedUserId.trim();
-
-      if (normalizedInvitedUserId.isEmpty ||
-          normalizedInvitedUserId == currentProject.ownerId) {
+      if (normalizedInvitedUserId == currentProject.ownerId) {
         return;
       }
 
@@ -984,11 +1043,11 @@ class ProjectService {
   }
 
   Future<List<Map<String, dynamic>>> getMyPendingInvitations() async {
-    final userId = _currentUserId;
-
-    if (userId == null || userId.isEmpty) {
+    if (!_hasValidCurrentUser) {
       return [];
     }
+
+    final userId = _currentUserId!.trim();
 
     try {
       final response = await client
@@ -1028,13 +1087,11 @@ class ProjectService {
   Future<Map<String, dynamic>?> _getInvitationForCurrentUser(
       String invitationId,
       ) async {
-    final userId = _currentUserId;
+    final userId = _requireUserId();
 
-    if (userId == null || userId.isEmpty) {
-      throw Exception('errors.not_authenticated');
-    }
+    final normalizedInvitationId = invitationId.trim();
 
-    if (invitationId.trim().isEmpty) {
+    if (!_isValidUuid(normalizedInvitationId)) {
       return null;
     }
 
@@ -1057,7 +1114,7 @@ class ProjectService {
           )
           ''',
     )
-        .eq('id', invitationId)
+        .eq('id', normalizedInvitationId)
         .maybeSingle();
 
     if (invitation == null) {
@@ -1093,19 +1150,17 @@ class ProjectService {
   }
 
   Future<void> acceptInvitation(String invitationId) async {
-    final userId = _currentUserId;
+    final userId = _requireUserId();
 
-    if (userId == null || userId.isEmpty) {
-      throw Exception('errors.not_authenticated');
-    }
+    final normalizedInvitationId = invitationId.trim();
 
-    if (invitationId.trim().isEmpty) {
+    if (!_isValidUuid(normalizedInvitationId)) {
       return;
     }
 
     try {
       final invitation = await _getInvitationForCurrentUser(
-        invitationId,
+        normalizedInvitationId,
       );
 
       if (invitation == null) {
@@ -1131,15 +1186,15 @@ class ProjectService {
       await client.rpc(
         'accept_project_invitation',
         params: {
-          'p_invitation_id': invitationId,
+          'p_invitation_id': normalizedInvitationId,
         },
       );
 
-      if (invitedBy != null && invitedBy.isNotEmpty) {
+      if (_isValidUuid(invitedBy) && _isValidUuid(projectId)) {
         await _notifications.notifyProjectInvitationAccepted(
           projectId: projectId,
           projectTitle: projectTitle,
-          recipientId: invitedBy,
+          recipientId: invitedBy!,
           senderId: userId,
         );
       }
@@ -1153,19 +1208,17 @@ class ProjectService {
   }
 
   Future<void> declineInvitation(String invitationId) async {
-    final userId = _currentUserId;
+    final userId = _requireUserId();
 
-    if (userId == null || userId.isEmpty) {
-      throw Exception('errors.not_authenticated');
-    }
+    final normalizedInvitationId = invitationId.trim();
 
-    if (invitationId.trim().isEmpty) {
+    if (!_isValidUuid(normalizedInvitationId)) {
       return;
     }
 
     try {
       final invitation = await _getInvitationForCurrentUser(
-        invitationId,
+        normalizedInvitationId,
       );
 
       if (invitation == null) {
@@ -1191,15 +1244,15 @@ class ProjectService {
       await client.rpc(
         'decline_project_invitation',
         params: {
-          'p_invitation_id': invitationId,
+          'p_invitation_id': normalizedInvitationId,
         },
       );
 
-      if (invitedBy != null && invitedBy.isNotEmpty) {
+      if (_isValidUuid(invitedBy) && _isValidUuid(projectId)) {
         await _notifications.notifyProjectInvitationDeclined(
           projectId: projectId,
           projectTitle: projectTitle,
-          recipientId: invitedBy,
+          recipientId: invitedBy!,
           senderId: userId,
         );
       }
@@ -1225,14 +1278,18 @@ class ProjectService {
     required String memberId,
     required ProjectRole role,
   }) async {
-    final userId = _currentUserId;
+    final userId = _requireUserId();
 
-    if (userId == null || userId.isEmpty) {
-      throw Exception('errors.not_authenticated');
+    final normalizedProjectId = projectId.trim();
+    final normalizedMemberId = memberId.trim();
+
+    if (!_isValidUuid(normalizedProjectId) ||
+        !_isValidUuid(normalizedMemberId)) {
+      return;
     }
 
     try {
-      final project = await getById(projectId);
+      final project = await getById(normalizedProjectId);
 
       if (project == null) {
         throw Exception('errors.project_not_found');
@@ -1242,21 +1299,22 @@ class ProjectService {
         throw Exception('errors.no_permission');
       }
 
-      if (memberId == project.ownerId && role != ProjectRole.owner) {
+      if (normalizedMemberId == project.ownerId &&
+          role != ProjectRole.owner) {
         throw Exception('errors.no_permission');
       }
 
       await client
           .from('project_members')
           .update({
-        'role': memberId == project.ownerId
+        'role': normalizedMemberId == project.ownerId
             ? ProjectRole.owner.value
             : _normalizeEditableRole(role).value,
       })
-          .eq('project_id', projectId)
-          .eq('member_id', memberId);
+          .eq('project_id', normalizedProjectId)
+          .eq('member_id', normalizedMemberId);
 
-      final fresh = await getById(projectId) ?? project;
+      final fresh = await getById(normalizedProjectId) ?? project;
 
       await _notifications.notifyProjectUpdatedForMembers(
         project: fresh,
@@ -1276,11 +1334,7 @@ class ProjectService {
   // =========================================================
 
   Future<ProjectModel> add(ProjectModel project) async {
-    final userId = _currentUserId;
-
-    if (userId == null || userId.isEmpty) {
-      throw Exception('errors.not_authenticated');
-    }
+    final userId = _requireUserId();
 
     await _ensureCurrentUserProfile();
 
@@ -1344,11 +1398,7 @@ class ProjectService {
   // =========================================================
 
   Future<void> update(ProjectModel project) async {
-    final userId = _currentUserId;
-
-    if (userId == null || userId.isEmpty) {
-      throw Exception('errors.not_authenticated');
-    }
+    final userId = _requireUserId();
 
     try {
       final dbProject = await getById(project.id);
@@ -1445,12 +1495,14 @@ class ProjectService {
     required String ownerId,
     required List<ProjectParticipant> participants,
   }) {
+    final normalizedOwnerId = ownerId.trim();
+
     final map = <String, ProjectParticipant>{};
 
     for (final participant in participants) {
       final id = participant.id.trim();
 
-      if (id.isEmpty) {
+      if (!_isValidUuid(id)) {
         continue;
       }
 
@@ -1459,17 +1511,17 @@ class ProjectService {
         fullName: participant.fullName,
         username: participant.username,
         avatarUrl: participant.avatarUrl,
-        role: id == ownerId
+        role: id == normalizedOwnerId
             ? ProjectRole.owner
             : _normalizeEditableRole(participant.role),
       );
     }
 
-    if (ownerId.isNotEmpty) {
-      final owner = map[ownerId];
+    if (_isValidUuid(normalizedOwnerId)) {
+      final owner = map[normalizedOwnerId];
 
-      map[ownerId] = ProjectParticipant(
-        id: ownerId,
+      map[normalizedOwnerId] = ProjectParticipant(
+        id: normalizedOwnerId,
         fullName: owner?.fullName ?? 'Owner',
         username: owner?.username,
         avatarUrl: owner?.avatarUrl,
@@ -1480,11 +1532,11 @@ class ProjectService {
     final result = map.values.toList();
 
     result.sort((a, b) {
-      if (a.id == ownerId) {
+      if (a.id == normalizedOwnerId) {
         return -1;
       }
 
-      if (b.id == ownerId) {
+      if (b.id == normalizedOwnerId) {
         return 1;
       }
 
@@ -1501,14 +1553,16 @@ class ProjectService {
   // =========================================================
 
   Future<void> delete(String id) async {
-    final userId = _currentUserId;
+    final userId = _requireUserId();
 
-    if (userId == null || userId.isEmpty) {
-      throw Exception('errors.not_authenticated');
+    final projectId = id.trim();
+
+    if (!_isValidUuid(projectId)) {
+      return;
     }
 
     try {
-      final project = await getById(id);
+      final project = await getById(projectId);
 
       if (project == null) {
         return;
@@ -1542,50 +1596,50 @@ class ProjectService {
 
       await _safeDeleteByProjectId(
         table: 'message_reads',
-        projectId: id,
+        projectId: projectId,
       );
 
       await _safeDeleteByProjectId(
         table: 'chat_typing',
-        projectId: id,
+        projectId: projectId,
       );
 
       await _safeDeleteByProjectId(
         table: 'chat_presence',
-        projectId: id,
+        projectId: projectId,
       );
 
       await _safeDeleteByProjectId(
         table: 'project_messages',
-        projectId: id,
+        projectId: projectId,
       );
 
       await _safeDeleteByProjectId(
         table: 'project_tasks',
-        projectId: id,
+        projectId: projectId,
       );
 
       await _safeDeleteByProjectId(
         table: 'project_grades',
-        projectId: id,
+        projectId: projectId,
       );
 
       await _safeDeleteByProjectId(
         table: _attachmentsTable,
-        projectId: id,
+        projectId: projectId,
       );
 
       await _safeDeleteByProjectId(
         table: 'project_members',
-        projectId: id,
+        projectId: projectId,
       );
 
       await _safeDeleteByProjectId(
         table: _invitationsTable,
-        projectId: id,
+        projectId: projectId,
       );
 
-      await client.from('projects').delete().eq('id', id);
+      await client.from('projects').delete().eq('id', projectId);
     } catch (e, st) {
       _handleError(
         e,
@@ -1599,8 +1653,14 @@ class ProjectService {
     required String table,
     required String projectId,
   }) async {
+    final normalizedProjectId = projectId.trim();
+
+    if (!_isValidUuid(normalizedProjectId)) {
+      return;
+    }
+
     try {
-      await client.from(table).delete().eq('project_id', projectId);
+      await client.from(table).delete().eq('project_id', normalizedProjectId);
     } catch (e) {
       debugPrint(
         '[ProjectService] delete from $table skipped: $e',
@@ -1618,14 +1678,16 @@ class ProjectService {
     List<File>? files,
     List<Uint8List>? filesBytes,
   }) async {
-    final userId = _currentUserId;
+    final userId = _requireUserId();
 
-    if (userId == null || userId.isEmpty) {
-      throw Exception('errors.not_authenticated');
+    final normalizedProjectId = projectId.trim();
+
+    if (!_isValidUuid(normalizedProjectId)) {
+      throw Exception('errors.project_not_found');
     }
 
     try {
-      final project = await getById(projectId);
+      final project = await getById(normalizedProjectId);
 
       if (project == null) {
         throw Exception('errors.project_not_found');
@@ -1675,7 +1737,7 @@ class ProjectService {
           index,
         );
 
-        final path = 'projects/$projectId/$userId/$safeName';
+        final path = 'projects/$normalizedProjectId/$userId/$safeName';
 
         int fileSize = 0;
 
@@ -1708,7 +1770,7 @@ class ProjectService {
 
         final attachment = Attachment(
           id: attachmentId,
-          projectId: projectId,
+          projectId: normalizedProjectId,
           fileName: originalName,
           filePath: path,
           mimeType: mimeType,
@@ -1721,7 +1783,7 @@ class ProjectService {
 
         await client.from(_attachmentsTable).insert({
           'id': attachmentId,
-          'project_id': projectId,
+          'project_id': normalizedProjectId,
           'uploaded_by': userId,
           'file_name': originalName,
           'file_path': path,
@@ -1842,14 +1904,16 @@ class ProjectService {
       String projectId,
       String filePath,
       ) async {
-    final userId = _currentUserId;
+    final userId = _requireUserId();
 
-    if (userId == null || userId.isEmpty) {
-      throw Exception('errors.not_authenticated');
+    final normalizedProjectId = projectId.trim();
+
+    if (!_isValidUuid(normalizedProjectId)) {
+      return;
     }
 
     try {
-      final project = await getById(projectId);
+      final project = await getById(normalizedProjectId);
 
       if (project == null) {
         return;
@@ -1886,7 +1950,7 @@ class ProjectService {
       await client
           .from(_attachmentsTable)
           .delete()
-          .eq('project_id', projectId)
+          .eq('project_id', normalizedProjectId)
           .eq('file_path', filePath);
 
       await _notifications.notifyProjectUpdatedForMembers(

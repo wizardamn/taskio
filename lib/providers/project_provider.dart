@@ -44,6 +44,10 @@ class ProjectProvider extends ChangeNotifier {
 
   ProjectProvider(this._service);
 
+  static final RegExp _uuidRegex = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+  );
+
   String? _userId;
   String _currentUserName = '';
 
@@ -95,7 +99,13 @@ class ProjectProvider extends ChangeNotifier {
   bool get isInvitationsLoading => _isInvitationsLoading;
   String? get errorMessage => _errorMessage;
 
-  bool get isGuest => _userId == null || _userId!.trim().isEmpty;
+  bool get isGuest {
+    return !_hasValidUserId;
+  }
+
+  bool get _hasValidUserId {
+    return _isValidUuid(_userId);
+  }
 
   List<Map<String, dynamic>> get pendingInvitations {
     return List<Map<String, dynamic>>.unmodifiable(
@@ -160,6 +170,20 @@ class ProjectProvider extends ChangeNotifier {
 
   bool get hasArchivedProjects {
     return archivedProjectsCount > 0;
+  }
+
+  bool _isValidUuid(String? value) {
+    final id = value?.trim();
+
+    if (id == null || id.isEmpty) {
+      return false;
+    }
+
+    if (id.toLowerCase() == 'guest') {
+      return false;
+    }
+
+    return _uuidRegex.hasMatch(id);
   }
 
   List<ProjectModel> _buildProjectList(
@@ -231,21 +255,16 @@ class ProjectProvider extends ChangeNotifier {
         project.participantsData.any((participant) {
           final fullName = participant.fullName.toLowerCase();
 
-          final username =
-          (participant.username ?? '').toLowerCase();
+          final username = (participant.username ?? '').toLowerCase();
 
-          return fullName.contains(query) ||
-              username.contains(query);
+          return fullName.contains(query) || username.contains(query);
         });
 
         final inFiles = project.attachments.any((attachment) {
           return attachment.fileName.toLowerCase().contains(query);
         });
 
-        return inTitle ||
-            inDescription ||
-            inParticipants ||
-            inFiles;
+        return inTitle || inDescription || inParticipants || inFiles;
       }).toList();
     }
 
@@ -253,8 +272,7 @@ class ProjectProvider extends ChangeNotifier {
       case ProjectFilter.inProgressOnly:
         result = result
             .where(
-              (project) =>
-          project.statusEnum == ProjectStatus.inProgress,
+              (project) => project.statusEnum == ProjectStatus.inProgress,
         )
             .toList();
         break;
@@ -262,8 +280,7 @@ class ProjectProvider extends ChangeNotifier {
       case ProjectFilter.completedOnly:
         result = result
             .where(
-              (project) =>
-          project.statusEnum == ProjectStatus.completed,
+              (project) => project.statusEnum == ProjectStatus.completed,
         )
             .toList();
         break;
@@ -289,6 +306,9 @@ class ProjectProvider extends ChangeNotifier {
       return;
     }
 
+    final normalizedUserId = userId.trim();
+    final normalizedUserName = userName.trim();
+
     _removeRealtime();
 
     _notifications.clearSettingsCache();
@@ -303,14 +323,45 @@ class ProjectProvider extends ChangeNotifier {
     _currentProjectId = null;
     _lastEmittedCurrentProjectId = null;
     _errorMessage = null;
+    _fetchQueued = false;
+    _isLoading = false;
+    _isInvitationsLoading = false;
 
-    _userId = userId;
-    _currentUserName = userName;
+    _searchDebounce?.cancel();
+    _messagesRefreshDebounce?.cancel();
+    _projectsRefreshDebounce?.cancel();
+    _tasksRefreshDebounce?.cancel();
+    _invitationsRefreshDebounce?.cancel();
 
-    _service.updateOwner(userId);
+    _searchDebounce = null;
+    _messagesRefreshDebounce = null;
+    _projectsRefreshDebounce = null;
+    _tasksRefreshDebounce = null;
+    _invitationsRefreshDebounce = null;
+
+    _currentUserName = normalizedUserName;
+
+    if (!_isValidUuid(normalizedUserId)) {
+      _userId = null;
+      _service.updateOwner(null);
+      _safeNotify();
+      return;
+    }
+
+    _userId = normalizedUserId;
+    _service.updateOwner(normalizedUserId);
 
     await fetchProjects();
+
+    if (_disposed || isGuest) {
+      return;
+    }
+
     await fetchPendingInvitations();
+
+    if (_disposed || isGuest) {
+      return;
+    }
 
     _subscribeRealtime();
     _subscribeMessagesRealtime();
@@ -329,6 +380,9 @@ class ProjectProvider extends ChangeNotifier {
     _searchQuery = '';
     _currentProjectId = null;
     _lastEmittedCurrentProjectId = null;
+    _fetchQueued = false;
+    _isLoading = false;
+    _isInvitationsLoading = false;
 
     _completedShown.clear();
     _autoCompletingProjectIds.clear();
@@ -373,14 +427,14 @@ class ProjectProvider extends ChangeNotifier {
   ProjectModel createEmptyProject() {
     final userId = _userId;
 
-    if (userId == null || userId.isEmpty) {
+    if (!_isValidUuid(userId)) {
       throw Exception(
         'projects.guest_cannot_create',
       );
     }
 
     return ProjectModel.createEmpty(
-      ownerId: userId,
+      ownerId: userId!,
     );
   }
 
@@ -416,15 +470,24 @@ class ProjectProvider extends ChangeNotifier {
   // =========================================================
 
   Future<void> fetchPendingInvitations() async {
-    if (_disposed || isGuest) {
+    if (_disposed) {
+      return;
+    }
+
+    if (isGuest) {
+      if (_pendingInvitations.isNotEmpty || _isInvitationsLoading) {
+        _pendingInvitations.clear();
+        _isInvitationsLoading = false;
+        _safeNotify();
+      }
+
       return;
     }
 
     try {
       _setInvitationsLoading(true);
 
-      final invitations =
-      await _service.getMyPendingInvitations();
+      final invitations = await _service.getMyPendingInvitations();
 
       _pendingInvitations
         ..clear()
@@ -458,8 +521,7 @@ class ProjectProvider extends ChangeNotifier {
       await _service.acceptInvitation(invitationId);
 
       _pendingInvitations.removeWhere(
-            (invitation) =>
-        invitation['id']?.toString() == invitationId,
+            (invitation) => invitation['id']?.toString() == invitationId,
       );
 
       await fetchProjects();
@@ -495,8 +557,7 @@ class ProjectProvider extends ChangeNotifier {
       await _service.declineInvitation(invitationId);
 
       _pendingInvitations.removeWhere(
-            (invitation) =>
-        invitation['id']?.toString() == invitationId,
+            (invitation) => invitation['id']?.toString() == invitationId,
       );
 
       await fetchPendingInvitations();
@@ -520,7 +581,7 @@ class ProjectProvider extends ChangeNotifier {
   // =========================================================
 
   Future<void> fetchProjects() async {
-    if (_disposed || _userId == null) {
+    if (_disposed || isGuest) {
       return;
     }
 
@@ -563,12 +624,14 @@ class ProjectProvider extends ChangeNotifier {
     } finally {
       _setLoading(false);
 
-      if (_fetchQueued && !_disposed) {
+      if (_fetchQueued && !_disposed && !isGuest) {
         _fetchQueued = false;
 
         unawaited(
           fetchProjects(),
         );
+      } else {
+        _fetchQueued = false;
       }
     }
   }
@@ -577,7 +640,7 @@ class ProjectProvider extends ChangeNotifier {
       String projectId, {
         bool makeCurrent = false,
       }) async {
-    if (_disposed || projectId.trim().isEmpty) {
+    if (_disposed || isGuest || projectId.trim().isEmpty) {
       return null;
     }
 
@@ -971,8 +1034,7 @@ class ProjectProvider extends ChangeNotifier {
       _autoArchiveIgnoredProjectIds.remove(id);
 
       if (_currentProjectId == id) {
-        _currentProjectId =
-        _projects.isNotEmpty ? _projects.first.id : null;
+        _currentProjectId = _projects.isNotEmpty ? _projects.first.id : null;
       }
 
       await _notifications.cancelProjectDeadline(id);
@@ -1052,8 +1114,7 @@ class ProjectProvider extends ChangeNotifier {
 
     final actualProject = _findProject(projectId) ?? project;
 
-    if (actualProject != null &&
-        !canChangeMemberRoles(actualProject)) {
+    if (actualProject != null && !canChangeMemberRoles(actualProject)) {
       _denyPermission();
       return;
     }
@@ -1204,7 +1265,7 @@ class ProjectProvider extends ChangeNotifier {
   bool isProjectMember(ProjectModel project) {
     final userId = _userId;
 
-    if (userId == null || userId.isEmpty) {
+    if (!_isValidUuid(userId)) {
       return false;
     }
 
@@ -1224,22 +1285,19 @@ class ProjectProvider extends ChangeNotifier {
   bool canEditProject(ProjectModel project) {
     final role = _currentUserRole(project);
 
-    return role == ProjectRole.owner ||
-        role == ProjectRole.editor;
+    return role == ProjectRole.owner || role == ProjectRole.editor;
   }
 
   bool canManageProjectContent(ProjectModel project) {
     final role = _currentUserRole(project);
 
-    return role == ProjectRole.owner ||
-        role == ProjectRole.editor;
+    return role == ProjectRole.owner || role == ProjectRole.editor;
   }
 
   bool canManageTasks(ProjectModel project) {
     final role = _currentUserRole(project);
 
-    return role == ProjectRole.owner ||
-        role == ProjectRole.editor;
+    return role == ProjectRole.owner || role == ProjectRole.editor;
   }
 
   bool canCompleteTasks(ProjectModel project) {
@@ -1261,8 +1319,7 @@ class ProjectProvider extends ChangeNotifier {
   bool canDeleteAnyAttachments(ProjectModel project) {
     final role = _currentUserRole(project);
 
-    return role == ProjectRole.owner ||
-        role == ProjectRole.editor;
+    return role == ProjectRole.owner || role == ProjectRole.editor;
   }
 
   bool canDeleteAttachment({
@@ -1272,7 +1329,7 @@ class ProjectProvider extends ChangeNotifier {
     final role = _currentUserRole(project);
     final userId = _userId;
 
-    if (userId == null || userId.isEmpty) {
+    if (!_isValidUuid(userId)) {
       return false;
     }
 
@@ -1284,7 +1341,7 @@ class ProjectProvider extends ChangeNotifier {
       return false;
     }
 
-    return attachment.isUploadedBy(userId);
+    return attachment.isUploadedBy(userId!);
   }
 
   bool canEditOwnerSettings(ProjectModel project) {
@@ -1294,7 +1351,7 @@ class ProjectProvider extends ChangeNotifier {
   bool isOwner(ProjectModel project) {
     final userId = _userId;
 
-    if (userId == null || userId.isEmpty) {
+    if (!_isValidUuid(userId)) {
       return false;
     }
 
@@ -1316,7 +1373,7 @@ class ProjectProvider extends ChangeNotifier {
   ProjectRole? _currentUserRole(ProjectModel project) {
     final userId = _userId;
 
-    if (userId == null || userId.isEmpty) {
+    if (!_isValidUuid(userId)) {
       return null;
     }
 
@@ -1367,9 +1424,8 @@ class ProjectProvider extends ChangeNotifier {
   // =========================================================
 
   bool _shouldScheduleDeadline(ProjectModel project) {
-    final isActive =
-        project.statusEnum == ProjectStatus.planned ||
-            project.statusEnum == ProjectStatus.inProgress;
+    final isActive = project.statusEnum == ProjectStatus.planned ||
+        project.statusEnum == ProjectStatus.inProgress;
 
     if (!isActive) {
       return false;
@@ -1507,7 +1563,7 @@ class ProjectProvider extends ChangeNotifier {
   // =========================================================
 
   void _subscribeRealtime() {
-    if (_userId == null || _disposed) {
+    if (_disposed || isGuest) {
       return;
     }
 
@@ -1521,7 +1577,7 @@ class ProjectProvider extends ChangeNotifier {
       _projectsRefreshDebounce = Timer(
         const Duration(milliseconds: 400),
             () {
-          if (_disposed) {
+          if (_disposed || isGuest) {
             return;
           }
 
@@ -1574,7 +1630,7 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   void _subscribeMessagesRealtime() {
-    if (_userId == null || _disposed) {
+    if (_disposed || isGuest) {
       return;
     }
 
@@ -1592,7 +1648,7 @@ class ProjectProvider extends ChangeNotifier {
         _messagesRefreshDebounce = Timer(
           const Duration(milliseconds: 500),
               () {
-            if (_disposed) {
+            if (_disposed || isGuest) {
               return;
             }
 
@@ -1619,7 +1675,7 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   void _subscribeTasksRealtime() {
-    if (_userId == null || _disposed) {
+    if (_disposed || isGuest) {
       return;
     }
 
@@ -1637,7 +1693,7 @@ class ProjectProvider extends ChangeNotifier {
         _tasksRefreshDebounce = Timer(
           const Duration(milliseconds: 500),
               () async {
-            if (_disposed) {
+            if (_disposed || isGuest) {
               return;
             }
 
@@ -1662,7 +1718,7 @@ class ProjectProvider extends ChangeNotifier {
   }
 
   void _subscribeInvitationsRealtime() {
-    if (_userId == null || _disposed) {
+    if (_disposed || isGuest) {
       return;
     }
 
@@ -1676,7 +1732,7 @@ class ProjectProvider extends ChangeNotifier {
       _invitationsRefreshDebounce = Timer(
         const Duration(milliseconds: 400),
             () async {
-          if (_disposed) {
+          if (_disposed || isGuest) {
             return;
           }
 
@@ -1758,15 +1814,19 @@ class ProjectProvider extends ChangeNotifier {
   // =========================================================
 
   Future<void> _checkCompletedProjects() async {
+    if (isGuest) {
+      return;
+    }
+
     final snapshot = List<ProjectModel>.from(_projects);
 
     for (final project in snapshot) {
-      if (_disposed) {
+      if (_disposed || isGuest) {
         return;
       }
 
-      final completed = project.totalTasks > 0 &&
-          project.completedTasks == project.totalTasks;
+      final completed =
+          project.totalTasks > 0 && project.completedTasks == project.totalTasks;
 
       if (!completed) {
         _completedShown.remove(project.id);
@@ -1804,7 +1864,7 @@ class ProjectProvider extends ChangeNotifier {
   Future<void> _completeProjectAutomatically(
       ProjectModel project,
       ) async {
-    if (_disposed) {
+    if (_disposed || isGuest) {
       return;
     }
 
@@ -1822,8 +1882,8 @@ class ProjectProvider extends ChangeNotifier {
         return;
       }
 
-      final stillCompleted = current.totalTasks > 0 &&
-          current.completedTasks == current.totalTasks;
+      final stillCompleted =
+          current.totalTasks > 0 && current.completedTasks == current.totalTasks;
 
       if (!stillCompleted) {
         return;
@@ -1915,19 +1975,15 @@ class ProjectProvider extends ChangeNotifier {
       final p1 = a[i];
       final p2 = b[i];
 
-      final attachments1 =
-      p1.attachments.map(_attachmentSignature).toList();
+      final attachments1 = p1.attachments.map(_attachmentSignature).toList();
 
-      final attachments2 =
-      p2.attachments.map(_attachmentSignature).toList();
+      final attachments2 = p2.attachments.map(_attachmentSignature).toList();
 
-      final participants1 = p1.participantsData
-          .map(_participantSignature)
-          .toList();
+      final participants1 =
+      p1.participantsData.map(_participantSignature).toList();
 
-      final participants2 = p2.participantsData
-          .map(_participantSignature)
-          .toList();
+      final participants2 =
+      p2.participantsData.map(_participantSignature).toList();
 
       if (p1.id != p2.id ||
           p1.ownerId != p2.ownerId ||
@@ -1943,10 +1999,8 @@ class ProjectProvider extends ChangeNotifier {
           p1.lastMessage != p2.lastMessage ||
           p1.totalTasks != p2.totalTasks ||
           p1.completedTasks != p2.completedTasks ||
-          p1.deadline.toIso8601String() !=
-              p2.deadline.toIso8601String() ||
-          p1.createdAt.toIso8601String() !=
-              p2.createdAt.toIso8601String() ||
+          p1.deadline.toIso8601String() != p2.deadline.toIso8601String() ||
+          p1.createdAt.toIso8601String() != p2.createdAt.toIso8601String() ||
           p1.lastMessageAt?.toIso8601String() !=
               p2.lastMessageAt?.toIso8601String() ||
           !listEquals(attachments1, attachments2) ||

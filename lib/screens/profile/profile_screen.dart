@@ -1,8 +1,5 @@
-import 'dart:io' show File;
-
 import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
@@ -27,18 +24,27 @@ class ProfileScreen extends StatefulWidget {
   });
 
   @override
-  State<ProfileScreen> createState() =>
-      _ProfileScreenState();
+  State<ProfileScreen> createState() {
+    return _ProfileScreenState();
+  }
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
   static const String _avatarFolder = 'profiles';
 
+  static const List<UserRole> _availableRoles = [
+    UserRole.student,
+    UserRole.teacher,
+  ];
+
+  static final RegExp _usernameRegex = RegExp(
+    r'^[a-zA-Z0-9_]{3,20}$',
+  );
+
   final AuthService _authService = AuthService();
   final SupabaseClient _supabase = SupabaseService.client;
 
-  final GlobalKey<FormState> _formKey =
-  GlobalKey<FormState>();
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
   final TextEditingController _firstNameController =
   TextEditingController();
@@ -62,6 +68,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
+
     _loadProfile();
   }
 
@@ -103,7 +110,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       setState(() {
         _profile = profile;
-        _selectedRole = profile.role;
+        _selectedRole = _safeRole(profile.role);
         _loading = false;
       });
     } catch (e, st) {
@@ -128,6 +135,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  UserRole _safeRole(UserRole role) {
+    if (_availableRoles.contains(role)) {
+      return role;
+    }
+
+    return UserRole.student;
+  }
+
   // =========================================================
   // AVATAR
   // =========================================================
@@ -141,7 +156,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final result = await FilePicker.pickFiles(
         type: FileType.image,
         allowMultiple: false,
-        withData: kIsWeb,
+        withData: true,
       );
 
       if (!mounted || result == null || result.files.isEmpty) {
@@ -154,7 +169,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _uploadingAvatar = true;
       });
 
-      final avatarUrl = await _uploadAvatarFile(file);
+      final avatarUrl = await _uploadAvatarFile(
+        file,
+      );
 
       if (!mounted) {
         return;
@@ -212,6 +229,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       throw Exception('profile.load_error');
     }
 
+    final bytes = file.bytes;
+
+    if (bytes == null || bytes.isEmpty) {
+      throw Exception('errors.invalid_files_bytes');
+    }
+
     final userId = profile.id;
     final extension = _safeExtension(file.name);
 
@@ -220,10 +243,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     final contentType = _mimeTypeFromExtension(extension);
 
-    await _uploadAvatarToStorage(
-      path: path,
-      file: file,
-      contentType: contentType,
+    await _supabase.storage
+        .from(SupabaseService.bucket)
+        .uploadBinary(
+      path,
+      bytes,
+      fileOptions: FileOptions(
+        upsert: true,
+        contentType: contentType,
+      ),
     );
 
     final avatarUrl = _supabase.storage
@@ -237,7 +265,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       username: profile.username,
       bio: profile.bio,
       avatarUrl: avatarUrl,
-      role: _selectedRole ?? profile.role,
+      role: _safeRole(_selectedRole ?? profile.role),
       language: profile.language,
     );
 
@@ -258,50 +286,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return avatarUrl;
   }
 
-  Future<void> _uploadAvatarToStorage({
-    required String path,
-    required PlatformFile file,
-    required String contentType,
-  }) async {
-    if (kIsWeb) {
-      final bytes = file.bytes;
-
-      if (bytes == null) {
-        throw Exception('errors.invalid_files_bytes');
-      }
-
-      await _supabase.storage
-          .from(SupabaseService.bucket)
-          .uploadBinary(
-        path,
-        bytes,
-        fileOptions: FileOptions(
-          upsert: true,
-          contentType: contentType,
-        ),
-      );
-
-      return;
-    }
-
-    final filePath = file.path;
-
-    if (filePath == null || filePath.isEmpty) {
-      throw Exception('errors.invalid_files');
-    }
-
-    await _supabase.storage
-        .from(SupabaseService.bucket)
-        .upload(
-      path,
-      File(filePath),
-      fileOptions: FileOptions(
-        upsert: true,
-        contentType: contentType,
-      ),
-    );
-  }
-
   String? _normalizeAvatarUrl(String? value) {
     if (value == null || value.trim().isEmpty) {
       return null;
@@ -309,11 +293,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     final raw = value.trim();
 
-    final oldAvatarBucketMarker =
+    const oldAvatarBucketMarker =
         '/storage/v1/object/public/avatars/';
 
-    if (raw.startsWith('http://') ||
-        raw.startsWith('https://')) {
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
       if (raw.contains(oldAvatarBucketMarker)) {
         return raw.replaceFirst(
           oldAvatarBucketMarker,
@@ -415,8 +398,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
 
     final bio = _bioController.text.trim();
+
     final fullName = '$firstName $lastName'.trim();
-    final role = _selectedRole ?? profile.role;
+
+    final role = _safeRole(
+      _selectedRole ?? profile.role,
+    );
 
     try {
       setState(() {
@@ -486,10 +473,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final username = value.trim();
 
     if (username.startsWith('@')) {
-      return username.substring(1);
+      return username.substring(1).toLowerCase();
     }
 
-    return username;
+    return username.toLowerCase();
   }
 
   // =========================================================
@@ -497,22 +484,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // =========================================================
 
   Widget _buildStatistics() {
-    final projects =
-        context.watch<ProjectProvider>().projects;
+    final projects = context.watch<ProjectProvider>().projects;
 
     final totalProjects = projects.length;
 
     final completedProjects = projects
         .where(
-          (project) =>
-      project.statusEnum == ProjectStatus.completed,
+          (project) => project.statusEnum == ProjectStatus.completed,
     )
         .length;
 
     final inProgressProjects = projects
         .where(
-          (project) =>
-      project.statusEnum == ProjectStatus.inProgress,
+          (project) => project.statusEnum == ProjectStatus.inProgress,
     )
         .length;
 
@@ -524,9 +508,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       completedTasks += project.completedTasks;
     }
 
-    final progress = totalTasks == 0
-        ? 0.0
-        : completedTasks / totalTasks;
+    final progress = totalTasks == 0 ? 0.0 : completedTasks / totalTasks;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -535,9 +517,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           'profile.statistics'.tr(),
           style: Theme.of(context).textTheme.titleLarge,
         ),
-
         const SizedBox(height: 16),
-
         Row(
           children: [
             Expanded(
@@ -548,9 +528,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 color: Theme.of(context).colorScheme.primary,
               ),
             ),
-
             const SizedBox(width: 12),
-
             Expanded(
               child: _StatCard(
                 title: 'profile.in_progress'.tr(),
@@ -559,9 +537,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 color: Colors.orange,
               ),
             ),
-
             const SizedBox(width: 12),
-
             Expanded(
               child: _StatCard(
                 title: 'profile.completed'.tr(),
@@ -572,9 +548,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ],
         ),
-
         const SizedBox(height: 24),
-
         ClipRRect(
           borderRadius: BorderRadius.circular(16),
           child: LinearProgressIndicator(
@@ -582,9 +556,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             minHeight: 10,
           ),
         ),
-
         const SizedBox(height: 8),
-
         Text(
           '${'profile.tasks_summary'.tr()}: '
               '$completedTasks / $totalTasks',
@@ -603,19 +575,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildRoleDropdown() {
     return DropdownButtonFormField<UserRole>(
-      initialValue: _selectedRole,
+      initialValue: _safeRole(
+        _selectedRole ?? UserRole.student,
+      ),
+      isExpanded: true,
       decoration: InputDecoration(
         labelText: 'profile.role'.tr(),
         prefixIcon: const Icon(
-          Icons.verified_user_outlined,
+          Icons.school_outlined,
         ),
         border: const OutlineInputBorder(),
       ),
-      items: UserRole.values.map((role) {
+      items: _availableRoles.map((role) {
         return DropdownMenuItem<UserRole>(
           value: role,
           child: Text(
             _roleText(role),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         );
       }).toList(),
@@ -627,7 +604,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         }
 
         setState(() {
-          _selectedRole = value;
+          _selectedRole = _safeRole(value);
         });
       },
     );
@@ -688,11 +665,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               );
             },
           ),
-        )
-            .animate()
-            .fadeIn()
-            .scale(),
-
+        ).animate().fadeIn().scale(),
         Positioned(
           right: 0,
           bottom: 0,
@@ -758,6 +731,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     final profile = _profile!;
+
     final emailText = profile.email.trim().isEmpty
         ? 'auth.email_not_provided'.tr()
         : profile.email.trim();
@@ -790,9 +764,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: Column(
                   children: [
                     _buildAvatar(profile),
-
                     const SizedBox(height: 16),
-
                     Text(
                       profile.displayName,
                       style: Theme.of(context)
@@ -803,7 +775,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       textAlign: TextAlign.center,
                     ),
-
                     if (usernameText.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       Text(
@@ -818,9 +789,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                     ],
-
                     const SizedBox(height: 8),
-
                     Chip(
                       avatar: const Icon(
                         Icons.verified_user,
@@ -828,13 +797,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       label: Text(
                         _roleText(
-                          _selectedRole ?? profile.role,
+                          _safeRole(_selectedRole ?? profile.role),
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 12),
-
                     SelectableText(
                       emailText,
                       textAlign: TextAlign.center,
@@ -842,19 +809,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ],
                 ),
-              )
-                  .animate()
-                  .fadeIn()
-                  .slideY(begin: 0.2),
-
+              ).animate().fadeIn().slideY(begin: 0.2),
               const SizedBox(height: 28),
-
               _buildStatistics(),
-
               const SizedBox(height: 32),
-
               TextFormField(
                 controller: _firstNameController,
+                enabled: !_saving && !_uploadingAvatar,
                 decoration: InputDecoration(
                   labelText: 'profile.first_name'.tr(),
                   prefixIcon: const Icon(
@@ -863,19 +824,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   border: const OutlineInputBorder(),
                 ),
                 validator: (value) {
-                  if (value == null ||
-                      value.trim().isEmpty) {
+                  if (value == null || value.trim().isEmpty) {
                     return 'validation.empty_name'.tr();
                   }
 
                   return null;
                 },
               ),
-
               const SizedBox(height: 16),
-
               TextFormField(
                 controller: _lastNameController,
+                enabled: !_saving && !_uploadingAvatar,
                 decoration: InputDecoration(
                   labelText: 'profile.last_name'.tr(),
                   prefixIcon: const Icon(
@@ -884,11 +843,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   border: const OutlineInputBorder(),
                 ),
               ),
-
               const SizedBox(height: 16),
-
               TextFormField(
                 controller: _usernameController,
+                enabled: !_saving && !_uploadingAvatar,
                 decoration: InputDecoration(
                   labelText: 'profile.username'.tr(),
                   prefixIcon: const Icon(
@@ -896,18 +854,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   border: const OutlineInputBorder(),
                 ),
+                onChanged: (value) {
+                  final normalized = _normalizeUsername(value);
+
+                  if (value != normalized && value.isNotEmpty) {
+                    _usernameController.value = TextEditingValue(
+                      text: normalized,
+                      selection: TextSelection.collapsed(
+                        offset: normalized.length,
+                      ),
+                    );
+                  }
+                },
                 validator: (value) {
-                  if (value == null ||
-                      value.trim().isEmpty) {
+                  final username = _normalizeUsername(
+                    value ?? '',
+                  );
+
+                  if (username.isEmpty) {
                     return 'validation.empty_field'.tr();
+                  }
+
+                  if (username.length < 3) {
+                    return 'validation.short_username'.tr();
+                  }
+
+                  if (!_usernameRegex.hasMatch(username)) {
+                    return 'validation.invalid_username'.tr();
                   }
 
                   return null;
                 },
               ),
-
               const SizedBox(height: 16),
-
               TextFormField(
                 enabled: false,
                 initialValue: emailText,
@@ -919,15 +898,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   border: const OutlineInputBorder(),
                 ),
               ),
-
               const SizedBox(height: 16),
-
               _buildRoleDropdown(),
-
               const SizedBox(height: 16),
-
               TextFormField(
                 controller: _bioController,
+                enabled: !_saving && !_uploadingAvatar,
                 maxLines: 4,
                 decoration: InputDecoration(
                   labelText: 'profile.bio'.tr(),
@@ -943,16 +919,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   border: const OutlineInputBorder(),
                 ),
               ),
-
               const SizedBox(height: 32),
-
               SizedBox(
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton.icon(
-                  onPressed: _saving || _uploadingAvatar
-                      ? null
-                      : _saveProfile,
+                  onPressed:
+                  _saving || _uploadingAvatar ? null : _saveProfile,
                   icon: const Icon(
                     Icons.save,
                   ),
@@ -1004,9 +977,7 @@ class _StatCard extends StatelessWidget {
             icon,
             color: color,
           ),
-
           const SizedBox(height: 10),
-
           Text(
             value,
             style: TextStyle(
@@ -1015,9 +986,7 @@ class _StatCard extends StatelessWidget {
               color: color,
             ),
           ),
-
           const SizedBox(height: 6),
-
           Text(
             title,
             textAlign: TextAlign.center,

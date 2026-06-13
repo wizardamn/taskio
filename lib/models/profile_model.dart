@@ -4,8 +4,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 enum UserRole {
   student,
   teacher,
-  leader,
-  general,
 }
 
 extension UserRoleExtension on UserRole {
@@ -13,29 +11,34 @@ extension UserRoleExtension on UserRole {
     final normalized = value?.toLowerCase().trim();
 
     switch (normalized) {
-      case 'student':
-        return UserRole.student;
-
       case 'teacher':
         return UserRole.teacher;
 
+      case 'student':
       case 'leader':
       case 'team_lead':
       case 'teamlead':
       case 'lead':
-        return UserRole.leader;
-
       case 'general':
       case 'user':
       case 'default':
-        return UserRole.general;
-
+      case 'owner':
+      case 'editor':
+      case 'viewer':
       default:
-        return UserRole.general;
+        return UserRole.student;
     }
   }
 
-  String get value => name;
+  String get value {
+    switch (this) {
+      case UserRole.student:
+        return 'student';
+
+      case UserRole.teacher:
+        return 'teacher';
+    }
+  }
 
   String localizedText() {
     switch (this) {
@@ -44,12 +47,6 @@ extension UserRoleExtension on UserRole {
 
       case UserRole.teacher:
         return 'roles.teacher'.tr();
-
-      case UserRole.leader:
-        return 'roles.leader'.tr();
-
-      case UserRole.general:
-        return 'roles.general'.tr();
     }
   }
 }
@@ -135,6 +132,14 @@ class ProfileModel {
     return email.trim().isNotEmpty;
   }
 
+  bool get isStudent {
+    return role == UserRole.student;
+  }
+
+  bool get isTeacher {
+    return role == UserRole.teacher;
+  }
+
   // =========================================================
   // FROM JSON
   // =========================================================
@@ -183,6 +188,13 @@ class ProfileModel {
       metadata['email'],
     ]);
 
+    final role = UserRoleExtension.fromString(
+      _firstNonEmpty([
+        json['role'],
+        metadata['role'],
+      ]),
+    );
+
     return ProfileModel(
       id: _firstNonEmpty([
         json['id'],
@@ -198,12 +210,7 @@ class ProfileModel {
       bio: _emptyToNull(
         json['bio'] ?? metadata['bio'],
       ),
-      role: UserRoleExtension.fromString(
-        _firstNonEmpty([
-          json['role'],
-          metadata['role'],
-        ]),
-      ),
+      role: role,
       createdAt: _parseDate(json['created_at']),
       updatedAt: _parseDate(json['updated_at']),
       email: email,

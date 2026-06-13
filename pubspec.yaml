@@ -18,26 +18,36 @@ dependencies:
   # Backend
   supabase_flutter: ^2.12.4
 
+  # Firebase / Push notifications
+  firebase_core: ^4.7.0
+  firebase_messaging: ^16.2.0
+
   # State management
   provider: ^6.1.5
 
-  # UI
-  table_calendar: ^3.2.0
-  cupertino_icons: ^1.0.9
+  # Localization
   easy_localization: ^3.0.7
+  intl: ^0.20.2
+
+  # UI
+  cupertino_icons: ^1.0.9
+  table_calendar: ^3.2.0
+  flutter_animate: ^4.5.0
+  cached_network_image: ^3.3.1
+  scrollable_positioned_list: ^0.3.8
+
+  # Files / media
   image_picker: ^1.1.2
   file_picker: ^11.0.2
-  url_launcher: ^6.3.2
-  flutter_animate: ^4.5.0
   open_file: ^3.5.11
-  cached_network_image: ^3.3.1
+  url_launcher: ^6.3.2
+  path_provider: ^2.1.5
+  path: ^1.9.0
 
-  # Notifications
+  # Local notifications
   flutter_local_notifications: ^21.0.0
   timezone: ^0.11.0
   flutter_timezone: ^5.0.2
-  firebase_core: ^4.7.0
-  firebase_messaging: ^16.2.0
   flutter_app_badger_plus: ^1.0.1
 
   # Local storage / streams
@@ -51,14 +61,8 @@ dependencies:
   # Utils
   flutter_dotenv: ^6.0.1
   uuid: ^4.5.3
-  intl: ^0.20.2
-  path_provider: ^2.1.5
-  path: ^1.9.0
   collection: ^1.18.0
-  scrollable_positioned_list: ^0.3.8
   http: ^1.6.0
-
-  # Info
   package_info_plus: ^9.0.1
 
 dev_dependencies:

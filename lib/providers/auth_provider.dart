@@ -21,6 +21,8 @@ class AuthProvider extends ChangeNotifier {
 
   SupabaseClient get _supabase => Supabase.instance.client;
 
+  static const String _guestModeKey = 'guest_mode';
+
   StreamSubscription<AuthState>? _authSubscription;
 
   AuthStatus _status = AuthStatus.loading;
@@ -29,6 +31,7 @@ class AuthProvider extends ChangeNotifier {
 
   bool _initialized = false;
   bool _disposed = false;
+  bool _handlingAuthChange = false;
 
   // =========================================================
   // GETTERS
@@ -45,7 +48,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   bool get isAuthenticated {
-    return _status == AuthStatus.authenticated;
+    return _status == AuthStatus.authenticated && _user != null;
   }
 
   User? get user {
@@ -57,8 +60,8 @@ class AuthProvider extends ChangeNotifier {
   }
 
   String? get userId {
-    if (isGuest) {
-      return 'guest';
+    if (!isAuthenticated) {
+      return null;
     }
 
     return _user?.id;
@@ -69,10 +72,10 @@ class AuthProvider extends ChangeNotifier {
       return 'profile.guest'.tr();
     }
 
-    final profile = _profile;
+    final currentProfile = _profile;
 
-    if (profile != null) {
-      return profile.displayName;
+    if (currentProfile != null) {
+      return currentProfile.displayName;
     }
 
     final email = _user?.email?.trim() ?? '';
@@ -109,7 +112,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   AuthProvider() {
-    _initialize();
+    unawaited(_initialize());
   }
 
   // =========================================================
@@ -120,7 +123,7 @@ class AuthProvider extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      final savedGuest = prefs.getBool('guest_mode') ?? false;
+      final savedGuest = prefs.getBool(_guestModeKey) ?? false;
       final currentUser = _supabase.auth.currentUser;
 
       if (savedGuest) {
@@ -134,7 +137,7 @@ class AuthProvider extends ChangeNotifier {
           profile: null,
         );
       } else if (currentUser != null) {
-        final profile = await _authService.getProfile();
+        final profile = await _loadProfileSafely();
 
         _setState(
           AuthStatus.authenticated,
@@ -151,7 +154,7 @@ class AuthProvider extends ChangeNotifier {
 
       _initialized = true;
 
-      _authSubscription = _supabase.auth.onAuthStateChange.listen(
+      _authSubscription ??= _supabase.auth.onAuthStateChange.listen(
         _handleAuthChange,
       );
     } catch (e, st) {
@@ -159,10 +162,16 @@ class AuthProvider extends ChangeNotifier {
         'AuthProvider init error: $e\n$st',
       );
 
+      _initialized = true;
+
       _setState(
         AuthStatus.unauthenticated,
         user: null,
         profile: null,
+      );
+
+      _authSubscription ??= _supabase.auth.onAuthStateChange.listen(
+        _handleAuthChange,
       );
     }
   }
@@ -174,42 +183,72 @@ class AuthProvider extends ChangeNotifier {
   Future<void> _handleAuthChange(
       AuthState data,
       ) async {
-    if (!_initialized || _disposed) {
+    if (!_initialized || _disposed || _handlingAuthChange) {
       return;
     }
 
-    final prefs = await SharedPreferences.getInstance();
-    final savedGuest = prefs.getBool('guest_mode') ?? false;
+    _handlingAuthChange = true;
 
-    if (savedGuest) {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedGuest = prefs.getBool(_guestModeKey) ?? false;
+
+      if (savedGuest) {
+        _setState(
+          AuthStatus.guest,
+          user: null,
+          profile: null,
+        );
+
+        return;
+      }
+
+      final sessionUser = data.session?.user;
+
+      if (sessionUser == null) {
+        _setState(
+          AuthStatus.unauthenticated,
+          user: null,
+          profile: null,
+        );
+
+        return;
+      }
+
+      final profile = await _loadProfileSafely();
+
       _setState(
-        AuthStatus.guest,
-        user: null,
-        profile: null,
+        AuthStatus.authenticated,
+        user: sessionUser,
+        profile: profile,
+      );
+    } catch (e, st) {
+      debugPrint(
+        'AuthProvider auth change error: $e\n$st',
       );
 
-      return;
+      if (!_disposed) {
+        _setState(
+          AuthStatus.unauthenticated,
+          user: null,
+          profile: null,
+        );
+      }
+    } finally {
+      _handlingAuthChange = false;
     }
+  }
 
-    final sessionUser = data.session?.user;
-
-    if (sessionUser == null) {
-      _setState(
-        AuthStatus.unauthenticated,
-        user: null,
-        profile: null,
+  Future<ProfileModel?> _loadProfileSafely() async {
+    try {
+      return await _authService.getProfile();
+    } catch (e, st) {
+      debugPrint(
+        'AuthProvider profile load error: $e\n$st',
       );
 
-      return;
+      return null;
     }
-
-    final profile = await _authService.getProfile();
-
-    _setState(
-      AuthStatus.authenticated,
-      user: sessionUser,
-      profile: profile,
-    );
   }
 
   // =========================================================
@@ -241,7 +280,7 @@ class AuthProvider extends ChangeNotifier {
       return;
     }
 
-    final profile = await _authService.getProfile();
+    final profile = await _loadProfileSafely();
 
     _setState(
       AuthStatus.authenticated,
@@ -300,18 +339,18 @@ class AuthProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
 
     try {
-      if (_supabase.auth.currentSession != null) {
-        await _authService.signOut();
-      }
-
       _setState(
         AuthStatus.loading,
         user: null,
         profile: null,
       );
 
+      if (_supabase.auth.currentSession != null) {
+        await _authService.signOut();
+      }
+
       await prefs.setBool(
-        'guest_mode',
+        _guestModeKey,
         true,
       );
 
@@ -323,6 +362,8 @@ class AuthProvider extends ChangeNotifier {
         profile: null,
       );
     } catch (_) {
+      await prefs.remove(_guestModeKey);
+
       _setState(
         AuthStatus.unauthenticated,
         user: null,
@@ -343,7 +384,7 @@ class AuthProvider extends ChangeNotifier {
     );
 
     try {
-      await prefs.remove('guest_mode');
+      await prefs.remove(_guestModeKey);
 
       await BadgeService.clear();
 
@@ -374,7 +415,7 @@ class AuthProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
 
     try {
-      await prefs.remove('guest_mode');
+      await prefs.remove(_guestModeKey);
 
       _setState(
         AuthStatus.loading,
@@ -388,7 +429,14 @@ class AuthProvider extends ChangeNotifier {
       );
 
       final currentUser = _supabase.auth.currentUser;
-      final profile = await _authService.getProfile();
+
+      if (currentUser == null) {
+        throw const AuthException(
+          'errors.auth_failed',
+        );
+      }
+
+      final profile = await _loadProfileSafely();
 
       _setState(
         AuthStatus.authenticated,
@@ -419,7 +467,7 @@ class AuthProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
 
     try {
-      await prefs.remove('guest_mode');
+      await prefs.remove(_guestModeKey);
 
       _setState(
         AuthStatus.loading,
@@ -446,7 +494,7 @@ class AuthProvider extends ChangeNotifier {
         return;
       }
 
-      final profile = await _authService.getProfile();
+      final profile = await _loadProfileSafely();
 
       _setState(
         AuthStatus.authenticated,
@@ -480,9 +528,9 @@ class AuthProvider extends ChangeNotifier {
         profile: null,
       );
 
-      await prefs.remove('guest_mode');
+      await prefs.remove(_guestModeKey);
 
-      if (!wasGuest) {
+      if (!wasGuest && _supabase.auth.currentSession != null) {
         await _authService.signOut();
       }
 

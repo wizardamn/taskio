@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Интернет для Supabase, Realtime, Storage и API -->
+    <!-- Интернет для Supabase, Realtime, Storage, Firebase и API -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Уведомления Android 13+ -->
@@ -11,6 +11,9 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Foreground service для уведомлений -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <!-- Точные уведомления для дедлайнов проектов -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
@@ -61,6 +64,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Канал уведомлений по умолчанию для Firebase Cloud Messaging -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="taskio_high_importance_channel" />
+
+        <!-- Иконка уведомлений по умолчанию для Firebase Cloud Messaging -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/launcher_icon" />
 
         <!-- Foreground service для flutter_local_notifications -->
         <service

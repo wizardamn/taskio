@@ -29,8 +29,7 @@ class _ParticipantSelectionDialogState
   late final Map<String, ProjectRole> _selectedRoles;
   late final List<Map<String, dynamic>> _usersForSelection;
 
-  final TextEditingController _searchController =
-  TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
 
   String _searchQuery = '';
 
@@ -66,9 +65,7 @@ class _ParticipantSelectionDialogState
     for (final id in _selectedIds) {
       _selectedRoles.putIfAbsent(
         id,
-            () => id == ownerId
-            ? ProjectRole.owner
-            : ProjectRole.editor,
+            () => id == ownerId ? ProjectRole.owner : ProjectRole.editor,
       );
     }
 
@@ -120,8 +117,7 @@ class _ParticipantSelectionDialogState
 
     final raw = value.trim();
 
-    const oldAvatarBucketMarker =
-        '/storage/v1/object/public/avatars/';
+    const oldAvatarBucketMarker = '/storage/v1/object/public/avatars/';
 
     if (raw.startsWith('http://') || raw.startsWith('https://')) {
       if (raw.contains(oldAvatarBucketMarker)) {
@@ -170,6 +166,10 @@ class _ParticipantSelectionDialogState
     final colorScheme = Theme.of(context).colorScheme;
 
     return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 24,
+      ),
       title: Text(
         'project.select_participants'.tr(),
       ),
@@ -180,22 +180,20 @@ class _ParticipantSelectionDialogState
         0,
       ),
       content: SizedBox(
-        width: screen.width > 600 ? 520 : screen.width * 0.92,
+        width: double.maxFinite,
         height: screen.height > 800 ? 620 : screen.height * 0.76,
         child: Column(
           children: [
             _buildSearchField(),
-
             const SizedBox(height: 12),
-
             _buildSelectedInfo(),
-
             const SizedBox(height: 12),
-
             Expanded(
               child: filteredUsers.isEmpty
                   ? _buildEmptyState()
                   : ListView.separated(
+                keyboardDismissBehavior:
+                ScrollViewKeyboardDismissBehavior.onDrag,
                 itemCount: filteredUsers.length,
                 separatorBuilder: (_, __) {
                   return const SizedBox(height: 8);
@@ -373,8 +371,8 @@ class _ParticipantSelectionDialogState
     final avatarUrl = _getString(user, 'avatar_url');
     final globalRole = _getString(user, 'role');
 
-    final selectedRole = _selectedRoles[id] ??
-        (isOwner ? ProjectRole.owner : ProjectRole.editor);
+    final selectedRole =
+        _selectedRoles[id] ?? (isOwner ? ProjectRole.owner : ProjectRole.editor);
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
@@ -415,18 +413,14 @@ class _ParticipantSelectionDialogState
                   _toggleSelected(id);
                 },
               ),
-
               const SizedBox(width: 4),
-
               _buildAvatar(
                 context,
                 fullName: fullName,
                 avatarUrl: avatarUrl,
                 isOwner: isOwner,
               ),
-
               const SizedBox(width: 12),
-
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -441,29 +435,23 @@ class _ParticipantSelectionDialogState
                             : FontWeight.w500,
                       ),
                     ),
-
                     const SizedBox(height: 4),
-
                     Wrap(
                       spacing: 8,
                       runSpacing: 4,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         if (username.isNotEmpty)
-                          Text(
-                            '@$username',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
+                          _buildUsernameLabel(
+                            context,
+                            username: username,
                           ),
-
                         if (globalRole.isNotEmpty)
                           _buildSmallChip(
                             context,
                             text: _globalRoleText(globalRole),
                             isPrimary: false,
                           ),
-
                         if (isOwner)
                           _buildSmallChip(
                             context,
@@ -472,7 +460,6 @@ class _ParticipantSelectionDialogState
                           ),
                       ],
                     ),
-
                     if (isSelected) ...[
                       const SizedBox(height: 10),
                       _buildRoleSelector(
@@ -487,6 +474,28 @@ class _ParticipantSelectionDialogState
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUsernameLabel(
+      BuildContext context, {
+        required String username,
+      }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(
+        maxWidth: 170,
+      ),
+      child: Text(
+        '@$username',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: textTheme.bodySmall?.copyWith(
+          color: colorScheme.onSurfaceVariant,
         ),
       ),
     );
@@ -513,6 +522,8 @@ class _ParticipantSelectionDialogState
       ),
       child: Text(
         text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: textTheme.labelSmall?.copyWith(
           color: isPrimary
               ? colorScheme.onPrimaryContainer
@@ -533,13 +544,11 @@ class _ParticipantSelectionDialogState
 
     final normalizedAvatarUrl = _normalizeAvatarUrl(avatarUrl);
 
-    final backgroundColor = isOwner
-        ? colorScheme.primaryContainer
-        : colorScheme.surfaceContainerHighest;
+    final backgroundColor =
+    isOwner ? colorScheme.primaryContainer : colorScheme.surfaceContainerHighest;
 
-    final foregroundColor = isOwner
-        ? colorScheme.onPrimaryContainer
-        : colorScheme.onSurfaceVariant;
+    final foregroundColor =
+    isOwner ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant;
 
     final fallback = Center(
       child: Text(
@@ -608,63 +617,138 @@ class _ParticipantSelectionDialogState
     final colorScheme = theme.colorScheme;
 
     if (isOwner) {
-      return Row(
-        children: [
-          Icon(
-            Icons.verified_user_outlined,
-            size: 18,
-            color: colorScheme.primary,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            'project_roles.owner'.tr(),
-            style: theme.textTheme.bodySmall?.copyWith(
+      return SizedBox(
+        width: double.infinity,
+        child: Row(
+          children: [
+            Icon(
+              Icons.verified_user_outlined,
+              size: 18,
               color: colorScheme.primary,
-              fontWeight: FontWeight.bold,
             ),
-          ),
-        ],
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                'project_roles.owner'.tr(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.primary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
       );
     }
 
-    return DropdownButtonFormField<ProjectRole>(
-      initialValue: role == ProjectRole.owner
-          ? ProjectRole.editor
-          : role,
-      isDense: true,
-      decoration: InputDecoration(
-        labelText: 'members.role'.tr(),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 10,
-        ),
-      ),
-      items: [
-        DropdownMenuItem(
-          value: ProjectRole.editor,
-          child: Text(
-            'project_roles.editor'.tr(),
+    final roles = <ProjectRole>[
+      ProjectRole.editor,
+      ProjectRole.viewer,
+    ];
+
+    final safeRole = roles.contains(role) ? role : ProjectRole.editor;
+
+    return SizedBox(
+      width: double.infinity,
+      child: DropdownButtonFormField<ProjectRole>(
+        initialValue: safeRole,
+        isExpanded: true,
+        isDense: true,
+        menuMaxHeight: 260,
+        decoration: InputDecoration(
+          labelText: 'members.role'.tr(),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
           ),
         ),
-        DropdownMenuItem(
-          value: ProjectRole.viewer,
+        selectedItemBuilder: (context) {
+          return roles.map((role) {
+            return _buildSelectedRoleItem(
+              context,
+              role,
+            );
+          }).toList();
+        },
+        items: roles.map((role) {
+          return DropdownMenuItem<ProjectRole>(
+            value: role,
+            child: _buildRoleMenuItem(
+              context,
+              role,
+            ),
+          );
+        }).toList(),
+        onChanged: (value) {
+          if (value == null) {
+            return;
+          }
+
+          setState(() {
+            _selectedRoles[id] = value;
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _buildSelectedRoleItem(
+      BuildContext context,
+      ProjectRole role,
+      ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Row(
+      children: [
+        Icon(
+          _roleIcon(role),
+          size: 17,
+          color: colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
           child: Text(
-            'project_roles.viewer'.tr(),
+            _projectRoleText(role),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: textTheme.bodyMedium,
           ),
         ),
       ],
-      onChanged: (value) {
-        if (value == null) {
-          return;
-        }
+    );
+  }
 
-        setState(() {
-          _selectedRoles[id] = value;
-        });
-      },
+  Widget _buildRoleMenuItem(
+      BuildContext context,
+      ProjectRole role,
+      ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          _roleIcon(role),
+          size: 18,
+          color: colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            _projectRoleText(role),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: textTheme.bodyMedium,
+          ),
+        ),
+      ],
     );
   }
 
@@ -832,8 +916,7 @@ class _ParticipantSelectionDialogState
       ) {
     final fullName = _getString(user, 'full_name');
 
-    if (fullName.isNotEmpty &&
-        fullName.toLowerCase() != 'unknown') {
+    if (fullName.isNotEmpty && fullName.toLowerCase() != 'unknown') {
       return fullName;
     }
 
@@ -892,6 +975,32 @@ class _ParticipantSelectionDialogState
       String key,
       ) {
     return user[key]?.toString().trim() ?? '';
+  }
+
+  IconData _roleIcon(ProjectRole role) {
+    switch (role) {
+      case ProjectRole.owner:
+        return Icons.verified_user_outlined;
+
+      case ProjectRole.editor:
+        return Icons.edit_outlined;
+
+      case ProjectRole.viewer:
+        return Icons.visibility_outlined;
+    }
+  }
+
+  String _projectRoleText(ProjectRole role) {
+    switch (role) {
+      case ProjectRole.owner:
+        return 'project_roles.owner'.tr();
+
+      case ProjectRole.editor:
+        return 'project_roles.editor'.tr();
+
+      case ProjectRole.viewer:
+        return 'project_roles.viewer'.tr();
+    }
   }
 
   String _globalRoleText(String role) {

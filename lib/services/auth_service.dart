@@ -44,10 +44,36 @@ class AuthService {
     r'^[a-zA-Z0-9_]{3,20}$',
   );
 
+  static final RegExp _emailRegex = RegExp(
+    r'^[\w\-.]+@([\w-]+\.)+[\w-]{2,}$',
+  );
+
   void _validateEmail(String email) {
-    if (email.trim().isEmpty) {
+    final cleanEmail = email.trim().toLowerCase();
+
+    if (cleanEmail.isEmpty) {
       throw const AuthException(
         'validation.empty_email',
+      );
+    }
+
+    if (!_emailRegex.hasMatch(cleanEmail)) {
+      throw const AuthException(
+        'validation.invalid_email',
+      );
+    }
+  }
+
+  void _validatePassword(String password) {
+    if (password.isEmpty) {
+      throw const AuthException(
+        'validation.empty_password',
+      );
+    }
+
+    if (password.length < 6) {
+      throw const AuthException(
+        'validation.short_password',
       );
     }
   }
@@ -56,11 +82,8 @@ class AuthService {
     required String email,
     required String password,
   }) {
-    if (email.trim().isEmpty || password.trim().isEmpty) {
-      throw const AuthException(
-        'errors.empty_credentials',
-      );
-    }
+    _validateEmail(email);
+    _validatePassword(password);
   }
 
   void _validateUsername(String username) {
@@ -132,31 +155,56 @@ class AuthService {
     return '';
   }
 
+  bool _isDatabaseSavingUserError(Object error) {
+    final text = error.toString().toLowerCase();
+
+    return text.contains('database error saving new user') ||
+        text.contains('unexpected_failure') ||
+        text.contains('error saving new user');
+  }
+
   Future<void> _ensureUsernameAvailable(
       String username, {
         String? exceptUserId,
       }) async {
     final cleanUsername = _normalizeUsername(username);
 
-    final data = await _client
-        .from('profiles')
-        .select('id')
-        .eq('username', cleanUsername)
-        .maybeSingle();
-
-    if (data == null) {
+    if (cleanUsername.isEmpty) {
       return;
     }
 
-    final existingUserId = data['id']?.toString();
+    try {
+      final data = await _client
+          .from('profiles')
+          .select('id')
+          .eq('username', cleanUsername)
+          .maybeSingle();
 
-    if (exceptUserId != null && existingUserId == exceptUserId) {
-      return;
+      if (data == null) {
+        return;
+      }
+
+      final existingUserId = data['id']?.toString();
+
+      if (exceptUserId != null && existingUserId == exceptUserId) {
+        return;
+      }
+
+      throw const AuthException(
+        'validation.username_taken',
+      );
+    } on AuthException {
+      rethrow;
+    } catch (e, st) {
+      AppLogger.error(
+        'ensureUsernameAvailable failed',
+        error: e,
+        stackTrace: st,
+        tag: 'AuthService',
+      );
+
+      rethrow;
     }
-
-    throw const AuthException(
-      'validation.username_taken',
-    );
   }
 
   // =========================================================
@@ -171,26 +219,26 @@ class AuthService {
   }) async {
     try {
       final cleanEmail = email.trim().toLowerCase();
+      final cleanPassword = password;
       final cleanUsername = _normalizeUsername(username);
       final cleanRole = _normalizeRole(role);
 
-      if (cleanEmail.isEmpty ||
-          password.trim().isEmpty ||
-          cleanUsername.isEmpty ||
-          cleanRole.isEmpty) {
+      _validateEmail(cleanEmail);
+      _validatePassword(cleanPassword);
+      _validateUsername(cleanUsername);
+
+      if (cleanRole.isEmpty) {
         throw const AuthException(
           'validation.empty_field',
         );
       }
-
-      _validateUsername(cleanUsername);
 
       await _ensureUsernameAvailable(cleanUsername);
 
       final response = await _client.auth
           .signUp(
         email: cleanEmail,
-        password: password,
+        password: cleanPassword,
         data: {
           'username': cleanUsername,
           'full_name': cleanUsername,
@@ -211,12 +259,22 @@ class AuthService {
         );
       }
 
-      await _createProfile(
-        user,
-        fallbackEmail: cleanEmail,
-        fallbackUsername: cleanUsername,
-        fallbackRole: cleanRole,
-      );
+      final hasActiveSession = response.session != null ||
+          _client.auth.currentUser?.id == user.id;
+
+      if (hasActiveSession) {
+        await _createProfile(
+          user,
+          fallbackEmail: cleanEmail,
+          fallbackUsername: cleanUsername,
+          fallbackRole: cleanRole,
+        );
+      } else {
+        AppLogger.info(
+          'Profile creation skipped until email confirmation',
+          tag: 'AuthService',
+        );
+      }
 
       AppLogger.info(
         'User registered: ${user.id}',
@@ -229,6 +287,12 @@ class AuthService {
         stackTrace: st,
         tag: 'AuthService',
       );
+
+      if (_isDatabaseSavingUserError(e)) {
+        throw const AuthException(
+          'errors.database_saving_user',
+        );
+      }
 
       rethrow;
     }
@@ -412,6 +476,8 @@ class AuthService {
     }
 
     try {
+      await _ensureProfileExists(user);
+
       await _client
           .from('profiles')
           .update({
@@ -574,18 +640,26 @@ class AuthService {
           ? email.split('@').first
           : 'user';
 
+      final generatedUsername = _generateUsername(
+        email.isEmpty ? 'user' : email,
+      );
+
       final username = _normalizeUsername(
         _firstNonEmpty([
           fallbackUsername,
           metadata['username'],
           emailName,
-          _generateUsername(email.isEmpty ? 'user' : email),
+          generatedUsername,
         ]),
       );
 
+      final safeUsername = _usernameRegex.hasMatch(username)
+          ? username
+          : generatedUsername;
+
       final fullName = _firstNonEmpty([
         metadata['full_name'],
-        username,
+        safeUsername,
         emailName,
         'User',
       ]);
@@ -620,7 +694,7 @@ class AuthService {
       await _client.from('profiles').upsert(
         {
           'id': user.id,
-          'username': username,
+          'username': safeUsername,
           'first_name': firstName.isEmpty ? null : firstName,
           'last_name': lastName.isEmpty ? null : lastName,
           'avatar_url': avatarUrl.isEmpty ? null : avatarUrl,

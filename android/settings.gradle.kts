@@ -1,9 +1,17 @@
 pluginManagement {
     val flutterSdkPath = run {
         val properties = java.util.Properties()
-        file("local.properties").inputStream().use { properties.load(it) }
+
+        file("local.properties").inputStream().use {
+            properties.load(it)
+        }
+
         val flutterSdkPath = properties.getProperty("flutter.sdk")
-        require(flutterSdkPath != null) { "flutter.sdk not set in local.properties" }
+
+        require(flutterSdkPath != null) {
+            "flutter.sdk not set in local.properties"
+        }
+
         flutterSdkPath
     }
 
@@ -19,11 +27,12 @@ pluginManagement {
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
 
-    /// 🔥 ОБНОВИЛИ AGP
     id("com.android.application") version "8.9.1" apply false
 
-    /// 🔥 Kotlin уже правильный
     id("org.jetbrains.kotlin.android") version "2.1.0" apply false
+
+    // Firebase / Google Services
+    id("com.google.gms.google-services") version "4.4.4" apply false
 }
 
 include(":app")

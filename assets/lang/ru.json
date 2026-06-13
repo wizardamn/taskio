@@ -61,6 +61,8 @@
     "email_hint": "Введите email",
     "password_label": "Пароль",
     "password_hint": "Введите пароль",
+    "hide_password": "Скрыть пароль",
+    "show_password": "Показать пароль",
     "confirm_password_label": "Подтвердите пароль",
     "full_name": "ФИО",
     "select_role": "Выберите роль",
@@ -95,8 +97,6 @@
   "roles": {
     "student": "Студент",
     "teacher": "Преподаватель",
-    "leader": "Руководитель команды",
-    "general": "Обычный пользователь",
     "owner": "Владелец",
     "editor": "Редактор",
     "viewer": "Наблюдатель"
@@ -304,6 +304,7 @@
   },
   "profile": {
     "choose_language": "Выберите язык",
+    "language": "Язык",
     "language_changed": "Язык успешно изменён",
     "dark_theme": "Тёмная тема",
     "light_theme": "Светлая тема",
@@ -399,6 +400,7 @@
     "foreign_key": "Ошибка связанных данных",
     "permission_denied": "Недостаточно прав",
     "database": "Ошибка базы данных",
+    "database_saving_user": "Ошибка сохранения пользователя в базе данных. Проверьте таблицу profiles и триггер handle_new_user в Supabase",
     "file_not_found": "Файл не найден",
     "storage": "Ошибка хранилища",
     "file_web_not_supported": "Не удалось открыть файл в Web-версии",

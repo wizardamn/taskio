@@ -1,8 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 /// CONFIG
 import 'config/env.dart';
@@ -25,10 +28,53 @@ import 'utils/loading_overlay.dart';
 /// Screens
 import 'screens/auth/login_wrapper.dart';
 
+/// ==========================================================
+/// BACKGROUND FCM HANDLER
+/// ==========================================================
+///
+/// Этот обработчик вызывается, когда Android-приложение находится
+/// в фоне или закрыто, а Firebase Cloud Messaging получает push.
+///
+/// Важно:
+/// - функция должна быть top-level;
+/// - обязательно нужен @pragma('vm:entry-point');
+/// - Firebase нужно инициализировать внутри background isolate.
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(
+    RemoteMessage message,
+    ) async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  try {
+    if (!kIsWeb) {
+      await Firebase.initializeApp();
+    }
+
+    AppLogger.info(
+      'Background FCM message received: ${message.messageId}',
+      tag: 'FCM',
+    );
+  } catch (e, st) {
+    AppLogger.error(
+      'Background FCM handler error',
+      error: e,
+      stackTrace: st,
+      tag: 'FCM',
+    );
+  }
+}
+
+/// ==========================================================
+/// MAIN
+/// ==========================================================
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  AppLogger.info('Application starting...');
+  AppLogger.info(
+    'Application starting...',
+    tag: 'Main',
+  );
 
   try {
     /// Localization
@@ -41,16 +87,23 @@ Future<void> main() async {
       anonKey: Env.supabaseAnonKey,
     );
 
-    AppLogger.info('Core initialization completed');
+    /// Firebase
+    await _initializeFirebase();
+
+    AppLogger.info(
+      'Core initialization completed',
+      tag: 'Main',
+    );
 
     runApp(
       const TaskioRoot(),
     );
-  } catch (e, s) {
+  } catch (e, st) {
     AppLogger.error(
       'App initialization failed',
       error: e,
-      stackTrace: s,
+      stackTrace: st,
+      tag: 'Main',
     );
 
     runApp(
@@ -69,6 +122,48 @@ Future<void> main() async {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// ==========================================================
+/// FIREBASE INIT
+/// ==========================================================
+
+Future<void> _initializeFirebase() async {
+  if (kIsWeb) {
+    AppLogger.info(
+      'Firebase initialization skipped for Web',
+      tag: 'Firebase',
+    );
+
+    return;
+  }
+
+  try {
+    await Firebase.initializeApp();
+
+    FirebaseMessaging.onBackgroundMessage(
+      firebaseMessagingBackgroundHandler,
+    );
+
+    await FirebaseMessaging.instance
+        .setForegroundNotificationPresentationOptions(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    AppLogger.info(
+      'Firebase initialized successfully',
+      tag: 'Firebase',
+    );
+  } catch (e, st) {
+    AppLogger.error(
+      'Firebase initialization failed',
+      error: e,
+      stackTrace: st,
+      tag: 'Firebase',
     );
   }
 }
@@ -96,18 +191,26 @@ class TaskioRoot extends StatelessWidget {
       child: MultiProvider(
         providers: [
           ChangeNotifierProvider(
-            create: (_) => ThemeProvider(),
+            create: (_) {
+              return ThemeProvider();
+            },
           ),
           ChangeNotifierProvider(
-            create: (_) => AuthProvider(),
+            create: (_) {
+              return AuthProvider();
+            },
           ),
           ChangeNotifierProvider(
-            create: (_) => ProjectProvider(
-              ProjectService(),
-            ),
+            create: (_) {
+              return ProjectProvider(
+                ProjectService(),
+              );
+            },
           ),
           ChangeNotifierProvider(
-            create: (_) => ChatProvider(),
+            create: (_) {
+              return ChatProvider();
+            },
           ),
         ],
         child: const TaskioApp(),
@@ -126,7 +229,9 @@ class TaskioApp extends StatefulWidget {
   });
 
   @override
-  State<TaskioApp> createState() => _TaskioAppState();
+  State<TaskioApp> createState() {
+    return _TaskioAppState();
+  }
 }
 
 class _TaskioAppState extends State<TaskioApp> {
@@ -144,12 +249,14 @@ class _TaskioAppState extends State<TaskioApp> {
 
         AppLogger.info(
           'NotificationService initialized',
+          tag: 'NotificationService',
         );
-      } catch (e, s) {
+      } catch (e, st) {
         AppLogger.error(
           'NotificationService error',
           error: e,
-          stackTrace: s,
+          stackTrace: st,
+          tag: 'NotificationService',
         );
       }
     });
@@ -163,7 +270,6 @@ class _TaskioAppState extends State<TaskioApp> {
       title: 'Taskio',
       debugShowCheckedModeBanner: false,
 
-      /// Важно для безопасного показа SnackBar без BuildContext.
       scaffoldMessengerKey: SnackbarManager.messengerKey,
 
       theme: themeProv.lightTheme,

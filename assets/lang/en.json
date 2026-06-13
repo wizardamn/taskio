@@ -61,6 +61,8 @@
     "email_hint": "Enter your email",
     "password_label": "Password",
     "password_hint": "Enter your password",
+    "hide_password": "Hide password",
+    "show_password": "Show password",
     "confirm_password_label": "Confirm Password",
     "full_name": "Full Name",
     "select_role": "Select role",
@@ -95,8 +97,6 @@
   "roles": {
     "student": "Student",
     "teacher": "Teacher",
-    "leader": "Team Lead",
-    "general": "General User",
     "owner": "Owner",
     "editor": "Editor",
     "viewer": "Viewer"
@@ -304,6 +304,7 @@
   },
   "profile": {
     "choose_language": "Choose Language",
+    "language": "Language",
     "language_changed": "Language changed successfully",
     "dark_theme": "Dark Theme",
     "light_theme": "Light Theme",
@@ -399,6 +400,7 @@
     "foreign_key": "Related data error",
     "permission_denied": "Permission denied",
     "database": "Database error",
+    "database_saving_user": "Database error while saving the user. Check the profiles table and handle_new_user trigger in Supabase",
     "file_not_found": "File not found",
     "storage": "Storage error",
     "file_web_not_supported": "Failed to open the file on Web",

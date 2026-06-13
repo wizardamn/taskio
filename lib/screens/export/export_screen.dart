@@ -453,6 +453,7 @@ class _ExportScreenState extends State<ExportScreen> {
     return Card(
       margin: const EdgeInsets.all(12),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           ListTile(
             title: Text(
@@ -486,11 +487,13 @@ class _ExportScreenState extends State<ExportScreen> {
             firstChild: Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   RadioGroup<ReportScope>(
                     groupValue: _scope,
                     onChanged: _changeScope,
                     child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         RadioListTile<ReportScope>(
                           value: ReportScope.singleProject,
@@ -500,6 +503,8 @@ class _ExportScreenState extends State<ExportScreen> {
                               projects,
                               provider,
                             ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         RadioListTile<ReportScope>(
@@ -507,6 +512,8 @@ class _ExportScreenState extends State<ExportScreen> {
                           contentPadding: EdgeInsets.zero,
                           title: Text(
                             'export.selected_projects'.tr(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         RadioListTile<ReportScope>(
@@ -514,9 +521,13 @@ class _ExportScreenState extends State<ExportScreen> {
                           contentPadding: EdgeInsets.zero,
                           title: Text(
                             'export.all_projects'.tr(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                           subtitle: Text(
                             'export.available_projects_hint'.tr(),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ),
@@ -551,6 +562,8 @@ class _ExportScreenState extends State<ExportScreen> {
                           : const Icon(Icons.picture_as_pdf),
                       label: Text(
                         'export.generate_preview'.tr(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ),
@@ -570,6 +583,8 @@ class _ExportScreenState extends State<ExportScreen> {
                   icon: const Icon(Icons.tune),
                   label: Text(
                     'export.change_report_settings'.tr(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ),
@@ -582,31 +597,39 @@ class _ExportScreenState extends State<ExportScreen> {
 
   Widget _buildProjectPicker(List<ProjectModel> projects) {
     if (projects.isEmpty) {
-      return Text(
-        'projects.no_projects'.tr(),
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          'projects.no_projects'.tr(),
+        ),
       );
     }
 
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          children: [
-            TextButton.icon(
-              onPressed: () => _selectAllProjects(projects),
-              icon: const Icon(Icons.done_all),
-              label: Text(
-                'common.select_all'.tr(),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              TextButton.icon(
+                onPressed: () => _selectAllProjects(projects),
+                icon: const Icon(Icons.done_all),
+                label: Text(
+                  'common.select_all'.tr(),
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            TextButton.icon(
-              onPressed: _clearSelectedProjects,
-              icon: const Icon(Icons.clear),
-              label: Text(
-                'common.clear'.tr(),
+              TextButton.icon(
+                onPressed: _clearSelectedProjects,
+                icon: const Icon(Icons.clear),
+                label: Text(
+                  'common.clear'.tr(),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         const SizedBox(height: 8),
         ConstrainedBox(
@@ -615,6 +638,7 @@ class _ExportScreenState extends State<ExportScreen> {
           ),
           child: ListView.separated(
             shrinkWrap: true,
+            primary: false,
             itemCount: projects.length,
             separatorBuilder: (_, __) {
               return const Divider(height: 1);
@@ -660,30 +684,34 @@ class _ExportScreenState extends State<ExportScreen> {
   // =========================================================
 
   Widget _buildEmptyState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.picture_as_pdf_outlined,
-              size: 72,
-              color: Theme.of(context).colorScheme.outline,
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.picture_as_pdf_outlined,
+            size: 64,
+            color: colorScheme.outline,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'report.no_preview'.tr(),
+            textAlign: TextAlign.center,
+            style: textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'export.generate_preview_hint'.tr(),
+            textAlign: TextAlign.center,
+            style: textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
             ),
-            const SizedBox(height: 16),
-            Text(
-              'report.no_preview'.tr(),
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'export.generate_preview_hint'.tr(),
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -706,6 +734,83 @@ class _ExportScreenState extends State<ExportScreen> {
       loadingWidget: const Center(
         child: CircularProgressIndicator(),
       ),
+    );
+  }
+
+  Widget _buildBody(
+      List<ProjectModel> projects,
+      ProjectProvider provider,
+      ) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final hasPdf = _pdf != null;
+
+        if (_isLoading) {
+          return Column(
+            children: [
+              _buildReportSettings(
+                projects,
+                provider,
+              ),
+              const Expanded(
+                child: Center(
+                  child: CircularProgressIndicator(),
+                ),
+              ),
+            ],
+          );
+        }
+
+        if (!hasPdf) {
+          return SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: constraints.maxHeight,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildReportSettings(
+                    projects,
+                    provider,
+                  ),
+                  _buildEmptyState(),
+                ],
+              ),
+            ),
+          );
+        }
+
+        final previewHeight = _settingsExpanded
+            ? constraints.maxHeight * 0.52
+            : constraints.maxHeight * 0.74;
+
+        return SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: constraints.maxHeight,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildReportSettings(
+                  projects,
+                  provider,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: SizedBox(
+                    height: previewHeight.clamp(320.0, 720.0),
+                    child: _buildPreview(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -732,6 +837,7 @@ class _ExportScreenState extends State<ExportScreen> {
     }
 
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: Text(
           'export.title'.tr(),
@@ -754,20 +860,11 @@ class _ExportScreenState extends State<ExportScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          _buildReportSettings(
-            projects,
-            provider,
-          ),
-          Expanded(
-            child: _isLoading
-                ? const Center(
-              child: CircularProgressIndicator(),
-            )
-                : _buildPreview(),
-          ),
-        ],
+      body: SafeArea(
+        child: _buildBody(
+          projects,
+          provider,
+        ),
       ),
     );
   }

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
@@ -156,17 +159,19 @@ class NotificationService {
   static final NotificationService _instance =
   NotificationService._internal();
 
-  factory NotificationService() => _instance;
+  factory NotificationService() {
+    return _instance;
+  }
 
   NotificationService._internal();
 
   static const String _settingsTable = 'notification_settings';
   static const String _notificationsTable = 'project_notifications';
+  static const String _devicesTable = 'user_devices';
 
-  static const String _mainChannelId = 'main_channel';
+  static const String _mainChannelId = 'taskio_high_importance_channel';
   static const String _chatChannelId = 'chat_channel';
-  static const String _projectUpdatesChannelId =
-      'project_updates_channel';
+  static const String _projectUpdatesChannelId = 'project_updates_channel';
   static const String _scheduledChannelId = 'scheduled_channel';
 
   final FlutterLocalNotificationsPlugin _plugin =
@@ -174,12 +179,19 @@ class NotificationService {
 
   final SupabaseClient _client = SupabaseService.client;
 
+  StreamSubscription<RemoteMessage>? _foregroundMessageSubscription;
+  StreamSubscription<RemoteMessage>? _messageOpenedSubscription;
+  StreamSubscription<String>? _tokenRefreshSubscription;
+  StreamSubscription<AuthState>? _authSubscription;
+
   bool _initialized = false;
   Future<void>? _initializingFuture;
 
   final Map<String, NotificationSettingsData> _settingsCache = {};
 
-  bool get _enabled => !kIsWeb;
+  bool get _enabled {
+    return !kIsWeb;
+  }
 
   bool get _isAndroid {
     return !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -211,6 +223,7 @@ class NotificationService {
     }
 
     if (_initialized) {
+      await syncFcmTokenForCurrentUser();
       return;
     }
 
@@ -236,10 +249,14 @@ class NotificationService {
       await _configureTimezone();
 
       const androidInit = AndroidInitializationSettings(
-        '@mipmap/ic_launcher',
+        '@mipmap/launcher_icon',
       );
 
-      const iosInit = DarwinInitializationSettings();
+      const iosInit = DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      );
 
       const settings = InitializationSettings(
         android: androidInit,
@@ -258,6 +275,7 @@ class NotificationService {
       );
 
       await _configurePermissions();
+      await _configureFcm();
 
       _initialized = true;
 
@@ -274,6 +292,62 @@ class NotificationService {
       );
     } finally {
       _initializingFuture = null;
+    }
+  }
+
+  Future<void> _configureFcm() async {
+    if (!_enabled) {
+      return;
+    }
+
+    try {
+      await FirebaseMessaging.instance.setAutoInitEnabled(true);
+
+      _foregroundMessageSubscription ??=
+          FirebaseMessaging.onMessage.listen((message) {
+            unawaited(
+              _handleForegroundFcmMessage(message),
+            );
+          });
+
+      _messageOpenedSubscription ??=
+          FirebaseMessaging.onMessageOpenedApp.listen((message) {
+            _handleNotificationOpened(message);
+          });
+
+      _tokenRefreshSubscription ??=
+          FirebaseMessaging.instance.onTokenRefresh.listen((token) {
+            unawaited(
+              _saveFcmToken(token),
+            );
+          });
+
+      _authSubscription ??= _client.auth.onAuthStateChange.listen((_) {
+        unawaited(
+          syncFcmTokenForCurrentUser(),
+        );
+      });
+
+      final initialMessage =
+      await FirebaseMessaging.instance.getInitialMessage();
+
+      if (initialMessage != null) {
+        _handleNotificationOpened(initialMessage);
+      }
+
+      await syncFcmTokenForCurrentUser();
+
+      AppLogger.info(
+        'FCM configured',
+        tag: 'NotificationService',
+      );
+    } catch (e, st) {
+      AppLogger.error(
+        'FCM configuration failed',
+        error: e,
+        stackTrace: st,
+        tag: 'NotificationService',
+      );
     }
   }
 
@@ -377,8 +451,8 @@ class NotificationService {
         await androidPlugin.createNotificationChannel(
           const AndroidNotificationChannel(
             _mainChannelId,
-            'Main notifications',
-            description: 'General app notifications',
+            'Taskio notifications',
+            description: 'Main Taskio push notifications',
             importance: Importance.max,
           ),
         );
@@ -435,6 +509,29 @@ class NotificationService {
         sound: true,
       );
     }
+
+    try {
+      await FirebaseMessaging.instance.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
+      );
+
+      await FirebaseMessaging.instance
+          .setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+    } catch (e, st) {
+      AppLogger.error(
+        'FCM permission request failed',
+        error: e,
+        stackTrace: st,
+        tag: 'NotificationService',
+      );
+    }
   }
 
   Future<void> _ensureInit() async {
@@ -455,6 +552,259 @@ class NotificationService {
 
   int _stableNotificationId(String input) {
     return input.hashCode & 0x7fffffff;
+  }
+
+  String _platformName() {
+    if (_isAndroid) {
+      return 'android';
+    }
+
+    if (_isIOS) {
+      return 'ios';
+    }
+
+    if (_isMacOS) {
+      return 'macos';
+    }
+
+    return defaultTargetPlatform.name;
+  }
+
+  // =========================================================
+  // FCM TOKEN
+  // =========================================================
+
+  Future<void> syncFcmTokenForCurrentUser() async {
+    if (!_enabled) {
+      return;
+    }
+
+    final userId = _currentUserId;
+
+    if (userId == null || userId.isEmpty) {
+      return;
+    }
+
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+
+      if (token == null || token.trim().isEmpty) {
+        AppLogger.warning(
+          'FCM token is empty',
+          tag: 'NotificationService',
+        );
+        return;
+      }
+
+      await _saveFcmToken(token);
+    } catch (e, st) {
+      AppLogger.error(
+        'Sync FCM token failed',
+        error: e,
+        stackTrace: st,
+        tag: 'NotificationService',
+      );
+    }
+  }
+
+  Future<void> _saveFcmToken(String token) async {
+    if (!_enabled) {
+      return;
+    }
+
+    final userId = _currentUserId;
+    final normalizedToken = token.trim();
+
+    if (userId == null || userId.isEmpty || normalizedToken.isEmpty) {
+      return;
+    }
+
+    try {
+      final now = DateTime.now().toUtc().toIso8601String();
+
+      await _client.from(_devicesTable).upsert(
+        {
+          'user_id': userId,
+          'fcm_token': normalizedToken,
+          'platform': _platformName(),
+          'updated_at': now,
+        },
+        onConflict: 'fcm_token',
+      );
+
+      AppLogger.info(
+        'FCM token saved',
+        tag: 'NotificationService',
+      );
+    } catch (e, st) {
+      AppLogger.error(
+        'Save FCM token failed',
+        error: e,
+        stackTrace: st,
+        tag: 'NotificationService',
+      );
+    }
+  }
+
+  Future<void> deleteCurrentFcmTokenFromDatabase() async {
+    if (!_enabled) {
+      return;
+    }
+
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+
+      if (token == null || token.trim().isEmpty) {
+        return;
+      }
+
+      await _client
+          .from(_devicesTable)
+          .delete()
+          .eq('fcm_token', token.trim());
+    } catch (e, st) {
+      AppLogger.error(
+        'Delete FCM token from database failed',
+        error: e,
+        stackTrace: st,
+        tag: 'NotificationService',
+      );
+    }
+  }
+
+  // =========================================================
+  // FCM MESSAGE HANDLERS
+  // =========================================================
+
+  Future<void> _handleForegroundFcmMessage(RemoteMessage message) async {
+    if (!_enabled) {
+      return;
+    }
+
+    try {
+      final data = message.data;
+
+      final notification = message.notification;
+
+      final type = _dataString(
+        data,
+        'type',
+      );
+
+      final projectId = _nullableDataString(
+        data,
+        'project_id',
+      );
+
+      final projectTitle = _nullableDataString(
+        data,
+        'project_title',
+      );
+
+      final title = notification?.title?.trim().isNotEmpty == true
+          ? notification!.title!.trim()
+          : _dataString(
+        data,
+        'title',
+        fallback: localizedTitleForType(
+          type,
+        ),
+      );
+
+      final body = notification?.body?.trim().isNotEmpty == true
+          ? notification!.body!.trim()
+          : _dataString(
+        data,
+        'body',
+        fallback: localizedBodyForType(
+          type,
+          projectTitle: projectTitle,
+        ),
+      );
+
+      final payload = _dataString(
+        data,
+        'payload',
+        fallback: projectId ?? '',
+      );
+
+      await showSimple(
+        title,
+        body,
+        payload: payload.isEmpty ? projectId : payload,
+        projectId: projectId,
+        category: _categoryForType(type),
+      );
+    } catch (e, st) {
+      AppLogger.error(
+        'Foreground FCM message handling failed',
+        error: e,
+        stackTrace: st,
+        tag: 'NotificationService',
+      );
+    }
+  }
+
+  void _handleNotificationOpened(RemoteMessage message) {
+    final data = message.data;
+
+    AppLogger.info(
+      'FCM notification opened: ${message.messageId}, data: $data',
+      tag: 'NotificationService',
+    );
+
+    final notificationId = _nullableDataString(
+      data,
+      'notification_id',
+    );
+
+    if (notificationId != null) {
+      unawaited(
+        markNotificationAsRead(notificationId),
+      );
+    }
+  }
+
+  String _dataString(
+      Map<String, dynamic> data,
+      String key, {
+        String fallback = '',
+      }) {
+    final value = data[key]?.toString().trim();
+
+    if (value == null || value.isEmpty || value.toLowerCase() == 'null') {
+      return fallback;
+    }
+
+    return value;
+  }
+
+  String? _nullableDataString(
+      Map<String, dynamic> data,
+      String key,
+      ) {
+    final value = data[key]?.toString().trim();
+
+    if (value == null || value.isEmpty || value.toLowerCase() == 'null') {
+      return null;
+    }
+
+    return value;
+  }
+
+  NotificationCategory _categoryForType(String type) {
+    switch (type.trim()) {
+      case 'new_message':
+      case 'chat_message':
+        return NotificationCategory.chat;
+
+      case 'deadline':
+      case 'deadline_soon':
+        return NotificationCategory.deadline;
+
+      default:
+        return NotificationCategory.projectUpdates;
+    }
   }
 
   // =========================================================
@@ -548,6 +898,11 @@ class NotificationService {
         );
 
       case 'file_uploaded':
+        return _safeTr(
+          'notifications.file_uploaded_title',
+          fallback: fallback ?? 'File uploaded',
+        );
+
       case 'file_added':
         return _safeTr(
           'notifications.file_added_title',
@@ -675,6 +1030,14 @@ class NotificationService {
         );
 
       case 'file_uploaded':
+        return _safeTr(
+          'notifications.file_uploaded_body',
+          namedArgs: {
+            'project': project,
+          },
+          fallback: fallback ?? 'A file was uploaded to project "$project"',
+        );
+
       case 'file_added':
         return _safeTr(
           'notifications.file_added_body',
@@ -1072,11 +1435,17 @@ class NotificationService {
           .eq('recipient_id', userId);
 
       if (unreadOnly) {
-        query = query.eq('is_read', false);
+        query = query.eq(
+          'is_read',
+          false,
+        );
       }
 
       final response = await query
-          .order('created_at', ascending: false)
+          .order(
+        'created_at',
+        ascending: false,
+      )
           .limit(limit);
 
       return List<Map<String, dynamic>>.from(response)
@@ -1124,9 +1493,7 @@ class NotificationService {
   Future<void> markNotificationAsRead(String notificationId) async {
     final userId = _currentUserId;
 
-    if (userId == null ||
-        userId.isEmpty ||
-        notificationId.trim().isEmpty) {
+    if (userId == null || userId.isEmpty || notificationId.trim().isEmpty) {
       return;
     }
 
@@ -1136,8 +1503,14 @@ class NotificationService {
           .update({
         'is_read': true,
       })
-          .eq('id', notificationId.trim())
-          .eq('recipient_id', userId);
+          .eq(
+        'id',
+        notificationId.trim(),
+      )
+          .eq(
+        'recipient_id',
+        userId,
+      );
     } catch (e, st) {
       AppLogger.error(
         'Mark notification as read failed',
@@ -1161,8 +1534,14 @@ class NotificationService {
           .update({
         'is_read': true,
       })
-          .eq('recipient_id', userId)
-          .eq('is_read', false);
+          .eq(
+        'recipient_id',
+        userId,
+      )
+          .eq(
+        'is_read',
+        false,
+      );
     } catch (e, st) {
       AppLogger.error(
         'Mark all notifications as read failed',
@@ -1975,5 +2354,21 @@ class NotificationService {
         tag: 'NotificationService',
       );
     }
+  }
+
+  // =========================================================
+  // DISPOSE
+  // =========================================================
+
+  Future<void> dispose() async {
+    await _foregroundMessageSubscription?.cancel();
+    await _messageOpenedSubscription?.cancel();
+    await _tokenRefreshSubscription?.cancel();
+    await _authSubscription?.cancel();
+
+    _foregroundMessageSubscription = null;
+    _messageOpenedSubscription = null;
+    _tokenRefreshSubscription = null;
+    _authSubscription = null;
   }
 }
